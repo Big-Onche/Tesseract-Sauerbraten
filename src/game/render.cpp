@@ -1,27 +1,30 @@
 #include "game.h"
 
+struct spawninfo { const extentity *e; float weight; };
+extern float gatherspawninfos(dynent *d, int tag, vector<spawninfo> &spawninfos);
+
 namespace game
 {
-    vector<gameent *> bestplayers;
-    vector<int> bestteams;
+    vector<fpsent *> bestplayers;
+    vector<const char *> bestteams;
 
     VARP(ragdoll, 0, 1, 1);
     VARP(ragdollmillis, 0, 10000, 300000);
-    VARP(ragdollfade, 0, 100, 5000);
+    VARP(ragdollfade, 0, 1000, 300000);
+    VARFP(playermodel, 0, 0, 4, changedplayermodel());
     VARP(forceplayermodels, 0, 0, 1);
-    VARP(hidedead, 0, 0, 1);
+    VARP(hidedead, 0, 0, 2);
 
-    extern int playermodel;
+    vector<fpsent *> ragdolls;
 
-    vector<gameent *> ragdolls;
-
-    void saveragdoll(gameent *d)
+    void saveragdoll(fpsent *d)
     {
         if(!d->ragdoll || !ragdollmillis || (!ragdollfade && lastmillis > d->lastpain + ragdollmillis)) return;
-        gameent *r = new gameent(*d);
+        fpsent *r = new fpsent(*d);
         r->lastupdate = ragdollfade && lastmillis > d->lastpain + max(ragdollmillis - ragdollfade, 0) ? lastmillis - max(ragdollmillis - ragdollfade, 0) : d->lastpain;
         r->edit = NULL;
         r->ai = NULL;
+        r->attackchan = r->idlechan = -1;
         if(d==player1) r->playermodel = playermodel;
         ragdolls.add(r);
         d->ragdoll = NULL;
@@ -36,7 +39,7 @@ namespace game
     {
         loopv(ragdolls)
         {
-            gameent *d = ragdolls[i];
+            fpsent *d = ragdolls[i];
             if(lastmillis > d->lastupdate + ragdollmillis)
             {
                 delete ragdolls.remove(i--);
@@ -46,47 +49,15 @@ namespace game
         }
     }
 
-    static const int playercolors[] =
+    static const playermodelinfo playermodels[5] =
     {
-        0xA12020,
-        0xA15B28,
-        0xB39D52,
-        0x3E752F,
-        0x3F748C,
-        0x214C85,
-        0xB3668C,
-        0x523678,
-        0xB3ADA3
+        { "mrfixit", "mrfixit/blue", "mrfixit/red", "mrfixit/hudguns", NULL, "mrfixit/horns", { "mrfixit/armor/blue", "mrfixit/armor/green", "mrfixit/armor/yellow" }, "mrfixit", "mrfixit_blue", "mrfixit_red", true },
+        { "snoutx10k", "snoutx10k/blue", "snoutx10k/red", "snoutx10k/hudguns", NULL, "snoutx10k/wings", { "snoutx10k/armor/blue", "snoutx10k/armor/green", "snoutx10k/armor/yellow" }, "snoutx10k", "snoutx10k_blue", "snoutx10k_red", true },
+        //{ "ogro/green", "ogro/blue", "ogro/red", "mrfixit/hudguns", "ogro/vwep", NULL, { NULL, NULL, NULL }, "ogro", "ogro_blue", "ogro_red", false },
+        { "ogro2", "ogro2/blue", "ogro2/red", "mrfixit/hudguns", NULL, "ogro2/quad", { "ogro2/armor/blue", "ogro2/armor/green", "ogro2/armor/yellow" }, "ogro", "ogro_blue", "ogro_red", true },
+        { "inky", "inky/blue", "inky/red", "inky/hudguns", NULL, "inky/quad", { "inky/armor/blue", "inky/armor/green", "inky/armor/yellow" }, "inky", "inky_blue", "inky_red", true },
+        { "captaincannon", "captaincannon/blue", "captaincannon/red", "captaincannon/hudguns", NULL, "captaincannon/quad", { "captaincannon/armor/blue", "captaincannon/armor/green", "captaincannon/armor/yellow" }, "captaincannon", "captaincannon_blue", "captaincannon_red", true }
     };
-
-    static const int playercolorsazul[] =
-    {
-        0x27508A,
-        0x3F748C,
-        0x3B3B80,
-        0x5364B5
-    };
-
-    static const int playercolorsrojo[] =
-    {
-        0xAC2C2A,
-        0x992417,
-        0x802438,
-        0xA3435B
-    };
-
-    extern void changedplayercolor();
-    VARFP(playercolor, 0, 4, sizeof(playercolors)/sizeof(playercolors[0])-1, changedplayercolor());
-    VARFP(playercolorazul, 0, 0, sizeof(playercolorsazul)/sizeof(playercolorsazul[0])-1, changedplayercolor());
-    VARFP(playercolorrojo, 0, 0, sizeof(playercolorsrojo)/sizeof(playercolorsrojo[0])-1, changedplayercolor());
-
-    static const playermodelinfo playermodels[] =
-    {
-        { { "player/bones", "player/bones", "player/bones" }, { "hudgun", "hudgun", "hudgun" }, { "player", "player_azul", "player_rojo" }, true }
-    };
-
-    extern void changedplayermodel();
-    VARFP(playermodel, 0, 0, sizeof(playermodels)/sizeof(playermodels[0])-1, changedplayermodel());
 
     int chooserandomplayermodel(int seed)
     {
@@ -99,36 +70,11 @@ namespace game
         return &playermodels[n];
     }
 
-    const playermodelinfo &getplayermodelinfo(gameent *d)
+    const playermodelinfo &getplayermodelinfo(fpsent *d)
     {
         const playermodelinfo *mdl = getplayermodelinfo(d==player1 || forceplayermodels ? playermodel : d->playermodel);
         if(!mdl) mdl = getplayermodelinfo(playermodel);
         return *mdl;
-    }
-
-    int getplayercolor(int team, int color)
-    {
-        #define GETPLAYERCOLOR(playercolors) \
-            return playercolors[color%(sizeof(playercolors)/sizeof(playercolors[0]))];
-        switch(team)
-        {
-            case 1: GETPLAYERCOLOR(playercolorsazul)
-            case 2: GETPLAYERCOLOR(playercolorsrojo)
-            default: GETPLAYERCOLOR(playercolors)
-        }
-    }
-
-    ICOMMAND(getplayercolor, "ii", (int *color, int *team), intret(getplayercolor(*team, *color)));
-
-    int getplayercolor(gameent *d, int team)
-    {
-        if(d==player1) switch(team)
-        {
-            case 1: return getplayercolor(1, playercolorazul);
-            case 2: return getplayercolor(2, playercolorrojo);
-            default: return getplayercolor(0, playercolor);
-        }
-        else return getplayercolor(team, (d->playercolor>>(5*team))&0x1F);
     }
 
     void changedplayermodel()
@@ -137,7 +83,7 @@ namespace game
         if(player1->ragdoll) cleanragdoll(player1);
         loopv(ragdolls)
         {
-            gameent *d = ragdolls[i];
+            fpsent *d = ragdolls[i];
             if(!d->ragdoll) continue;
             if(!forceplayermodels)
             {
@@ -148,7 +94,7 @@ namespace game
         }
         loopv(players)
         {
-            gameent *d = players[i];
+            fpsent *d = players[i];
             if(d == player1 || !d->ragdoll) continue;
             if(!forceplayermodels)
             {
@@ -156,27 +102,6 @@ namespace game
                 if(mdl) continue;
             }
             cleanragdoll(d);
-        }
-    }
-
-    void changedplayercolor()
-    {
-        if(player1->clientnum < 0) player1->playercolor = playercolor | (playercolorazul<<5) | (playercolorrojo<<10);
-    }
-
-    void syncplayer()
-    {
-        if(player1->playermodel != playermodel)
-        {
-            player1->playermodel = playermodel;
-            addmsg(N_SWITCHMODEL, "ri", player1->playermodel);
-        }
-
-        int col = playercolor | (playercolorazul<<5) | (playercolorrojo<<10);
-        if(player1->playercolor != col)
-        {
-            player1->playercolor = col;
-            addmsg(N_SWITCHCOLOR, "ri", player1->playercolor);
         }
     }
 
@@ -189,11 +114,19 @@ namespace game
             if(i != playermodel && (!multiplayer(false) || forceplayermodels)) continue;
             if(m_teammode)
             {
-                loopj(MAXTEAMS) preloadmodel(mdl->model[1+j]);
+                preloadmodel(mdl->blueteam);
+                preloadmodel(mdl->redteam);
             }
-            else preloadmodel(mdl->model[0]);
+            else preloadmodel(mdl->ffa);
+            if(mdl->vwep) preloadmodel(mdl->vwep);
+            if(mdl->quad) preloadmodel(mdl->quad);
+            loopj(3) if(mdl->armour[j]) preloadmodel(mdl->armour[j]);
         }
     }
+
+    VAR(testquad, 0, 0, 1);
+    VAR(testarmour, 0, 0, 1);
+    VAR(testteam, 0, 0, 3);
 
     int numanims() { return NUMANIMS; }
 
@@ -202,118 +135,167 @@ namespace game
         loopi(sizeof(animnames)/sizeof(animnames[0])) if(matchanim(animnames[i], pattern)) anims.add(i);
     }
 
-    VAR(animoverride, -1, 0, NUMANIMS-1);
-    VAR(testanims, 0, 0, 1);
-    VAR(testpitch, -90, 0, 90);
-
-    void renderplayer(gameent *d, const playermodelinfo &mdl, int color, int team, float fade, int flags = 0, bool mainpass = true)
+    void renderplayer(fpsent *d, const playermodelinfo &mdl, int team, float fade, bool mainpass)
     {
-        int lastaction = d->lastaction, anim = ANIM_IDLE|ANIM_LOOP, attack = 0, delay = 0;
-        if(d->lastattack >= 0)
-        {
-            attack = attacks[d->lastattack].anim;
-            delay = attacks[d->lastattack].attackdelay+50;
-        }
+        int lastaction = d->lastaction, hold = mdl.vwep || d->gunselect==GUN_PISTOL ? 0 : (ANIM_HOLD1+d->gunselect)|ANIM_LOOP, attack = ANIM_ATTACK1+d->gunselect, delay = mdl.vwep ? 300 : guns[d->gunselect].attackdelay+50;
         if(intermission && d->state!=CS_DEAD)
         {
-            anim = attack = ANIM_LOSE|ANIM_LOOP;
-            if(validteam(team) ? bestteams.htfind(team)>=0 : bestplayers.find(d)>=0) anim = attack = ANIM_WIN|ANIM_LOOP;
+            lastaction = 0;
+            hold = attack = ANIM_LOSE|ANIM_LOOP;
+            delay = 0;
+            if(m_teammode ? bestteams.htfind(d->team)>=0 : bestplayers.find(d)>=0) hold = attack = ANIM_WIN|ANIM_LOOP;
         }
         else if(d->state==CS_ALIVE && d->lasttaunt && lastmillis-d->lasttaunt<1000 && lastmillis-d->lastaction>delay)
         {
             lastaction = d->lasttaunt;
-            anim = attack = ANIM_TAUNT;
+            hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
         modelattach a[5];
+        static const char * const vweps[] = {"vwep/fist", "vwep/shotg", "vwep/chaing", "vwep/rocket", "vwep/rifle", "vwep/gl", "vwep/pistol"};
         int ai = 0;
-        if(guns[d->gunselect].vwep)
+        if((!mdl.vwep || d->gunselect!=GUN_FIST) && d->gunselect<=GUN_PISTOL)
         {
             int vanim = ANIM_VWEP_IDLE|ANIM_LOOP, vtime = 0;
-            if(lastaction && d->lastattack >= 0 && attacks[d->lastattack].gun==d->gunselect && lastmillis < lastaction + delay)
+            if(lastaction && d->lastattackgun==d->gunselect && lastmillis < lastaction + delay)
             {
-                vanim = attacks[d->lastattack].vwepanim;
+                vanim = ANIM_VWEP_SHOOT;
                 vtime = lastaction;
             }
-            a[ai++] = modelattach("tag_weapon", guns[d->gunselect].vwep, vanim, vtime);
+            a[ai++] = modelattach("tag_weapon", mdl.vwep ? mdl.vwep : vweps[d->gunselect], vanim, vtime);
         }
-        if(mainpass && !(flags&MDL_ONLYSHADOW))
+        if(d->state==CS_ALIVE)
+        {
+            if((testquad || d->quadmillis) && mdl.quad)
+                a[ai++] = modelattach("tag_powerup", mdl.quad, ANIM_POWERUP|ANIM_LOOP, 0);
+            if(testarmour || d->armour)
+            {
+                int type = clamp(d->armourtype, (int)A_BLUE, (int)A_YELLOW);
+                if(mdl.armour[type])
+                    a[ai++] = modelattach("tag_shield", mdl.armour[type], ANIM_SHIELD|ANIM_LOOP, 0);
+            }
+        }
+        if(mainpass)
         {
             d->muzzle = vec(-1, -1, -1);
-            if(guns[d->gunselect].vwep) a[ai++] = modelattach("tag_muzzle", &d->muzzle);
+            a[ai++] = modelattach("tag_muzzle", &d->muzzle);
         }
-        const char *mdlname = mdl.model[validteam(team) ? team : 0];
-        float yaw = testanims && d==player1 ? 0 : d->yaw,
-              pitch = testpitch && d==player1 ? testpitch : d->pitch;
-        vec o = d->feetpos();
-        int basetime = 0;
-        if(animoverride) anim = (animoverride<0 ? ANIM_ALL : animoverride)|ANIM_LOOP;
-        else if(d->state==CS_DEAD)
+        const char *mdlname = mdl.ffa;
+        switch(testteam ? testteam-1 : team)
         {
-            anim = ANIM_DYING|ANIM_NOPITCH;
-            basetime = d->lastpain;
-            if(ragdoll && mdl.ragdoll) anim |= ANIM_RAGDOLL;
-            else if(lastmillis-basetime>1000) anim = ANIM_DEAD|ANIM_LOOP|ANIM_NOPITCH;
+            case 1: mdlname = mdl.blueteam; break;
+            case 2: mdlname = mdl.redteam; break;
         }
-        else if(d->state==CS_EDITING || d->state==CS_SPECTATOR) anim = ANIM_EDIT|ANIM_LOOP;
-        else if(d->state==CS_LAGGED)                            anim = ANIM_LAG|ANIM_LOOP;
-        else if(!intermission)
+        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll);
+#if 0
+        if(d->state!=CS_DEAD && d->quadmillis)
         {
-            if(lastmillis-d->lastpain < 300)
-            {
-                anim = ANIM_PAIN;
-                basetime = d->lastpain;
-            }
-            else if(d->lastpain < lastaction && lastmillis-lastaction < delay)
-            {
-                anim = attack;
-                basetime = lastaction;
-            }
-
-            if(d->inwater && d->physstate<=PHYS_FALL) anim |= (((game::allowmove(d) && (d->move || d->strafe)) || d->vel.z+d->falling.z>0 ? ANIM_SWIM : ANIM_SINK)|ANIM_LOOP)<<ANIM_SECONDARY;
-            else
-            {
-                static const int dirs[9] =
-                {
-                    ANIM_RUN_SE, ANIM_RUN_S, ANIM_RUN_SW,
-                    ANIM_RUN_E,  0,          ANIM_RUN_W,
-                    ANIM_RUN_NE, ANIM_RUN_N, ANIM_RUN_NW
-                };
-                int dir = dirs[(d->move+1)*3 + (d->strafe+1)];
-                if(d->timeinair>100) anim |= ((dir ? dir+ANIM_JUMP_N-ANIM_RUN_N : ANIM_JUMP) | ANIM_END) << ANIM_SECONDARY;
-                else if(dir && game::allowmove(d)) anim |= (dir | ANIM_LOOP) << ANIM_SECONDARY;
-            }
-
-            if(d->crouching) switch((anim>>ANIM_SECONDARY)&ANIM_INDEX)
-            {
-                case ANIM_IDLE: anim &= ~(ANIM_INDEX<<ANIM_SECONDARY); anim |= ANIM_CROUCH<<ANIM_SECONDARY; break;
-                case ANIM_JUMP: anim &= ~(ANIM_INDEX<<ANIM_SECONDARY); anim |= ANIM_CROUCH_JUMP<<ANIM_SECONDARY; break;
-                case ANIM_SWIM: anim &= ~(ANIM_INDEX<<ANIM_SECONDARY); anim |= ANIM_CROUCH_SWIM<<ANIM_SECONDARY; break;
-                case ANIM_SINK: anim &= ~(ANIM_INDEX<<ANIM_SECONDARY); anim |= ANIM_CROUCH_SINK<<ANIM_SECONDARY; break;
-                case 0: anim |= (ANIM_CROUCH|ANIM_LOOP)<<ANIM_SECONDARY; break;
-                case ANIM_RUN_N: case ANIM_RUN_NE: case ANIM_RUN_E: case ANIM_RUN_SE: case ANIM_RUN_S: case ANIM_RUN_SW: case ANIM_RUN_W: case ANIM_RUN_NW:
-                    anim += (ANIM_CROUCH_N - ANIM_RUN_N) << ANIM_SECONDARY;
-                    break;
-                case ANIM_JUMP_N: case ANIM_JUMP_NE: case ANIM_JUMP_E: case ANIM_JUMP_SE: case ANIM_JUMP_S: case ANIM_JUMP_SW: case ANIM_JUMP_W: case ANIM_JUMP_NW:
-                    anim += (ANIM_CROUCH_JUMP_N - ANIM_JUMP_N) << ANIM_SECONDARY;
-                    break;
-            }
-
-            if((anim&ANIM_INDEX)==ANIM_IDLE && (anim>>ANIM_SECONDARY)&ANIM_INDEX) anim >>= ANIM_SECONDARY;
+            entitylight light;
+            rendermodel("quadrings", ANIM_MAPMODEL|ANIM_LOOP, vec(d->o).sub(vec(0, 0, d->eyeheight/2)), 360*lastmillis/1000.0f, 0, MDL_DYNSHADOW | MDL_CULL_VFC | MDL_CULL_DIST);
         }
-        if(!((anim>>ANIM_SECONDARY)&ANIM_INDEX)) anim |= (ANIM_IDLE|ANIM_LOOP)<<ANIM_SECONDARY;
-        if(d!=player1) flags |= MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY;
-        if(d->type==ENT_PLAYER) flags |= MDL_FULLBRIGHT;
-        else flags |= MDL_CULL_DIST;
-        if(!mainpass) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
-        float trans = d->state == CS_LAGGED ? 0.5f : 1.0f;
-        rendermodel(mdlname, anim, o, yaw, pitch, 0, flags, d, a[0].tag ? a : NULL, basetime, 0, fade, vec4(vec::hexcolor(color), trans));
+#endif
     }
 
-    static inline void renderplayer(gameent *d, float fade = 1, int flags = 0)
+    VARP(teamskins, 0, 0, 1);
+
+#if 0
+    // for testing spawns
+
+    float hsv2rgb(float h, float s, float v, int n)
     {
-        int team = m_teammode && validteam(d->team) ? d->team : 0;
-        renderplayer(d, getplayermodelinfo(d), getplayercolor(d, team), team, fade, flags);
+        float k = fmod(n + h / 60.0f, 6.0f);
+        return v - v * s * max(min(min(k, 4.0f - k), 1.0f), 0.0f);
+    }
+
+    vec hsv2rgb(float h, float s, float v)
+    {
+        return vec(hsv2rgb(h, s, v, 5), hsv2rgb(h, s, v, 3), hsv2rgb(h, s, v, 1));
+    }
+
+    void renderspawn(const vec &o, int rating, float probability)
+    {
+        defformatstring(score, "%d", rating);
+        defformatstring(percentage, "(%.2f%%)", probability * 100);
+        bvec colorvec = bvec::fromcolor(hsv2rgb(rating * 1.2f, 0.8, 1));
+        int color = (colorvec.r << 16) + (colorvec.g << 8) + colorvec.b;
+        particle_textcopy(vec(o).addz(5), score, PART_TEXT, 1, color, 5.0f);
+        particle_textcopy(vec(o).addz(1), percentage, PART_TEXT, 1, color, 4.0f);
+    }
+
+    void renderspawns()
+    {
+        vector<spawninfo> spawninfos;
+        float ratingsum = gatherspawninfos(player1, 0, spawninfos);
+        loopv(spawninfos) renderspawn(spawninfos[i].e->o, spawninfos[i].weight * 100, spawninfos[i].weight / ratingsum);
+    }
+
+    VAR(dbgspawns, 0, 0, 1);
+#endif
+
+    VARP(statusicons, 0, 1, 1);
+
+    void renderstatusicons(fpsent *d, int team, float yoffset)
+    {
+        vec p = d->abovehead().madd(camup, yoffset);
+        int icons = 0;
+        const itemstat &boost = itemstats[I_BOOST-I_SHELLS];
+        if(statusicons && (d->state==CS_ALIVE || d->state==CS_LAGGED))
+        {
+            if(d->quadmillis) icons++;
+            if(d->maxhealth>100) icons += (min(d->maxhealth, boost.max) - 100 + boost.info-1) / boost.info;
+            if(d->armour>0 && d->armourtype>=A_GREEN && !m_noitems) icons++;
+        }
+        if(icons) concatstring(d->info, " ");
+        particle_text(p, d->info, PART_TEXT, 1, team ? (team==1 ? 0x6496FF : 0xFF4B19) : 0x1EC850, 2.0f, 0, icons);
+        if(icons)
+        {
+            float tw, th;
+            text_boundsf(d->info, tw, th);
+            float offset = (tw - icons*th)/2;
+            if(d->armour>0 && d->armourtype>=A_GREEN && !m_noitems)
+            {
+                int icon = itemstats[(d->armourtype==A_YELLOW ? I_YELLOWARMOUR : I_GREENARMOUR)-I_SHELLS].icon;
+                particle_texticon(p, icon%4, icon/4, offset, PART_TEXT_ICON, 1, 0xFFFFFF, 2.0f);
+                offset += th;
+            }
+            for(int i = 100; i < min(d->maxhealth, boost.max); i += boost.info)
+            {
+                particle_texticon(p, boost.icon%4, boost.icon/4, offset, PART_TEXT_ICON, 1, 0xFFFFFF, 2.0f);
+                offset += th;
+            }
+            if(d->quadmillis)
+            {
+                int icon = itemstats[I_QUAD-I_SHELLS].icon;
+                particle_texticon(p, icon%4, icon/4, offset, PART_TEXT_ICON, 1, 0xFFFFFF, 2.0f);
+                offset += th;
+            }
+        }
+    }
+
+    VARP(statusbars, 0, 1, 2);
+    FVARP(statusbarscale, 0, 1, 2);
+
+    float renderstatusbars(fpsent *d, int team)
+    {
+        if(!statusbars || m_insta || (player1->state==CS_SPECTATOR ? statusbars <= 1 : team != 1) || (d->state!=CS_ALIVE && d->state!=CS_LAGGED)) return 0;
+        vec p = d->abovehead().msub(camdir, 50/80.0f).msub(camup, 2.0f);
+        float offset = 0;
+        float scale = statusbarscale;
+        if(d->armour > 0)
+        {
+            int limit = d->armourtype==A_YELLOW ? 200 : (d->armourtype==A_GREEN ? 100 : 50);
+            int color = d->armourtype==A_YELLOW ? 0xFFC040 : (d->armourtype==A_GREEN ? 0x008C00 : 0x0B5899);
+            float size = scale*sqrtf(max(d->armour, limit)/100.0f);
+            float fill = float(d->armour)/limit;
+            offset += size;
+            particle_meter(vec(p).madd(camup, offset), fill, PART_METER, 1, color, 0, size);
+        }
+        int color = d->health<=25 ? 0xFF0000 : (d->health<=50 ? 0xFF8000 : (d->health<=100 ? 0x40FF80 : 0x40C0FF));
+        float size = scale*sqrtf(max(d->health, d->maxhealth)/100.0f);
+        float fill = float(d->health)/d->maxhealth;
+        offset += size;
+        particle_meter(vec(p).madd(camup, offset), fill, PART_METER, 1, color, 0, size);
+        return offset;
     }
 
     void rendergame()
@@ -328,13 +310,14 @@ namespace game
             else getbestplayers(bestplayers);
         }
 
-        bool third = isthirdperson();
-        gameent *f = followingplayer(), *exclude = third ? NULL : f;
+        fpsent *exclude = isthirdperson() ? NULL : followingplayer();
         loopv(players)
         {
-            gameent *d = players[i];
+            fpsent *d = players[i];
             if(d == player1 || d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
-            renderplayer(d);
+            int team = 0;
+            if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
+            renderplayer(d, getplayermodelinfo(d), team, 1, false);
 
             vec dir = vec(d->o).sub(camera1->o);
             float dist = dir.magnitude();
@@ -348,41 +331,48 @@ namespace game
             copystring(d->info, colorname(d));
             if(d->state!=CS_DEAD)
             {
-                int team = m_teammode && validteam(d->team) ? d->team : 0;
-                particle_text(d->abovehead(), d->info, PART_TEXT, 1, teamtextcolor[team], 2.0f);
+                float offset = renderstatusbars(d, team);
+                renderstatusicons(d, team, offset);
             }
         }
         loopv(ragdolls)
         {
-            gameent *d = ragdolls[i];
+            fpsent *d = ragdolls[i];
+            int team = 0;
+            if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
             float fade = 1.0f;
             if(ragdollmillis && ragdollfade)
                 fade -= clamp(float(lastmillis - (d->lastupdate + max(ragdollmillis - ragdollfade, 0)))/min(ragdollmillis, ragdollfade), 0.0f, 1.0f);
-            renderplayer(d, fade);
+            renderplayer(d, getplayermodelinfo(d), team, fade, false);
         }
-        if(exclude)
-            renderplayer(exclude, 1, MDL_ONLYSHADOW);
-        else if(!f && (player1->state==CS_ALIVE || (player1->state==CS_EDITING && third) || (player1->state==CS_DEAD && !hidedead)))
-            renderplayer(player1, 1, third ? 0 : MDL_ONLYSHADOW);
+        if(isthirdperson() && !followingplayer() && (player1->state!=CS_DEAD || hidedead != 1)) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, false);
+        rendermonsters();
+        rendermovables();
         entities::renderentities();
         renderbouncers();
         renderprojectiles();
         if(cmode) cmode->rendergame();
+
+#if 0
+        if(dbgspawns) renderspawns();
+#endif
     }
 
     VARP(hudgun, 0, 1, 1);
     VARP(hudgunsway, 0, 1, 1);
+    VARP(teamhudguns, 0, 1, 1);
+    VARP(chainsawhudgun, 0, 1, 1);
 
     FVAR(swaystep, 1, 35.0f, 100);
-    FVAR(swayside, 0, 0.10f, 1);
-    FVAR(swayup, -1, 0.15f, 1);
+    FVAR(swayside, 0, 0.04f, 1);
+    FVAR(swayup, -1, 0.05f, 1);
 
     float swayfade = 0, swayspeed = 0, swaydist = 0;
     vec swaydir(0, 0, 0);
 
     void swayhudgun(int curtime)
     {
-        gameent *d = hudplayer();
+        fpsent *d = hudplayer();
         if(d->state != CS_SPECTATOR)
         {
             if(d->physstate >= PHYS_SLOPE)
@@ -412,10 +402,11 @@ namespace game
         hudent() { type = ENT_CAMERA; }
     } guninterp;
 
-    void drawhudmodel(gameent *d, int anim, int basetime)
+    SVARP(hudgunsdir, "");
+
+    void drawhudmodel(fpsent *d, int anim, float speed = 0, int base = 0)
     {
-        const char *file = guns[d->gunselect].file;
-        if(!file) return;
+        if(d->gunselect>GUN_PISTOL) return;
 
         vec sway;
         vecfromyawpitch(d->yaw, 0, 0, 1, sway);
@@ -425,33 +416,51 @@ namespace game
         sway.add(swaydir).add(d->o);
         if(!hudgunsway) sway = d->o;
 
+#if 0
+        if(player1->state!=CS_DEAD && player1->quadmillis)
+        {
+            float t = 0.5f + 0.5f*sinf(2*M_PI*lastmillis/1000.0f);
+            color.y = color.y*(1-t) + t;
+        }
+#endif
         const playermodelinfo &mdl = getplayermodelinfo(d);
-        int team = m_teammode && validteam(d->team) ? d->team : 0,
-            color = getplayercolor(d, team);
-        defformatstring(gunname, "%s/%s", mdl.hudguns[team], file);
+        defformatstring(gunname, "%s/%s", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, guns[d->gunselect].file);
+
+        if((m_teammode || teamskins) && teamhudguns) concatstring(gunname, d==player1 || isteam(d->team, player1->team) ? "/blue" : "/red");
+        else if(testteam > 1) concatstring(gunname, testteam==2 ? "/blue" : "/red");
+
         modelattach a[2];
         d->muzzle = vec(-1, -1, -1);
         a[0] = modelattach("tag_muzzle", &d->muzzle);
-        rendermodel(gunname, anim, sway, d->yaw, d->pitch, 0, MDL_NOBATCH, NULL, a, basetime, 0, 1, vec4(vec::hexcolor(color), 1));
+        dynent *interp = NULL;
+        if(d->gunselect==GUN_FIST && chainsawhudgun)
+        {
+            anim |= ANIM_LOOP;
+            base = 0;
+            interp = &guninterp;
+        }
+        rendermodel(gunname, anim, sway, d->yaw, d->pitch, 0, MDL_NOBATCH, interp, a, base, (int)ceil(speed));
         if(d->muzzle.x >= 0) d->muzzle = calcavatarpos(d->muzzle, 12);
     }
 
     void drawhudgun()
     {
-        gameent *d = hudplayer();
+        fpsent *d = hudplayer();
         if(d->state==CS_SPECTATOR || d->state==CS_EDITING || !hudgun || editmode)
         {
             d->muzzle = player1->muzzle = vec(-1, -1, -1);
             return;
         }
 
-        int anim = ANIM_GUN_IDLE|ANIM_LOOP, basetime = 0;
-        if(d->lastaction && d->lastattack >= 0 && attacks[d->lastattack].gun==d->gunselect && lastmillis-d->lastaction<attacks[d->lastattack].attackdelay)
+        int rtime = guns[d->gunselect].attackdelay;
+        if(d->lastaction && d->lastattackgun==d->gunselect && lastmillis-d->lastaction<rtime)
         {
-            anim = attacks[d->lastattack].hudanim;
-            basetime = d->lastaction;
+            drawhudmodel(d, ANIM_GUN_SHOOT|ANIM_SETSPEED, rtime/17.0f, d->lastaction);
         }
-        drawhudmodel(d, anim, basetime);
+        else
+        {
+            drawhudmodel(d, ANIM_GUN_IDLE|ANIM_LOOP);
+        }
     }
 
     void renderavatar()
@@ -459,25 +468,25 @@ namespace game
         drawhudgun();
     }
 
-    void renderplayerpreview(int model, int color, int team, int weap)
+    void renderplayerpreview(int model, int team, int weap)
     {
-        static gameent *previewent = NULL;
+        static fpsent *previewent = NULL;
         if(!previewent)
         {
-            previewent = new gameent;
-            loopi(NUMGUNS) previewent->ammo[i] = 1;
+            previewent = new fpsent;
+            loopi(GUN_PISTOL-GUN_FIST) previewent->ammo[GUN_FIST+1+i] = 1;
         }
         float height = previewent->eyeheight + previewent->aboveeye,
               zrad = height/2;
         vec2 xyrad = vec2(previewent->xradius, previewent->yradius).max(height/4);
         previewent->o = calcmodelpreviewpos(vec(xyrad, zrad), previewent->yaw).addz(previewent->eyeheight - zrad);
-        previewent->gunselect = validgun(weap) ? weap : GUN_RAIL;
+        previewent->gunselect = clamp(weap, int(GUN_FIST), int(GUN_PISTOL));
         const playermodelinfo *mdlinfo = getplayermodelinfo(model);
         if(!mdlinfo) return;
-        renderplayer(previewent, *mdlinfo, getplayercolor(team, color), team, 1, 0, false);
+        renderplayer(previewent, *mdlinfo, team >= 0 && team <= 2 ? team : 0, 1, false);
     }
 
-    vec hudgunorigin(int gun, const vec &from, const vec &to, gameent *d)
+    vec hudgunorigin(int gun, const vec &from, const vec &to, fpsent *d)
     {
         if(d->muzzle.x >= 0) return d->muzzle;
         vec offset(from);
@@ -486,10 +495,13 @@ namespace game
             vec front, right;
             vecfromyawpitch(d->yaw, d->pitch, 1, 0, front);
             offset.add(front.mul(d->radius));
-            offset.z += (d->aboveeye + d->eyeheight)*0.75f - d->eyeheight;
-            vecfromyawpitch(d->yaw, 0, 0, -1, right);
-            offset.add(right.mul(0.5f*d->radius));
-            offset.add(front);
+            if(d->type!=ENT_AI)
+            {
+                offset.z += (d->aboveeye + d->eyeheight)*0.75f - d->eyeheight;
+                vecfromyawpitch(d->yaw, 0, 0, -1, right);
+                offset.add(right.mul(0.5f*d->radius));
+                offset.add(front);
+            }
             return offset;
         }
         offset.add(vec(to).sub(from).normalize().mul(2));
@@ -510,27 +522,27 @@ namespace game
             const char *file = guns[i].file;
             if(!file) continue;
             string fname;
-            if(m_teammode)
+            if((m_teammode || teamskins) && teamhudguns)
             {
-                loopj(MAXTEAMS)
-                {
-                    formatstring(fname, "%s/%s", mdl.hudguns[1+j], file);
-                    preloadmodel(fname);
-                }
+                formatstring(fname, "%s/%s/blue", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, file);
+                preloadmodel(fname);
             }
             else
             {
-                formatstring(fname, "%s/%s", mdl.hudguns[0], file);
+                formatstring(fname, "%s/%s", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, file);
                 preloadmodel(fname);
             }
-            formatstring(fname, "worldgun/%s", file);
+            formatstring(fname, "vwep/%s", file);
             preloadmodel(fname);
         }
     }
 
     void preloadsounds()
     {
-        for(int i = S_JUMP; i <= S_DIE2; i++) preloadsound(i);
+        for(int i = S_JUMP; i <= S_SPLASH2; i++) preloadsound(i);
+        for(int i = S_JUMPPAD; i <= S_PISTOL; i++) preloadsound(i);
+        for(int i = S_V_BOOST; i <= S_V_QUAD10; i++) preloadsound(i);
+        for(int i = S_BURN; i <= S_HIT; i++) preloadsound(i);
     }
 
     void preload()
@@ -540,6 +552,7 @@ namespace game
         preloadplayermodel();
         preloadsounds();
         entities::preloadentities();
+        if(m_sp) preloadmonsters();
     }
 
 }

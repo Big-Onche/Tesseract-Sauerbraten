@@ -12,6 +12,29 @@ namespace entities
 
     void readent(entity &e, char *buf, int ver)     // read from disk, and init
     {
+        if(ver <= 30) switch(e.type)
+        {
+            case FLAG:
+            case MONSTER:
+            case TELEDEST:
+            case RESPAWNPOINT:
+            case BOX:
+            case BARREL:
+            case PLATFORM:
+            case ELEVATOR:
+                e.attr1 = (int(e.attr1)+180)%360;
+                break;
+        }
+        if(ver <= 31) switch(e.type)
+        {
+            case BOX:
+            case BARREL:
+            case PLATFORM:
+            case ELEVATOR:
+                int yaw = (int(e.attr1)%360 + 360)%360 + 7;
+                e.attr1 = yaw - yaw%15;
+                break;
+        }
     }
 
 #ifndef STANDALONE
@@ -24,30 +47,31 @@ namespace entities
 
     const char *itemname(int i)
     {
-        return NULL;
-#if 0
         int t = ents[i]->type;
-        if(!validitem(t)) return NULL;
-        return itemstats[t-I_FIRST].name;
-#endif
+        if(t<I_SHELLS || t>I_QUAD) return NULL;
+        return itemstats[t-I_SHELLS].name;
     }
 
     int itemicon(int i)
     {
-        return -1;
-#if 0
         int t = ents[i]->type;
-        if(!validitem(t)) return -1;
-        return itemstats[t-I_FIRST].icon;
-#endif
+        if(t<I_SHELLS || t>I_QUAD) return -1;
+        return itemstats[t-I_SHELLS].icon;
     }
 
     const char *entmdlname(int type)
     {
-        static const char * const entmdlnames[MAXENTTYPES] =
+        static const char * const entmdlnames[] =
         {
             NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-            "game/teleport", NULL, NULL,
+            "ammo/shells", "ammo/bullets", "ammo/rockets", "ammo/rrounds", "ammo/grenades", "ammo/cartridges",
+            "health", "boost", "armor/green", "armor/yellow", "quad", "teleporter",
+            NULL, NULL,
+            "carrot",
+            NULL, NULL,
+            "checkpoint",
+            NULL, NULL,
+            NULL, NULL,
             NULL
         };
         return entmdlnames[type];
@@ -67,6 +91,18 @@ namespace entities
     {
         loopi(MAXENTTYPES)
         {
+            switch(i)
+            {
+                case I_SHELLS: case I_BULLETS: case I_ROCKETS: case I_ROUNDS: case I_GRENADES: case I_CARTRIDGES:
+                    if(m_noammo) continue;
+                    break;
+                case I_HEALTH: case I_BOOST: case I_GREENARMOUR: case I_YELLOWARMOUR: case I_QUAD:
+                    if(m_noitems) continue;
+                    break;
+                case CARROT: case RESPAWNPOINT:
+                    if(!m_classicsp) continue;
+                    break;
+            }
             const char *mdl = entmdlname(i);
             if(!mdl) continue;
             preloadmodel(mdl);
@@ -87,70 +123,85 @@ namespace entities
 
     void renderentities()
     {
+        const int mdlFlags = MDL_CULL_VFC | MDL_CULL_DIST | MDL_CULL_OCCLUDED;
+        const int animFlags = ANIM_MAPMODEL | ANIM_LOOP;
         loopv(ents)
         {
             extentity &e = *ents[i];
             int revs = 10;
             switch(e.type)
             {
+                case CARROT:
+                case RESPAWNPOINT:
+                    if(e.attr2) revs = 1;
+                    break;
                 case TELEPORT:
                     if(e.attr2 < 0) continue;
                     break;
                 default:
-                    if(!e.spawned() || !validitem(e.type)) continue;
-                    break;
+                    if(!e.spawned() || e.type < I_SHELLS || e.type > I_QUAD) continue;
             }
             const char *mdlname = entmodel(e);
             if(mdlname)
             {
                 vec p = e.o;
                 p.z += 1+sinf(lastmillis/100.0+e.o.x+e.o.y)/20;
-                rendermodel(mdlname, ANIM_MAPMODEL|ANIM_LOOP, p, lastmillis/(float)revs, 0, 0, MDL_CULL_VFC | MDL_CULL_DIST | MDL_CULL_OCCLUDED);
+                rendermodel(mdlname, animFlags, p, lastmillis/(float)revs, 0, 0, mdlFlags);
             }
         }
     }
 
     void addammo(int type, int &v, bool local)
     {
-#if 0
-        itemstat &is = itemstats[type-I_FIRST];
+        itemstat &is = itemstats[type-I_SHELLS];
         v += is.add;
         if(v>is.max) v = is.max;
         if(local) msgsound(is.sound);
-#endif
+    }
+
+    void repammo(fpsent *d, int type, bool local)
+    {
+        addammo(type, d->ammo[type-I_SHELLS+GUN_SG], local);
     }
 
     // these two functions are called when the server acknowledges that you really
     // picked up the item (in multiplayer someone may grab it before you).
 
-    void pickupeffects(int n, gameent *d)
+    void pickupeffects(int n, fpsent *d)
     {
-#if 0
         if(!ents.inrange(n)) return;
         extentity *e = ents[n];
         int type = e->type;
-        if(!validitem(type)) return;
+        if(type<I_SHELLS || type>I_QUAD) return;
         e->clearspawned();
         e->clearnopickup();
         if(!d) return;
-        itemstat &is = itemstats[type-I_FIRST];
-        gameent *h = followingplayer(player1);
+        itemstat &is = itemstats[type-I_SHELLS];
+        fpsent *h = followingplayer(player1);
         if(d!=h || isthirdperson())
         {
             //particle_text(d->abovehead(), is.name, PART_TEXT, 2000, 0xFFC864, 4.0f, -8);
             particle_icon(d->abovehead(), is.icon%4, is.icon/4, PART_HUD_ICON_GREY, 2000, 0xFFFFFF, 2.0f, -8);
         }
-        playsound(itemstats[type-I_FIRST].sound, d!=h ? &d->o : NULL, NULL, 0, 0, 0, -1, 0, 1500);
+        playsound(itemstats[type-I_SHELLS].sound, d!=h ? &d->o : NULL, NULL, 0, 0, 0, -1, 0, 1500);
         d->pickup(type);
         if(d==h) switch(type)
         {
+            case I_BOOST:
+                conoutf(CON_GAMEINFO, "\f2you got the health boost!");
+                playsound(S_V_BOOST, NULL, NULL, 0, 0, 0, -1, 0, 3000);
+                break;
+
+            case I_QUAD:
+                conoutf(CON_GAMEINFO, "\f2you got the quad!");
+                playsound(S_V_QUAD, NULL, NULL, 0, 0, 0, -1, 0, 3000);
+                break;
         }
-#endif
     }
 
     // these functions are called when the client touches the item
 
-    void teleporteffects(gameent *d, int tp, int td, bool local)
+    void teleporteffects(fpsent *d, int tp, int td, bool local)
     {
         if(ents.inrange(tp) && ents[tp]->type == TELEPORT)
         {
@@ -159,7 +210,7 @@ namespace entities
             {
                 int snd = S_TELEPORT, flags = 0;
                 if(e.attr4 > 0) { snd = e.attr4; flags = SND_MAP; }
-                gameent *h = followingplayer(player1);
+                fpsent *h = followingplayer(player1);
                 playsound(snd, d==h ? NULL : &e.o, NULL, flags);
                 if(d!=h && ents.inrange(td) && ents[td]->type == TELEDEST) playsound(snd, &ents[td]->o, NULL, flags);
             }
@@ -177,7 +228,7 @@ namespace entities
         }
     }
 
-    void jumppadeffects(gameent *d, int jp, bool local)
+    void jumppadeffects(fpsent *d, int jp, bool local)
     {
         if(ents.inrange(jp) && ents[jp]->type == JUMPPAD)
         {
@@ -201,7 +252,7 @@ namespace entities
         }
     }
 
-    void teleport(int n, gameent *d)     // also used by monsters
+    void teleport(int n, fpsent *d)     // also used by monsters
     {
         int e = -1, tag = ents[n]->attr1, beenhere = -1;
         for(;;)
@@ -231,9 +282,7 @@ namespace entities
         }
     }
 
-    VARR(teleteam, 0, 1, 1);
-
-    void trypickup(int n, gameent *d)
+    void trypickup(int n, fpsent *d)
     {
         extentity *e = ents[n];
         switch(e->type)
@@ -249,7 +298,6 @@ namespace entities
             case TELEPORT:
             {
                 if(d->lastpickup==e->type && lastmillis-d->lastpickupmillis<500) break;
-                if(!teleteam && m_teammode) break;
                 if(e->attr3 > 0)
                 {
                     defformatstring(hookname, "can_teleport_%d", e->attr3);
@@ -260,6 +308,13 @@ namespace entities
                 teleport(n, d);
                 break;
             }
+
+            case RESPAWNPOINT:
+                if(!m_classicsp || d!=player1 || n==respawnent) break;
+                respawnent = n;
+                conoutf(CON_GAMEINFO, "\f2respawn point set!");
+                playsound(S_V_RESPAWNPOINT);
+                break;
 
             case JUMPPAD:
             {
@@ -277,7 +332,7 @@ namespace entities
         }
     }
 
-    void checkitems(gameent *d)
+    void checkitems(fpsent *d)
     {
         if(d->state!=CS_ALIVE) return;
         vec o = d->feetpos();
@@ -285,16 +340,27 @@ namespace entities
         {
             extentity &e = *ents[i];
             if(e.type==NOTUSED) continue;
-            if((!e.spawned() || e.nopickup()) && e.type!=TELEPORT && e.type!=JUMPPAD) continue;
+            if((!e.spawned() || e.nopickup()) && e.type!=TELEPORT && e.type!=JUMPPAD && e.type!=RESPAWNPOINT) continue;
             float dist = e.o.dist(o);
             if(dist<(e.type==TELEPORT ? 16 : 12)) trypickup(i, d);
+        }
+    }
+
+    void checkquad(int time, fpsent *d)
+    {
+        if(d->quadmillis && (d->quadmillis -= time)<=0)
+        {
+            d->quadmillis = 0;
+            fpsent *h = followingplayer(player1);
+            playsound(S_PUPOUT, d==h ? NULL : &d->o);
+            if(d==h) conoutf(CON_GAMEINFO, "\f2quad damage is over");
         }
     }
 
     void putitems(packetbuf &p)            // puts items in network stream and also spawns them locally
     {
         putint(p, N_ITEMLIST);
-        loopv(ents) if(validitem(ents[i]->type))
+        loopv(ents) if(ents[i]->type>=I_SHELLS && ents[i]->type<=I_QUAD && (!m_noammo || ents[i]->type<I_SHELLS || ents[i]->type>I_CARTRIDGES))
         {
             putint(p, i);
             putint(p, ents[i]->type);
@@ -306,12 +372,13 @@ namespace entities
 
     void spawnitems(bool force)
     {
+        if(m_noitems) return;
         loopv(ents)
         {
             extentity *e = ents[i];
-            if(validitem(e->type))
+            if(e->type>=I_SHELLS && e->type<=I_QUAD && (!m_noammo || e->type<I_SHELLS || e->type>I_CARTRIDGES))
             {
-                e->setspawned(force || !server::delayspawn(e->type));
+                e->setspawned(force || m_sp || !server::delayspawn(e->type));
                 e->clearnopickup();
             }
         }
@@ -319,16 +386,223 @@ namespace entities
 
     void setspawn(int i, bool on) { if(ents.inrange(i)) { extentity *e = ents[i]; e->setspawned(on); e->clearnopickup(); } }
 
-    extentity *newentity() { return new gameentity(); }
-    void deleteentity(extentity *e) { delete (gameentity *)e; }
+    extentity *newentity() { return new fpsentity(); }
+    void deleteentity(extentity *e) { delete (fpsentity *)e; }
 
     void clearents()
     {
         while(ents.length()) deleteentity(ents.pop());
     }
 
+    enum
+    {
+        TRIG_COLLIDE    = 1<<0,
+        TRIG_TOGGLE     = 1<<1,
+        TRIG_ONCE       = 0<<2,
+        TRIG_MANY       = 1<<2,
+        TRIG_DISAPPEAR  = 1<<3,
+        TRIG_AUTO_RESET = 1<<4,
+        TRIG_RUMBLE     = 1<<5,
+        TRIG_LOCKED     = 1<<6,
+        TRIG_ENDSP      = 1<<7
+    };
+
+    static const int NUMTRIGGERTYPES = 32;
+
+    static const int triggertypes[NUMTRIGGERTYPES] =
+    {
+        -1,
+        TRIG_ONCE,                    // 1
+        TRIG_RUMBLE,                  // 2
+        TRIG_TOGGLE,                  // 3
+        TRIG_TOGGLE | TRIG_RUMBLE,    // 4
+        TRIG_MANY,                    // 5
+        TRIG_MANY | TRIG_RUMBLE,      // 6
+        TRIG_MANY | TRIG_TOGGLE,      // 7
+        TRIG_MANY | TRIG_TOGGLE | TRIG_RUMBLE,    // 8
+        TRIG_COLLIDE | TRIG_TOGGLE | TRIG_RUMBLE, // 9
+        TRIG_COLLIDE | TRIG_TOGGLE | TRIG_AUTO_RESET | TRIG_RUMBLE, // 10
+        TRIG_COLLIDE | TRIG_TOGGLE | TRIG_LOCKED | TRIG_RUMBLE,     // 11
+        TRIG_DISAPPEAR,               // 12
+        TRIG_DISAPPEAR | TRIG_RUMBLE, // 13
+        TRIG_DISAPPEAR | TRIG_COLLIDE | TRIG_LOCKED, // 14
+        -1 /* reserved 15 */,
+        -1 /* reserved 16 */,
+        -1 /* reserved 17 */,
+        -1 /* reserved 18 */,
+        -1 /* reserved 19 */,
+        -1 /* reserved 20 */,
+        -1 /* reserved 21 */,
+        -1 /* reserved 22 */,
+        -1 /* reserved 23 */,
+        -1 /* reserved 24 */,
+        -1 /* reserved 25 */,
+        -1 /* reserved 26 */,
+        -1 /* reserved 27 */,
+        -1 /* reserved 28 */,
+        TRIG_DISAPPEAR | TRIG_RUMBLE | TRIG_ENDSP, // 29
+        -1 /* reserved 30 */,
+        -1 /* reserved 31 */,
+    };
+
+    #define validtrigger(type) (triggertypes[(type) & (NUMTRIGGERTYPES-1)]>=0)
+    #define checktriggertype(type, flag) (triggertypes[(type) & (NUMTRIGGERTYPES-1)] & (flag))
+
+    static inline void cleartriggerflags(extentity &e)
+    {
+        e.flags &= ~(EF_ANIM | EF_NOVIS | EF_NOSHADOW | EF_NOCOLLIDE);
+    }
+
+    static inline void setuptriggerflags(fpsentity &e)
+    {
+        cleartriggerflags(e);
+        e.flags |= EF_ANIM;
+        if(checktriggertype(e.attr3, TRIG_COLLIDE|TRIG_DISAPPEAR)) e.flags |= EF_NOSHADOW;
+        if(!checktriggertype(e.attr3, TRIG_COLLIDE)) e.flags |= EF_NOCOLLIDE;
+        switch(e.triggerstate)
+        {
+            case TRIGGERING:
+                if(checktriggertype(e.attr3, TRIG_COLLIDE) && lastmillis-e.lasttrigger >= 500) e.flags |= EF_NOCOLLIDE;
+                break;
+            case TRIGGERED:
+                if(checktriggertype(e.attr3, TRIG_COLLIDE)) e.flags |= EF_NOCOLLIDE;
+                break;
+            case TRIGGER_DISAPPEARED:
+                e.flags |= EF_NOVIS | EF_NOCOLLIDE;
+                break;
+        }
+    }
+
+    void resettriggers()
+    {
+        loopv(ents)
+        {
+            fpsentity &e = *(fpsentity *)ents[i];
+            if(e.type != ET_MAPMODEL || !validtrigger(e.attr3)) continue;
+            e.triggerstate = TRIGGER_RESET;
+            e.lasttrigger = 0;
+            setuptriggerflags(e);
+        }
+    }
+
+    void unlocktriggers(int tag, int oldstate = TRIGGER_RESET, int newstate = TRIGGERING)
+    {
+        loopv(ents)
+        {
+            fpsentity &e = *(fpsentity *)ents[i];
+            if(e.type != ET_MAPMODEL || !validtrigger(e.attr3)) continue;
+            if(e.attr4 == tag && e.triggerstate == oldstate && checktriggertype(e.attr3, TRIG_LOCKED))
+            {
+                if(newstate == TRIGGER_RESETTING && checktriggertype(e.attr3, TRIG_COLLIDE) && overlapsdynent(e.o, 20)) continue;
+                e.triggerstate = newstate;
+                e.lasttrigger = lastmillis;
+                if(checktriggertype(e.attr3, TRIG_RUMBLE)) playsound(S_RUMBLE, &e.o);
+            }
+        }
+    }
+
+    ICOMMAND(trigger, "ii", (int *tag, int *state),
+    {
+        if(*state) unlocktriggers(*tag);
+        else unlocktriggers(*tag, TRIGGERED, TRIGGER_RESETTING);
+    });
+
+    VAR(triggerstate, -1, 0, 1);
+
+    void doleveltrigger(int trigger, int state)
+    {
+        defformatstring(aliasname, "level_trigger_%d", trigger);
+        if(identexists(aliasname))
+        {
+            triggerstate = state;
+            execident(aliasname);
+        }
+    }
+
+    void checktriggers()
+    {
+        if(player1->state != CS_ALIVE) return;
+        vec o = player1->feetpos();
+        loopv(ents)
+        {
+            fpsentity &e = *(fpsentity *)ents[i];
+            if(e.type != ET_MAPMODEL || !validtrigger(e.attr3)) continue;
+            switch(e.triggerstate)
+            {
+                case TRIGGERING:
+                case TRIGGER_RESETTING:
+                    if(lastmillis-e.lasttrigger>=1000)
+                    {
+                        if(e.attr4)
+                        {
+                            if(e.triggerstate == TRIGGERING) unlocktriggers(e.attr4);
+                            else unlocktriggers(e.attr4, TRIGGERED, TRIGGER_RESETTING);
+                        }
+                        if(checktriggertype(e.attr3, TRIG_DISAPPEAR)) e.triggerstate = TRIGGER_DISAPPEARED;
+                        else if(e.triggerstate==TRIGGERING && checktriggertype(e.attr3, TRIG_TOGGLE)) e.triggerstate = TRIGGERED;
+                        else e.triggerstate = TRIGGER_RESET;
+                    }
+                    setuptriggerflags(e);
+                    break;
+                case TRIGGER_RESET:
+                    if(e.lasttrigger)
+                    {
+                        if(checktriggertype(e.attr3, TRIG_AUTO_RESET|TRIG_MANY|TRIG_LOCKED) && e.o.dist(o)-player1->radius>=(checktriggertype(e.attr3, TRIG_COLLIDE) ? 20 : 12))
+                            e.lasttrigger = 0;
+                        break;
+                    }
+                    else if(e.o.dist(o)-player1->radius>=(checktriggertype(e.attr3, TRIG_COLLIDE) ? 20 : 12)) break;
+                    else if(checktriggertype(e.attr3, TRIG_LOCKED))
+                    {
+                        if(!e.attr4) break;
+                        doleveltrigger(e.attr4, -1);
+                        e.lasttrigger = lastmillis;
+                        break;
+                    }
+                    e.triggerstate = TRIGGERING;
+                    e.lasttrigger = lastmillis;
+                    setuptriggerflags(e);
+                    if(checktriggertype(e.attr3, TRIG_RUMBLE)) playsound(S_RUMBLE, &e.o);
+                    if(checktriggertype(e.attr3, TRIG_ENDSP)) endsp(false);
+                    if(e.attr4) doleveltrigger(e.attr4, 1);
+                    break;
+                case TRIGGERED:
+                    if(e.o.dist(o)-player1->radius<(checktriggertype(e.attr3, TRIG_COLLIDE) ? 20 : 12))
+                    {
+                        if(e.lasttrigger) break;
+                    }
+                    else if(checktriggertype(e.attr3, TRIG_AUTO_RESET))
+                    {
+                        if(lastmillis-e.lasttrigger<6000) break;
+                    }
+                    else if(checktriggertype(e.attr3, TRIG_MANY))
+                    {
+                        e.lasttrigger = 0;
+                        break;
+                    }
+                    else break;
+                    if(checktriggertype(e.attr3, TRIG_COLLIDE) && overlapsdynent(e.o, 20)) break;
+                    e.triggerstate = TRIGGER_RESETTING;
+                    e.lasttrigger = lastmillis;
+                    setuptriggerflags(e);
+                    if(checktriggertype(e.attr3, TRIG_RUMBLE)) playsound(S_RUMBLE, &e.o);
+                    if(checktriggertype(e.attr3, TRIG_ENDSP)) endsp(false);
+                    if(e.attr4) doleveltrigger(e.attr4, 0);
+                    break;
+            }
+        }
+    }
+
     void animatemapmodel(const extentity &e, int &anim, int &basetime)
     {
+        const fpsentity &f = (const fpsentity &)e;
+        if(validtrigger(f.attr3)) switch(f.triggerstate)
+        {
+            case TRIGGER_RESET: anim = ANIM_TRIGGER|ANIM_START; break;
+            case TRIGGERING: anim = ANIM_TRIGGER; basetime = f.lasttrigger; break;
+            case TRIGGERED: anim = ANIM_TRIGGER|ANIM_END; break;
+            case TRIGGER_RESETTING: anim = ANIM_TRIGGER|ANIM_REVERSE; basetime = f.lasttrigger; break;
+        }
     }
 
     void fixentity(extentity &e)
@@ -336,11 +610,17 @@ namespace entities
         switch(e.type)
         {
             case FLAG:
+            case BOX:
+            case BARREL:
+            case PLATFORM:
+            case ELEVATOR:
                 e.attr5 = e.attr4;
                 e.attr4 = e.attr3;
             case TELEDEST:
                 e.attr3 = e.attr2;
+            case MONSTER:
                 e.attr2 = e.attr1;
+            case RESPAWNPOINT:
                 e.attr1 = (int)player1->yaw;
                 break;
         }
@@ -363,13 +643,22 @@ namespace entities
                 break;
 
             case FLAG:
+            case MONSTER:
             case TELEDEST:
+            case RESPAWNPOINT:
+            case BOX:
+            case BARREL:
+            case PLATFORM:
+            case ELEVATOR:
             {
                 vec dir;
                 vecfromyawpitch(e.attr1, 0, 1, 0, dir);
                 renderentarrow(e, dir, 4);
                 break;
             }
+            case MAPMODEL:
+                if(validtrigger(e.attr3)) renderentring(e, checktriggertype(e.attr3, TRIG_COLLIDE) ? 20 : 12);
+                break;
         }
     }
 
@@ -381,11 +670,19 @@ namespace entities
     const char *entnameinfo(entity &e) { return ""; }
     const char *entname(int i)
     {
-        static const char * const entnames[MAXENTTYPES] =
+        static const char * const entnames[] =
         {
             "none?", "light", "mapmodel", "playerstart", "envmap", "particles", "sound", "spotlight", "decal",
-            "teleport", "teledest", "jumppad",
-            "flag"
+            "shells", "bullets", "rockets", "riflerounds", "grenades", "cartridges",
+            "health", "healthboost", "greenarmour", "yellowarmour", "quaddamage",
+            "teleport", "teledest",
+            "monster", "carrot", "jumppad",
+            "base", "respawnpoint",
+            "box", "barrel",
+            "platform", "elevator",
+            "flag",
+            "decal",
+            "", "", "", "",
         };
         return i>=0 && size_t(i)<sizeof(entnames)/sizeof(entnames[0]) ? entnames[i] : "";
     }
@@ -393,13 +690,20 @@ namespace entities
     void editent(int i, bool local)
     {
         extentity &e = *ents[i];
-        //e.flags = 0;
+        if(e.type == ET_MAPMODEL && validtrigger(e.attr3))
+        {
+            fpsentity &f = (fpsentity &)e;
+            f.triggerstate = TRIGGER_RESET;
+            f.lasttrigger = 0;
+            setuptriggerflags(f);
+        }
+        else cleartriggerflags(e);
         if(local) addmsg(N_EDITENT, "rii3ii5", i, (int)(e.o.x*DMF), (int)(e.o.y*DMF), (int)(e.o.z*DMF), e.type, e.attr1, e.attr2, e.attr3, e.attr4, e.attr5);
     }
 
     float dropheight(entity &e)
     {
-        if(e.type==FLAG) return 0.0f;
+        if(e.type==BASE || e.type==FLAG) return 0.0f;
         return 4.0f;
     }
 #endif

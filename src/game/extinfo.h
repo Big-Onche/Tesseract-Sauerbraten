@@ -38,14 +38,14 @@
         putint(q, ci->clientnum); //add player id
         putint(q, ci->ping);
         sendstring(ci->name, q);
-        sendstring(teamname(m_teammode ? ci->team : 0), q);
+        sendstring(ci->team, q);
         putint(q, ci->state.frags);
         putint(q, ci->state.flags);
         putint(q, ci->state.deaths);
         putint(q, ci->state.teamkills);
         putint(q, ci->state.damage*100/max(ci->state.shotdamage,1));
         putint(q, ci->state.health);
-        putint(q, 0);
+        putint(q, ci->state.armour);
         putint(q, ci->state.gunselect);
         putint(q, ci->privilege);
         putint(q, ci->state.state);
@@ -54,9 +54,9 @@
         sendserverinforeply(q);
     }
 
-    static inline void extinfoteamscore(ucharbuf &p, int team, int score)
+    static inline void extinfoteamscore(ucharbuf &p, const char *team, int score)
     {
-        sendstring(teamname(team), p);
+        sendstring(team, p);
         putint(p, score);
         if(!smode || !smode->extinfoteam(team, p))
             putint(p,-1); //no bases follow
@@ -74,10 +74,10 @@
         loopv(clients)
         {
             clientinfo *ci = clients[i];
-            if(ci->state.state!=CS_SPECTATOR && validteam(ci->team) && scores.htfind(ci->team) < 0)
+            if(ci->state.state!=CS_SPECTATOR && ci->team[0] && scores.htfind(ci->team) < 0)
             {
                 if(smode && smode->hidefrags()) scores.add(teamscore(ci->team, 0));
-                else { teaminfo &t = teaminfos[ci->team-1]; scores.add(teamscore(ci->team, t.frags)); }
+                else { teaminfo *ti = teaminfos.access(ci->team); scores.add(teamscore(ci->team, ti ? ti->frags : 0)); }
             }
         }
         loopv(scores) extinfoteamscore(p, scores[i].team, scores[i].score);
