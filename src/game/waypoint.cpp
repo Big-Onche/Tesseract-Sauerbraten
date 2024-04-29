@@ -196,7 +196,7 @@ namespace ai
         lastwpcache = waypoints.length();
 
         wpavoid.clear();
-        loopv(waypoints) if(waypoints[i].weight < 0) wpavoid.avoidnear(NULL, waypoints[i].o.z + WAYPOINTRADIUS, waypoints[i].o, WAYPOINTRADIUS);
+		loopv(waypoints) if(waypoints[i].weight < 0) wpavoid.avoidnear(NULL, waypoints[i].o.z + WAYPOINTRADIUS, waypoints[i].o, WAYPOINTRADIUS);
     }
 
     struct wpcachestack
@@ -207,7 +207,7 @@ namespace ai
 
     vector<wpcache::node *> wpcachestack;
 
-    int closestwaypoint(const vec &pos, float mindist, bool links, gameent *d)
+    int closestwaypoint(const vec &pos, float mindist, bool links, fpsent *d)
     {
         if(waypoints.empty()) return -1;
         if(clearedwpcaches) buildwpcache();
@@ -369,7 +369,7 @@ namespace ai
         for(int i = lastwpcache; i < waypoints.length(); i++) { CHECKNEAR(i); }
     }
 
-    int avoidset::remap(gameent *d, int n, vec &pos, bool retry)
+    int avoidset::remap(fpsent *d, int n, vec &pos, bool retry)
     {
         if(!obstacles.empty())
         {
@@ -399,7 +399,7 @@ namespace ai
                         else
                         {
                             vec old = d->o;
-                            d->o = vec(above).addz(d->eyeheight);
+                            d->o = vec(above).add(vec(0, 0, d->eyeheight));
                             bool col = collide(d, vec(0, 0, 1));
                             d->o = old;
                             if(!col)
@@ -419,7 +419,7 @@ namespace ai
 
     static inline float heapscore(waypoint *q) { return q->score(); }
 
-    bool route(gameent *d, int node, int goal, vector<int> &route, const avoidset &obstacles, int retries)
+    bool route(fpsent *d, int node, int goal, vector<int> &route, const avoidset &obstacles, int retries)
     {
         if(waypoints.empty() || !iswaypoint(node) || !iswaypoint(goal) || goal == node || !waypoints[node].links[0])
             return false;
@@ -441,18 +441,18 @@ namespace ai
                 waypoints[d->ai->prevnodes[i]].curscore = -1;
                 waypoints[d->ai->prevnodes[i]].estscore = 0;
             }
-            if(retries <= 0)
-            {
-                loopavoid(obstacles, d,
-                {
-                    if(iswaypoint(wp) && wp != node && wp != goal && waypoints[node].find(wp) < 0 && waypoints[goal].find(wp) < 0)
-                    {
-                        waypoints[wp].route = routeid;
-                        waypoints[wp].curscore = -1;
-                        waypoints[wp].estscore = 0;
-                    }
-                });
-            }
+			if(retries <= 0)
+			{
+				loopavoid(obstacles, d,
+				{
+					if(iswaypoint(wp) && wp != node && wp != goal && waypoints[node].find(wp) < 0 && waypoints[goal].find(wp) < 0)
+					{
+						waypoints[wp].route = routeid;
+						waypoints[wp].curscore = -1;
+						waypoints[wp].estscore = 0;
+					}
+				});
+			}
         }
 
         waypoints[node].route = routeid;
@@ -536,33 +536,33 @@ namespace ai
         return false;
     }
 
-    static inline bool shoulddrop(gameent *d)
+    static inline bool shoulddrop(fpsent *d)
     {
         return !d->ai && (dropwaypoints || !loadedwaypoints[0]);
     }
 
-    void inferwaypoints(gameent *d, const vec &o, const vec &v, float mindist)
+    void inferwaypoints(fpsent *d, const vec &o, const vec &v, float mindist)
     {
         if(!shouldnavigate()) return;
-        if(shoulddrop(d))
-        {
-            if(waypoints.empty()) seedwaypoints();
-            int from = closestwaypoint(o, mindist, false), to = closestwaypoint(v, mindist, false);
-            if(!iswaypoint(from)) from = addwaypoint(o);
-            if(!iswaypoint(to)) to = addwaypoint(v);
-            if(d->lastnode != from && iswaypoint(d->lastnode) && iswaypoint(from))
-                linkwaypoint(waypoints[d->lastnode], from);
-            if(iswaypoint(to))
-            {
-                if(from != to && iswaypoint(from) && iswaypoint(to))
-                    linkwaypoint(waypoints[from], to);
-                d->lastnode = to;
-            }
-        }
-        else d->lastnode = closestwaypoint(v, WAYPOINTRADIUS*2, false, d);
+    	if(shoulddrop(d))
+    	{
+			if(waypoints.empty()) seedwaypoints();
+			int from = closestwaypoint(o, mindist, false), to = closestwaypoint(v, mindist, false);
+			if(!iswaypoint(from)) from = addwaypoint(o);
+			if(!iswaypoint(to)) to = addwaypoint(v);
+			if(d->lastnode != from && iswaypoint(d->lastnode) && iswaypoint(from))
+				linkwaypoint(waypoints[d->lastnode], from);
+			if(iswaypoint(to))
+			{
+				if(from != to && iswaypoint(from) && iswaypoint(to))
+					linkwaypoint(waypoints[from], to);
+				d->lastnode = to;
+			}
+		}
+		else d->lastnode = closestwaypoint(v, WAYPOINTRADIUS*2, false, d);
     }
 
-    void navigate(gameent *d)
+    void navigate(fpsent *d)
     {
         vec v(d->feetpos());
         if(d->state != CS_ALIVE) { d->lastnode = -1; return; }
@@ -573,8 +573,8 @@ namespace ai
         int curnode = closestwaypoint(v, dist, false, d), prevnode = d->lastnode;
         if(!iswaypoint(curnode) && dropping)
         {
-            if(waypoints.empty()) seedwaypoints();
-            curnode = addwaypoint(v);
+			if(waypoints.empty()) seedwaypoints();
+        	curnode = addwaypoint(v);
         }
         if(iswaypoint(curnode))
         {
@@ -587,12 +587,12 @@ namespace ai
             if(d->ai && iswaypoint(prevnode) && d->lastnode != prevnode) d->ai->addprevnode(prevnode);
         }
         else if(!iswaypoint(d->lastnode) || waypoints[d->lastnode].o.squaredist(v) > SIGHTMIN*SIGHTMIN)
-            d->lastnode = closestwaypoint(v, SIGHTMAX, false, d);
+			d->lastnode = closestwaypoint(v, SIGHTMAX, false, d);
     }
 
     void navigate()
     {
-        if(shouldnavigate()) loopv(players) ai::navigate(players[i]);
+    	if(shouldnavigate()) loopv(players) ai::navigate(players[i]);
         if(invalidatedwpcaches) clearwpcache(false);
     }
 
@@ -616,11 +616,11 @@ namespace ai
             extentity &e = *entities::ents[i];
             switch(e.type)
             {
-                case PLAYERSTART: case TELEPORT: case JUMPPAD: case FLAG:
+                case PLAYERSTART: case TELEPORT: case JUMPPAD: case FLAG: case BASE:
                     addwaypoint(e.o);
                     break;
                 default:
-                    if(validitem(e.type)) addwaypoint(e.o);
+                    if(e.type >= I_SHELLS && e.type <= I_QUAD) addwaypoint(e.o);
                     break;
             }
         }
@@ -679,7 +679,9 @@ namespace ai
         if(!mname || !*mname) mname = getclientmap();
         if(!*mname) return false;
 
-        nformatstring(wptname, MAXSTRLEN, "media/map/%s.wpt", mname);
+        string pakname, mapname, cfgname;
+        getmapfilenames(mname, NULL, pakname, mapname, cfgname);
+        nformatstring(wptname, MAXSTRLEN, "media/map/%s.wpt", mapname);
         path(wptname);
         return true;
     }
