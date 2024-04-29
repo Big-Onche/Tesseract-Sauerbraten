@@ -21,12 +21,23 @@ void fixmapname(char *name)
     validmapname(name, name, NULL, "");
 }
 
-static void fixent(entity &e, int version)
+void getmapfilenames(const char *fname, const char *cname, char *pakname, char *mapname, char *cfgname)
 {
-    if(version <= 0)
+    if(!cname) cname = fname;
+    string name;
+    validmapname(name, cname);
+    char *slash = strpbrk(name, "/\\");
+    if(slash)
     {
-        if(e.type >= ET_DECAL) e.type++;
+        copystring(pakname, name, slash-name+1);
+        copystring(cfgname, slash+1, MAXSTRLEN);
     }
+    else
+    {
+        copystring(pakname, "base", MAXSTRLEN);
+        copystring(cfgname, name, MAXSTRLEN);
+    }
+    validmapname(mapname, fname, strpbrk(fname, "/\\") ? NULL : "");
 }
 
 static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octaheader &ohdr)
@@ -62,6 +73,19 @@ static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octahe
     return true;
 }
 
+static void fixent(entity &e, int version)
+{
+    if(version <= 0)
+    {
+        if(e.type >= ET_DECAL) e.type++;
+        if(e.type == ET_MAPMODEL) // pentaract | invert mdl id and pitch for sauerbraten port
+        {
+            int attr1 = e.attr1, attr2 = e.attr2;
+            e.attr1 = attr2, e.attr2 = attr1;
+        }
+    }
+}
+
 bool loadents(const char *fname, vector<entity> &ents, uint *crc)
 {
     string name;
@@ -70,10 +94,36 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
     path(ogzname);
     stream *f = opengzfile(ogzname, "rb");
     if(!f) return false;
+    octaheader hdr;
+    if(f->read(&hdr, 7*sizeof(int)) != 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
+    lilswap(&hdr.version, 6);
+    if(memcmp(hdr.magic, "OCTA", 4) || hdr.worldsize <= 0|| hdr.numents < 0) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
+    if(hdr.version>MAPVERSION) { conoutf(CON_ERROR, "map %s requires a newer version of Cube 2: Sauerbraten", ogzname); delete f; return false; }
+    compatheader chdr;
+    if(hdr.version <= 28)
+    {
+        if(f->read(&chdr.lightprecision, sizeof(chdr) - 7*sizeof(int)) != sizeof(chdr) - 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
+    }
+    else
+    {
+        int extra = 0;
+        if(hdr.version <= 29) extra++;
+        if(f->read(&hdr.blendmap, sizeof(hdr) - (7+extra)*sizeof(int)) != sizeof(hdr) - (7+extra)*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
+    }
 
-    mapheader hdr;
-    octaheader ohdr;
-    if(!loadmapheader(f, ogzname, hdr, ohdr)) { delete f; return false; }
+    if(hdr.version <= 28)
+    {
+        lilswap(&chdr.lightprecision, 3);
+        hdr.blendmap = chdr.blendmap;
+        hdr.numvars = 0;
+        hdr.numvslots = 0;
+    }
+    else
+    {
+        lilswap(&hdr.blendmap, 2);
+        if(hdr.version <= 29) hdr.numvslots = 0;
+        else lilswap(&hdr.numvslots, 1);
+    }
 
     loopi(hdr.numvars)
     {
@@ -88,21 +138,35 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
     }
 
     string gametype;
+    copystring(gametype, "fps");
     bool samegame = true;
-    int len = f->getchar();
-    if(len >= 0) f->read(gametype, len+1);
-    gametype[max(len, 0)] = '\0';
+    int eif = 0;
+    if(hdr.version>=16)
+    {
+        int len = f->getchar();
+        f->read(gametype, len+1);
+    }
     if(strcmp(gametype, game::gameident()))
     {
         samegame = false;
         conoutf(CON_WARN, "WARNING: loading map from %s game, ignoring entities except for lights/mapmodels", gametype);
     }
-    int eif = f->getlil<ushort>();
-    int extrasize = f->getlil<ushort>();
-    f->seek(extrasize, SEEK_CUR);
+    if(hdr.version>=16)
+    {
+        eif = f->getlil<ushort>();
+        int extrasize = f->getlil<ushort>();
+        f->seek(extrasize, SEEK_CUR);
+    }
 
-    ushort nummru = f->getlil<ushort>();
-    f->seek(nummru*sizeof(ushort), SEEK_CUR);
+    if(hdr.version<14)
+    {
+        f->seek(256, SEEK_CUR);
+    }
+    else
+    {
+        ushort nummru = f->getlil<ushort>();
+        f->seek(nummru*sizeof(ushort), SEEK_CUR);
+    }
 
     loopi(min(hdr.numents, MAXENTS))
     {
@@ -116,7 +180,7 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
         {
             entities::readent(e, NULL, hdr.version);
         }
-        else if(e.type>=ET_GAMESPECIFIC)
+        else if(e.type>=ET_GAMESPECIFIC || hdr.version<=14)
         {
             ents.pop();
             continue;
