@@ -524,7 +524,7 @@ void addbatchedmodel(model *m, batchedmodel &bm, int idx)
         if(b->m == m && (b->flags & MDL_MAPMODEL) == (bm.flags & MDL_MAPMODEL))
             goto foundbatch;
     }
-    
+
     m->batch = batches.length();
     b = &batches.add();
     b->m = m;
@@ -842,7 +842,7 @@ void rendertransparentmodelbatches(int stencil)
 
 static occludequery *modelquery = NULL;
 static int modelquerybatches = -1, modelquerymodels = -1, modelqueryattached = -1;
- 
+
 void startmodelquery(occludequery *query)
 {
     modelquery = query;
@@ -1117,6 +1117,74 @@ void loadskin(const char *dir, const char *altdir, Texture *&skin, Texture *&mas
     masks = notexture;
     tryload(skin, NULL, NULL, "skin");
     tryload(masks, NULL, NULL, "masks");
+}
+
+
+VAR(animoverride, -1, 0, NUMANIMS-1);
+VAR(testanims, 0, 0, 1);
+VAR(testpitch, -90, 0, 90);
+
+void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int hold, int attack, int attackdelay, int lastaction, int lastpain, float fade, bool ragdoll)
+{
+    int anim = hold ? hold : ANIM_IDLE|ANIM_LOOP;
+    float yaw = testanims && d==player ? 0 : d->yaw+90,
+          pitch = testpitch && d==player ? testpitch : d->pitch;
+    vec o = d->feetpos();
+    int basetime = 0;
+    if(animoverride) anim = (animoverride<0 ? ANIM_ALL : animoverride)|ANIM_LOOP;
+    else if(d->state==CS_DEAD)
+    {
+        anim = ANIM_DYING|ANIM_NOPITCH;
+        basetime = lastpain;
+        if(ragdoll)
+        {
+            if(!d->ragdoll || d->ragdoll->millis < basetime)
+            {
+                DELETEP(d->ragdoll);
+                anim |= ANIM_RAGDOLL;
+            }
+        }
+        else if(lastmillis-basetime>1000) anim = ANIM_DEAD|ANIM_LOOP|ANIM_NOPITCH;
+    }
+    else if(d->state==CS_EDITING || d->state==CS_SPECTATOR) anim = ANIM_EDIT|ANIM_LOOP;
+    else if(d->state==CS_LAGGED)                            anim = ANIM_LAG|ANIM_LOOP;
+    else
+    {
+        if(lastmillis-lastpain < 300)
+        {
+            anim = ANIM_PAIN;
+            basetime = lastpain;
+        }
+        else if(lastpain < lastaction && (attack < 0 || (d->type != ENT_AI && lastmillis-lastaction < attackdelay)))
+        {
+            anim = attack < 0 ? -attack : attack;
+            basetime = lastaction;
+        }
+
+        if(d->inwater && d->physstate<=PHYS_FALL) anim |= (((game::allowmove(d) && (d->move || d->strafe)) || d->vel.z+d->falling.z>0 ? ANIM_SWIM : ANIM_SINK)|ANIM_LOOP)<<ANIM_SECONDARY;
+        else if(d->timeinair>100) anim |= (ANIM_JUMP|ANIM_END)<<ANIM_SECONDARY;
+        else if(game::allowmove(d) && (d->move || d->strafe))
+        {
+            if(d->move>0) anim |= (ANIM_FORWARD|ANIM_LOOP)<<ANIM_SECONDARY;
+            else if(d->strafe)
+            {
+                if(d->move<0) anim |= ((d->strafe>0 ? ANIM_RIGHT : ANIM_LEFT)|ANIM_REVERSE|ANIM_LOOP)<<ANIM_SECONDARY;
+                else anim |= ((d->strafe>0 ? ANIM_LEFT : ANIM_RIGHT)|ANIM_LOOP)<<ANIM_SECONDARY;
+            }
+            else if(d->move<0) anim |= (ANIM_BACKWARD|ANIM_LOOP)<<ANIM_SECONDARY;
+        }
+
+        if((anim&ANIM_INDEX)==ANIM_IDLE && (anim>>ANIM_SECONDARY)&ANIM_INDEX) anim >>= ANIM_SECONDARY;
+    }
+    if(d->ragdoll && (!ragdoll || (anim&ANIM_INDEX)!=ANIM_DYING)) DELETEP(d->ragdoll);
+    if(!((anim>>ANIM_SECONDARY)&ANIM_INDEX)) anim |= (ANIM_IDLE|ANIM_LOOP)<<ANIM_SECONDARY;
+    int flags = 0;
+    if(d!=player && !(anim&ANIM_RAGDOLL)) flags |= MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY;
+    if(d->type==ENT_PLAYER) flags |= MDL_FULLBRIGHT;
+    else flags |= MDL_CULL_DIST;
+    if(d->state==CS_LAGGED) fade = min(fade, 0.3f);
+    if(drawtex == DRAWTEX_MODELPREVIEW) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
+    rendermodel(mdlname, anim, o, yaw, pitch, 0, flags, d, attachments, basetime, 0, fade);
 }
 
 void setbbfrommodel(dynent *d, const char *mdl)
