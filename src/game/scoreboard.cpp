@@ -3,30 +3,33 @@
 
 namespace game
 {
+    VARP(scoreboard2d, 0, 1, 1);
     VARP(showservinfo, 0, 1, 1);
     VARP(showclientnum, 0, 0, 1);
     VARP(showpj, 0, 0, 1);
-    VARP(showping, 0, 1, 1);
+    VARP(showping, 0, 1, 2);
     VARP(showspectators, 0, 1, 1);
+    VARP(showspectatorping, 0, 0, 1);
     VARP(highlightscore, 0, 1, 1);
     VARP(showconnecting, 0, 0, 1);
     VARP(hidefrags, 0, 1, 1);
+    VARP(showdeaths, 0, 0, 1);
 
-    static teaminfo teaminfos[MAXTEAMS];
+    static hashset<teaminfo> teaminfos;
 
     void clearteaminfo()
     {
-        loopi(MAXTEAMS) teaminfos[i].reset();
+        teaminfos.clear();
     }
 
-    void setteaminfo(int team, int frags)
+    void setteaminfo(const char *team, int frags)
     {
-        if(!validteam(team)) return;
-        teaminfo &t = teaminfos[team-1];
-        t.frags = frags;
+        teaminfo *t = teaminfos.access(team);
+        if(!t) { t = &teaminfos[team]; copystring(t->team, team, sizeof(t->team)); }
+        t->frags = frags;
     }
 
-    static inline bool playersort(const gameent *a, const gameent *b)
+    static inline bool playersort(const fpsent *a, const fpsent *b)
     {
         if(a->state==CS_SPECTATOR)
         {
@@ -34,7 +37,7 @@ namespace game
             else return false;
         }
         else if(b->state==CS_SPECTATOR) return true;
-        if(m_ctf)
+        if(m_ctf || m_collect)
         {
             if(a->flags > b->flags) return true;
             if(a->flags < b->flags) return false;
@@ -44,18 +47,18 @@ namespace game
         return strcmp(a->name, b->name) < 0;
     }
 
-    void getbestplayers(vector<gameent *> &best)
+    void getbestplayers(vector<fpsent *> &best)
     {
         loopv(players)
         {
-            gameent *o = players[i];
+            fpsent *o = players[i];
             if(o->state!=CS_SPECTATOR) best.add(o);
         }
         best.sort(playersort);
         while(best.length() > 1 && best.last()->frags < best[0]->frags) best.drop();
     }
 
-    void getbestteams(vector<int> &best)
+    void getbestteams(vector<const char *> &best)
     {
         if(cmode && cmode->hidefrags())
         {
@@ -68,154 +71,33 @@ namespace game
         else
         {
             int bestfrags = INT_MIN;
-            loopi(MAXTEAMS)
+            enumerate(teaminfos, teaminfo, t, bestfrags = max(bestfrags, t.frags));
+            if(bestfrags <= 0) loopv(players)
             {
-                teaminfo &t = teaminfos[i];
-                bestfrags = max(bestfrags, t.frags);
+                fpsent *o = players[i];
+                if(o->state!=CS_SPECTATOR && !teaminfos.access(o->team) && best.htfind(o->team) < 0) { bestfrags = 0; best.add(o->team); }
             }
-            loopi(MAXTEAMS)
-            {
-                teaminfo &t = teaminfos[i];
-                if(t.frags >= bestfrags) best.add(1+i);
-            }
+            enumerate(teaminfos, teaminfo, t, if(t.frags >= bestfrags) best.add(t.team));
         }
     }
 
-    static vector<gameent *> teamplayers[1+MAXTEAMS], spectators;
-
-    static void groupplayers()
+    int statuscolor(fpsent *d, int color)
     {
-        loopi(1+MAXTEAMS) teamplayers[i].setsize(0);
-        spectators.setsize(0);
-        loopv(players)
+        if(d->privilege)
         {
-            gameent *o = players[i];
-            if(!showconnecting && !o->name[0]) continue;
-            if(o->state==CS_SPECTATOR) { spectators.add(o); continue; }
-            int team = m_teammode && validteam(o->team) ? o->team : 0;
-            teamplayers[team].add(o);
+            color = d->privilege>=PRIV_ADMIN ? 0xFF8000 : (d->privilege>=PRIV_AUTH ? 0xC040C0 : 0x40FF80);
+            if(d->state==CS_DEAD) color = (color>>1)&0x7F7F7F;
         }
-        loopi(1+MAXTEAMS) teamplayers[i].sort(playersort);
-        spectators.sort(playersort);
+        else if(d->state==CS_DEAD) color = 0x606060;
+        return color;
     }
 
-    void removegroupedplayer(gameent *d)
+    VARP(hudscore, 0, 0, 1);
+
+    void drawhudscore(int w, int h)
     {
-        loopi(1+MAXTEAMS) teamplayers[i].removeobj(d);
-        spectators.removeobj(d);
+
     }
 
-    void refreshscoreboard()
-    {
-        groupplayers();
-    }
-
-    COMMAND(refreshscoreboard, "");
-    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= MAXTEAMS ? teamplayers[*team].length() : 0)));
-    ICOMMAND(loopscoreboard, "rie", (ident *id, int *team, uint *body),
-    {
-        if(*team > MAXTEAMS) return;
-        loopstart(id, stack);
-        vector<gameent *> &p = *team < 0 ? spectators : teamplayers[*team];
-        loopv(p)
-        {
-            loopiter(id, stack, p[i]->clientnum);
-            execute(body);
-        }
-        loopend(id, stack);
-    });
-
-    ICOMMAND(scoreboardstatus, "i", (int *cn),
-    {
-        gameent *d = getclient(*cn);
-        if(d)
-        {
-            int status = d->state!=CS_DEAD ? 0xFFFFFF : 0x606060;
-            if(d->privilege)
-            {
-                status = d->privilege>=PRIV_ADMIN ? 0xFF8000 : 0x40FF80;
-                if(d->state==CS_DEAD) status = (status>>1)&0x7F7F7F;
-            }
-            intret(status);
-        }
-    });
-
-    ICOMMAND(scoreboardpj, "i", (int *cn),
-    {
-        gameent *d = getclient(*cn);
-        if(d && d != player1)
-        {
-            if(d->state==CS_LAGGED) result("LAG");
-            else intret(d->plag);
-        }
-    });
-
-    ICOMMAND(scoreboardping, "i", (int *cn),
-    {
-        gameent *d = getclient(*cn);
-        if(d)
-        {
-            if(!showpj && d->state==CS_LAGGED) result("LAG");
-            else intret(d->ping);
-        }
-    });
-
-    ICOMMAND(scoreboardshowfrags, "", (), intret(cmode && cmode->hidefrags() && hidefrags ? 0 : 1));
-    ICOMMAND(scoreboardshowclientnum, "", (), intret(showclientnum || player1->privilege>=PRIV_MASTER ? 1 : 0));
     ICOMMAND(scoreboardmultiplayer, "", (), intret(multiplayer(false) || demoplayback ? 1 : 0));
-
-    ICOMMAND(scoreboardhighlight, "i", (int *cn),
-        intret(*cn == player1->clientnum && highlightscore && (multiplayer(false) || demoplayback || players.length() > 1) ? 0x808080 : 0));
-
-    ICOMMAND(scoreboardservinfo, "", (),
-    {
-        if(!showservinfo) return;
-        const ENetAddress *address = connectedpeer();
-        if(address && player1->clientnum >= 0)
-        {
-            if(servdesc[0]) result(servdesc);
-            else
-            {
-                string hostname;
-                if(enet_address_get_host_ip(address, hostname, sizeof(hostname)) >= 0)
-                    result(tempformatstring("%s:%d", hostname, address->port));
-            }
-        }
-    });
-
-    ICOMMAND(scoreboardmode, "", (),
-    {
-        result(server::modeprettyname(gamemode));
-    });
-
-    ICOMMAND(scoreboardmap, "", (),
-    {
-        const char *mname = getclientmap();
-        result(mname[0] ? mname : "[new map]");
-    });
-
-    ICOMMAND(scoreboardtime, "", (),
-    {
-        if(m_timed && getclientmap() && (maplimit >= 0 || intermission))
-        {
-            if(intermission) result("intermission");
-            else
-            {
-                int secs = max(maplimit-lastmillis + 999, 0)/1000;
-                result(tempformatstring("%d:%02d", secs/60, secs%60));
-            }
-        }
-    });
-
-    ICOMMAND(getteamscore, "i", (int *team),
-    {
-        if(m_teammode && validteam(*team))
-        {
-            if(cmode && cmode->hidefrags()) intret(cmode->getteamscore(*team));
-            else intret(teaminfos[*team-1].frags);
-        }
-    });
-
-    void showscores(bool on) { UI::holdui("scoreboard", on); }
 }
-
