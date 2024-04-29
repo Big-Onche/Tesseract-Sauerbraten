@@ -122,7 +122,7 @@ enum
     PT_FLIP      = PT_HFLIP | PT_VFLIP | PT_ROT
 };
 
-const char *partnames[] = { "part", "tape", "trail", "text", "textup", "meter", "metervs", "fireball", "lightning", "flare" };
+const char *partnames[] = { "part", "tape", "trail", "text", "texticon", "meter", "metervs", "fireball", "lightning", "flare" };
 
 struct particle
 {
@@ -239,6 +239,8 @@ struct partrenderer
     void debuginfo()
     {
         formatstring(info, "%d\t%s(", count(), partnames[type&0xFF]);
+        if(type&PT_BRIGHT) concatstring(info, "b,");
+        if(type&PT_SOFT) concatstring(info, "s,");
         if(type&PT_LERP) concatstring(info, "l,");
         if(type&PT_MOD) concatstring(info, "m,");
         if(type&PT_RND4) concatstring(info, "r,");
@@ -396,13 +398,13 @@ struct meterrenderer : listrenderer
 
     void startrender()
     {
-         glDisable(GL_BLEND);
-         gle::defvertex();
+        glDisable(GL_BLEND);
+        gle::defvertex();
     }
 
     void endrender()
     {
-         glEnable(GL_BLEND);
+        glEnable(GL_BLEND);
     }
 
     void renderpart(listparticle *p, const vec &o, const vec &d, int blend, int ts)
@@ -507,6 +509,51 @@ struct textrenderer : listrenderer
     }
 };
 static textrenderer texts;
+
+struct texticonrenderer : listrenderer
+{
+    texticonrenderer(const char *texname, int type)
+        : listrenderer(texname, 3, type)
+    {}
+
+    void startrender()
+    {
+        gle::defvertex();
+        gle::deftexcoord0();
+        gle::defcolor(4, GL_UNSIGNED_BYTE);
+        gle::begin(GL_QUADS);
+    }
+
+    void endrender()
+    {
+        gle::end();
+    }
+
+    void renderpart(listparticle *p, const vec &o, const vec &d, int blend, int ts)
+    {
+        float scale = p->size/80.0f, xoff = p->val, yoff = 0;
+
+        matrix4x3 m(camright, vec(camup).neg(), vec(camdir).neg(), o);
+        m.scale(scale);
+        m.translate(xoff, yoff, 50);
+
+        float tx = 0.25f*(p->flags&3), ty = 0.25f*((p->flags>>2)&3);
+
+        gle::attrib(m.transform(vec2(0, 0)));
+            gle::attrib(tx, ty);
+            gle::attrib(p->color, blend);
+        gle::attrib(m.transform(vec2(FONTH, 0)));
+            gle::attrib(tx + 0.25f, ty);
+            gle::attrib(p->color, blend);
+        gle::attrib(m.transform(vec2(FONTH, FONTH)));
+            gle::attrib(tx + 0.25f, ty + 0.25f);
+            gle::attrib(p->color, blend);
+        gle::attrib(m.transform(vec2(0, FONTH)));
+            gle::attrib(tx, ty + 0.25f);
+            gle::attrib(p->color, blend);
+    }
+};
+static texticonrenderer texticons("media/hud/items.png", PT_TEXTUP|PT_LERP);
 
 template<int T>
 static inline void modifyblend(const vec &o, int &blend)
@@ -839,29 +886,31 @@ struct softquadrenderer : quadrenderer
 
 static partrenderer *parts[] =
 {
-    new quadrenderer("<grey>media/particle/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4|PT_COLLIDE, STAIN_BLOOD), // blood spats (note: rgb is inverted)
-    new trailrenderer("media/particle/base.png", PT_TRAIL|PT_LERP),                            // water, entity
-    new quadrenderer("<grey>media/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),               // smoke
-    new quadrenderer("<grey>media/particle/steam.png", PT_PART|PT_FLIP),                       // steam
-    new quadrenderer("<grey>media/particle/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),   // flame
-    new taperenderer("media/particle/flare.png", PT_TAPE|PT_BRIGHT),                           // streak
-    new taperenderer("media/particle/rail_trail.png", PT_TAPE|PT_FEW|PT_BRIGHT),               // rail trail
-    new taperenderer("media/particle/pulse_side.png", PT_TAPE|PT_FEW|PT_BRIGHT),               // pulse side
-    new quadrenderer("media/particle/pulse_front.png", PT_PART|PT_FLIP|PT_FEW|PT_BRIGHT),      // pulse front
-    &lightnings,                                                                               // lightning
-    &fireballs,                                                                                // explosion fireball
-    &pulsebursts,                                                                              // pulse burst
-    new quadrenderer("media/particle/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                   // sparks
-    new quadrenderer("media/particle/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                   // edit mode entities
-    new quadrenderer("media/particle/snow.png", PT_PART|PT_FLIP|PT_RND4|PT_COLLIDE),           // colliding snow
-    new quadrenderer("media/particle/rail_muzzle.png", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),  // rail muzzle flash
-    new quadrenderer("media/particle/pulse_muzzle.png", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK), // pulse muzzle flash
-    new quadrenderer("media/interface/hud/items.png", PT_PART|PT_FEW|PT_ICON),                 // hud icon
-    new quadrenderer("<colorify:1/1/1>media/interface/hud/items.png", PT_PART|PT_FEW|PT_ICON), // grey hud icon
-    &texts,                                                                                    // text
-    &meters,                                                                                   // meter
-    &metervs,                                                                                  // meter vs.
-    &flares                                                                                    // lens flares - must be done last
+    new quadrenderer("<grey>media/particle/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),   // blood spats (note: rgb is inverted)
+    new trailrenderer("media/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
+    new quadrenderer("<grey>media/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
+    new quadrenderer("<grey>media/particle/steam.png", PT_PART|PT_FLIP),                               // steam
+    new quadrenderer("<grey>media/particle/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),           // flame on - no flipping please, they have orientation
+    new quadrenderer("media/particle/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball1
+    new quadrenderer("media/particle/ball2.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball2
+    new quadrenderer("media/particle/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball3
+    new taperenderer("media/particle/flare.jpg", PT_TAPE|PT_BRIGHT),                                   // streak
+    &lightnings,                                                                                        // lightning
+    &fireballs,                                                                                         // explosion fireball
+    &bluefireballs,                                                                                     // bluish explosion fireball
+    new quadrenderer("media/particle/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                           // sparks
+    new quadrenderer("media/particle/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                           // edit mode entities
+    new quadrenderer("<grey>media/particle/snow.png", PT_PART|PT_FLIP|PT_RND4, -1),                    // colliding snow
+    new quadrenderer("media/particle/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("media/particle/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("media/particle/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("media/hud/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
+    new quadrenderer("<colorify:1/1/1>media/hud/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
+    &texts,                                                                                             // text
+    &texticons,                                                                                         // text icons
+    &meters,                                                                                            // meter
+    &metervs,                                                                                           // meter vs.
+    &flares                                                                                             // lens flares - must be done last
 };
 
 VARFP(maxparticles, 10, 4000, 10000, initparticles());
@@ -1018,7 +1067,7 @@ static void splash(int type, int color, int radius, int num, int fade, const vec
             z = rnd(radius*2)-radius;
         }
         while(x*x+y*y+z*z>radius*radius);
-        vec tmp = vec((float)x, (float)y, (float)z);
+    	vec tmp = vec((float)x, (float)y, (float)z);
         int f = (num < 10) ? (fmin + rnd(fmax)) : (fmax - (i*(fmax-fmin))/(num-1)); //help deallocater by using fade distribution rather than random
         newparticle(p, tmp, f, type, color, size, gravity)->val = collidez;
     }
@@ -1068,12 +1117,13 @@ void particle_trail(int type, int fade, const vec &s, const vec &e, int color, f
 VARP(particletext, 0, 1, 1);
 VARP(maxparticletextdistance, 0, 128, 10000);
 
-void particle_text(const vec &s, const char *t, int type, int fade, int color, float size, int gravity)
+void particle_text(const vec &s, const char *t, int type, int fade, int color, float size, int gravity, int icons)
 {
     if(!canaddparticles()) return;
     if(!particletext || camera1->o.dist(s) > maxparticletextdistance) return;
     particle *p = newparticle(s, vec(0, 0, 1), fade, type, color, size, gravity);
     p->text = t;
+    p->flags = icons<<1;
 }
 
 void particle_textcopy(const vec &s, const char *t, int type, int fade, int color, float size, int gravity)
@@ -1083,6 +1133,15 @@ void particle_textcopy(const vec &s, const char *t, int type, int fade, int colo
     particle *p = newparticle(s, vec(0, 0, 1), fade, type, color, size, gravity);
     p->text = newstring(t);
     p->flags = 1;
+}
+
+void particle_texticon(const vec &s, int ix, int iy, float offset, int type, int fade, int color, float size, int gravity)
+{
+    if(!canaddparticles()) return;
+    if(!particletext || camera1->o.dist(s) > maxparticletextdistance) return;
+    particle *p = newparticle(s, vec(0, 0, 1), fade, type, color, size, gravity);
+    p->flags |= ix | (iy<<2);
+    p->val = offset;
 }
 
 void particle_icon(const vec &s, int ix, int iy, int type, int fade, int color, float size, int gravity)
