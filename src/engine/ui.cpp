@@ -2936,7 +2936,7 @@ namespace UI
             int sx1, sy1, sx2, sy2;
             window->calcscissor(sx, sy, sx+w, sy+h, sx1, sy1, sx2, sy2, false);
             modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, false, clipstack.length() > 0);
-            game::renderplayerpreview(model, color, team, weapon);
+            game::renderplayerpreview(model, team, weapon);
             if(clipstack.length()) clipstack.last().scissor();
             modelpreview::end();
         }
