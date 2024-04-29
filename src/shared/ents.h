@@ -15,21 +15,21 @@ struct entity                                   // persistent map entity
 
 enum
 {
-    EF_NOVIS      = 1<<0,
-    EF_NOSHADOW   = 1<<1,
-    EF_NOCOLLIDE  = 1<<2,
-    EF_ANIM       = 1<<3,
+    EF_NOVIS     = 1<<0,
+    EF_NOSHADOW  = 1<<1,
+    EF_NOCOLLIDE = 1<<2,
+    EF_ANIM      = 1<<3,
     EF_SHADOWMESH = 1<<4,
-    EF_OCTA       = 1<<5,
-    EF_RENDER     = 1<<6,
-    EF_SOUND      = 1<<7,
-    EF_SPAWNED    = 1<<8,
-    EF_NOPICKUP   = 1<<9
+    EF_OCTA      = 1<<5,
+    EF_RENDER    = 1<<6,
+    EF_SOUND     = 1<<7,
+    EF_SPAWNED   = 1<<8,
+    EF_NOPICKUP  = 1<<9
 };
 
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
 {
-    int flags;
+    int flags;  // the only dynamic state of a map entity
     extentity *attached;
 
     extentity() : flags(0), attached(NULL) {}
@@ -53,12 +53,9 @@ enum { CS_ALIVE = 0, CS_DEAD, CS_SPAWNING, CS_LAGGED, CS_EDITING, CS_SPECTATOR }
 
 enum { PHYS_FLOAT = 0, PHYS_FALL, PHYS_SLIDE, PHYS_SLOPE, PHYS_FLOOR, PHYS_STEP_UP, PHYS_STEP_DOWN, PHYS_BOUNCE };
 
-enum { ENT_PLAYER = 0, ENT_CAMERA, ENT_BOUNCE };
+enum { ENT_PLAYER = 0, ENT_AI, ENT_INANIMATE, ENT_CAMERA, ENT_BOUNCE };
 
 enum { COLLIDE_NONE = 0, COLLIDE_ELLIPSE, COLLIDE_OBB, COLLIDE_TRI };
-
-#define CROUCHTIME 200
-#define CROUCHHEIGHT 0.75f
 
 struct physent                                  // base entity type, can be affected by physics
 {
@@ -66,14 +63,14 @@ struct physent                                  // base entity type, can be affe
     vec deltapos, newpos;                       // movement interpolation
     float yaw, pitch, roll;
     float maxspeed;                             // cubes per second, 100 for player
-    float radius, eyeheight, maxheight, aboveeye; // bounding box size
+    float radius, eyeheight, aboveeye;          // bounding box size
     float xradius, yradius, zmargin;
     vec floor;                                  // the normal of floor the dynent is on
 
     ushort timeinair;
     uchar inwater;
     bool jumping;
-    schar move, strafe, crouching;
+    schar move, strafe;
 
     uchar physstate;                            // one of PHYS_* above
     uchar state, editstate;                     // one of CS_* above
@@ -83,7 +80,7 @@ struct physent                                  // base entity type, can be affe
     bool blocked;                               // used by physics to signal ai
 
     physent() : o(0, 0, 0), deltapos(0, 0, 0), newpos(0, 0, 0), yaw(0), pitch(0), roll(0), maxspeed(100),
-               radius(4.1f), eyeheight(18), maxheight(18), aboveeye(2), xradius(4.1f), yradius(4.1f), zmargin(0),
+               radius(4.1f), eyeheight(14), aboveeye(1), xradius(4.1f), yradius(4.1f), zmargin(0),
                state(CS_ALIVE), editstate(CS_ALIVE), type(ENT_PLAYER),
                collidetype(COLLIDE_ELLIPSE),
                blocked(false)
@@ -99,9 +96,8 @@ struct physent                                  // base entity type, can be affe
     {
         inwater = 0;
         timeinair = 0;
-        eyeheight = maxheight;
         jumping = false;
-        strafe = move = crouching = 0;
+        strafe = move = 0;
         physstate = PHYS_FALL;
         vel = falling = vec(0, 0, 0);
         floor = vec(0, 0, 1);
@@ -110,33 +106,57 @@ struct physent                                  // base entity type, can be affe
     vec feetpos(float offset = 0) const { return vec(o).addz(offset - eyeheight); }
     vec headpos(float offset = 0) const { return vec(o).addz(offset); }
 
-    bool crouched() const { return fabs(eyeheight - maxheight*CROUCHHEIGHT) < 1e-4f; }
+    bool maymove() const { return timeinair || physstate < PHYS_FLOOR || vel.squaredlen() > 1e-4f || deltapos.squaredlen() > 1e-4f; }
 };
 
 enum
 {
-    ANIM_MAPMODEL = 0,
-    ANIM_GAMESPECIFIC
+    ANIM_DEAD = 0, ANIM_DYING, ANIM_IDLE,
+    ANIM_FORWARD, ANIM_BACKWARD, ANIM_LEFT, ANIM_RIGHT,
+    ANIM_HOLD1, ANIM_HOLD2, ANIM_HOLD3, ANIM_HOLD4, ANIM_HOLD5, ANIM_HOLD6, ANIM_HOLD7,
+    ANIM_ATTACK1, ANIM_ATTACK2, ANIM_ATTACK3, ANIM_ATTACK4, ANIM_ATTACK5, ANIM_ATTACK6, ANIM_ATTACK7,
+    ANIM_PAIN,
+    ANIM_JUMP, ANIM_SINK, ANIM_SWIM,
+    ANIM_EDIT, ANIM_LAG, ANIM_TAUNT, ANIM_WIN, ANIM_LOSE,
+    ANIM_GUN_IDLE, ANIM_GUN_SHOOT,
+    ANIM_VWEP_IDLE, ANIM_VWEP_SHOOT, ANIM_SHIELD, ANIM_POWERUP,
+    ANIM_MAPMODEL, ANIM_TRIGGER,
+    NUMANIMS
 };
 
-#define ANIM_ALL         0x1FF
-#define ANIM_INDEX       0x1FF
-#define ANIM_LOOP        (1<<9)
-#define ANIM_CLAMP       (1<<10)
-#define ANIM_REVERSE     (1<<11)
-#define ANIM_START       (ANIM_LOOP|ANIM_CLAMP)
-#define ANIM_END         (ANIM_LOOP|ANIM_CLAMP|ANIM_REVERSE)
-#define ANIM_DIR         0xE00
-#define ANIM_SECONDARY   12
-#define ANIM_REUSE       0xFFFFFF
-#define ANIM_NOSKIN      (1<<24)
-#define ANIM_SETTIME     (1<<25)
-#define ANIM_FULLBRIGHT  (1<<26)
-#define ANIM_NORENDER    (1<<27)
-#define ANIM_RAGDOLL     (1<<28)
-#define ANIM_SETSPEED    (1<<29)
-#define ANIM_NOPITCH     (1<<30)
-#define ANIM_FLAGS       0xFF000000
+static const char * const animnames[] =
+{
+    "dead", "dying", "idle",
+    "forward", "backward", "left", "right",
+    "hold 1", "hold 2", "hold 3", "hold 4", "hold 5", "hold 6", "hold 7",
+    "attack 1", "attack 2", "attack 3", "attack 4", "attack 5", "attack 6", "attack 7",
+    "pain",
+    "jump", "sink", "swim",
+    "edit", "lag", "taunt", "win", "lose",
+    "gun idle", "gun shoot",
+    "vwep idle", "vwep shoot", "shield", "powerup",
+    "mapmodel", "trigger"
+};
+
+#define ANIM_ALL         0x7F
+#define ANIM_INDEX       0x7F
+#define ANIM_LOOP        (1<<7)
+#define ANIM_START       (1<<8)
+#define ANIM_END         (1<<9)
+#define ANIM_REVERSE     (1<<10)
+#define ANIM_CLAMP       (ANIM_START|ANIM_END)
+#define ANIM_DIR         0x780
+#define ANIM_SECONDARY   11
+#define ANIM_NOSKIN      (1<<22)
+#define ANIM_SETTIME     (1<<23)
+#define ANIM_FULLBRIGHT  (1<<24)
+#define ANIM_REUSE       (1<<25)
+#define ANIM_NORENDER    (1<<26)
+#define ANIM_RAGDOLL     (1<<27)
+#define ANIM_SETSPEED    (1<<28)
+#define ANIM_NOPITCH     (1<<29)
+#define ANIM_GHOST       (1<<30)
+#define ANIM_FLAGS       (0x1FF<<22)
 
 struct animinfo // description of a character's animation
 {
@@ -191,7 +211,7 @@ struct dynent : physent                         // animated characters, or chara
     void stopmoving()
     {
         k_left = k_right = k_up = k_down = jumping = false;
-        move = strafe = crouching = 0;
+        move = strafe = 0;
     }
 
     void reset()
@@ -203,5 +223,3 @@ struct dynent : physent                         // animated characters, or chara
 
     vec abovehead() { return vec(o).addz(aboveeye+4); }
 };
-
-

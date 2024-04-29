@@ -39,6 +39,7 @@ namespace game
     extern void forceedit(const char *name);
     extern bool ispaused();
     extern int scaletime(int t);
+    extern float gameSpeedScale();
     extern bool allowmouselook();
 
     extern const char *gameident();
@@ -70,11 +71,12 @@ namespace game
     extern bool canjump();
     extern bool cancrouch();
     extern bool allowmove(physent *d);
+    extern void doattack(bool on);
     extern dynent *iterdynents(int i);
     extern int numdynents();
     extern void rendergame();
     extern void renderavatar();
-    extern void renderplayerpreview(int model, int color, int team, int weap);
+    extern void renderplayerpreview(int model, int team, int weap);
     extern int numanims();
     extern void findanims(const char *pattern, vector<int> &anims);
     extern void writegamedata(vector<char> &extras);
@@ -113,7 +115,8 @@ namespace server
     extern void serverupdate();
     extern int protocolversion();
     extern int laninfoport();
-    extern int serverport();
+    extern int serverinfoport(int servport = -1);
+    extern int serverport(int infoport = -1);
     extern const char *defaultmaster();
     extern int masterport();
     extern void processmasterinput(const char *cmd, int cmdlen, const char *args);
