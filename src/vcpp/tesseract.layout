@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_layout_file>
+	<FileVersion major="1" minor="0" />
+	<ActiveTarget name="client64" />
+	<File name="..\engine\serverbrowser.cpp" open="1" top="0" tabpos="14" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="6689" topLine="232" />
+		</Cursor>
+	</File>
+	<File name="..\game\client.cpp" open="1" top="0" tabpos="5" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="19331" topLine="570" />
+		</Cursor>
+	</File>
+	<File name="..\engine\engine.h" open="1" top="0" tabpos="19" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="5602" topLine="151" />
+		</Cursor>
+	</File>
+	<File name="..\engine\worldio.cpp" open="1" top="0" tabpos="23" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="616" topLine="21" />
+		</Cursor>
+	</File>
+	<File name="..\game\weapon.cpp" open="1" top="1" tabpos="1" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="25409" topLine="728" />
+		</Cursor>
+	</File>
+	<File name="..\engine\ui.cpp" open="1" top="0" tabpos="20" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="84705" topLine="2881" />
+		</Cursor>
+	</File>
+	<File name="..\engine\rendermodel.cpp" open="1" top="0" tabpos="10" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="25044" topLine="946" />
+		</Cursor>
+	</File>
+	<File name="..\engine\world.cpp" open="1" top="0" tabpos="22" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="33316" topLine="1100" />
+		</Cursor>
+	</File>
+	<File name="..\shared\igame.h" open="1" top="0" tabpos="15" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="1620" topLine="27" />
+		</Cursor>
+	</File>
+	<File name="..\engine\console.cpp" open="1" top="0" tabpos="12" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="5044" topLine="140" />
+		</Cursor>
+	</File>
+	<File name="..\game\game.cpp" open="1" top="0" tabpos="3" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="21352" topLine="720" />
+		</Cursor>
+	</File>
+	<File name="..\engine\renderparticles.cpp" open="1" top="0" tabpos="21" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="46306" topLine="1411" />
+		</Cursor>
+	</File>
+	<File name="..\shared\iengine.h" open="1" top="0" tabpos="8" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="19505" topLine="433" />
+		</Cursor>
+	</File>
+	<File name="..\engine\client.cpp" open="1" top="0" tabpos="9" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="1882" topLine="50" />
+		</Cursor>
+	</File>
+	<File name="..\game\game.h" open="1" top="0" tabpos="4" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="2159" topLine="55" />
+		</Cursor>
+	</File>
+	<File name="..\engine\main.cpp" open="1" top="0" tabpos="16" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="36729" topLine="1183" />
+		</Cursor>
+	</File>
+	<File name="..\game\scoreboard.cpp" open="1" top="0" tabpos="6" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="4757" topLine="156" />
+		</Cursor>
+	</File>
+	<File name="..\game\waypoint.cpp" open="1" top="0" tabpos="17" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="23856" topLine="663" />
+		</Cursor>
+	</File>
+	<File name="..\game\ai.cpp" open="1" top="0" tabpos="2" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="16021" topLine="479" />
+		</Cursor>
+	</File>
+	<File name="..\engine\bih.cpp" open="1" top="0" tabpos="18" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="11317" topLine="287" />
+		</Cursor>
+	</File>
+	<File name="..\game\render.cpp" open="1" top="0" tabpos="11" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="15120" topLine="412" />
+		</Cursor>
+	</File>
+	<File name="..\game\ctf.h" open="1" top="0" tabpos="13" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="9880" topLine="371" />
+		</Cursor>
+	</File>
+	<File name="..\game\server.cpp" open="1" top="0" tabpos="7" split="0" active="1" splitpos="0" zoom_1="0" zoom_2="0">
+		<Cursor>
+			<Cursor1 position="122342" topLine="3694" />
+		</Cursor>
+	</File>
+</CodeBlocks_layout_file>
