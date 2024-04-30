@@ -812,7 +812,7 @@ namespace game
 
     void drawicon(int icon, float x, float y, float sz)
     {
-        settexture("media/hud/items.png");
+        settexture("packages/hud/items.png");
         float tsz = 0.25f, tx = tsz*(icon%4), ty = tsz*(icon/4);
         gle::defvertex(2);
         gle::deftexcoord0();
@@ -1106,9 +1106,9 @@ namespace game
     {
         switch(index)
         {
-            case 2: return "media/interface/crosshair/default_hit.png";
-            case 1: return "media/interface/crosshair/teammate.png";
-            default: return "media/interface/crosshair/default.png";
+            case 2: return "packages/interface/crosshair/default_hit.png";
+            case 1: return "packages/interface/crosshair/teammate.png";
+            default: return "packages/interface/crosshair/default.png";
         }
     }
 

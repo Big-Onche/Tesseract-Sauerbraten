@@ -553,7 +553,7 @@ struct texticonrenderer : listrenderer
             gle::attrib(p->color, blend);
     }
 };
-static texticonrenderer texticons("media/hud/items.png", PT_TEXTUP|PT_LERP);
+static texticonrenderer texticons("packages/hud/items.png", PT_TEXTUP|PT_LERP);
 
 template<int T>
 static inline void modifyblend(const vec &o, int &blend)
@@ -886,26 +886,26 @@ struct softquadrenderer : quadrenderer
 
 static partrenderer *parts[] =
 {
-    new quadrenderer("<grey>media/particle/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),   // blood spats (note: rgb is inverted)
-    new trailrenderer("media/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
-    new quadrenderer("<grey>media/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
-    new quadrenderer("<grey>media/particle/steam.png", PT_PART|PT_FLIP),                               // steam
-    new quadrenderer("<grey>media/particle/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),           // flame on - no flipping please, they have orientation
-    new quadrenderer("media/particle/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball1
-    new quadrenderer("media/particle/ball2.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball2
-    new quadrenderer("media/particle/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball3
-    new taperenderer("media/particle/flare.jpg", PT_TAPE|PT_BRIGHT),                                   // streak
+    new quadrenderer("<grey>packages/particle/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),   // blood spats (note: rgb is inverted)
+    new trailrenderer("packages/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
+    new quadrenderer("<grey>packages/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
+    new quadrenderer("<grey>packages/particle/steam.png", PT_PART|PT_FLIP),                               // steam
+    new quadrenderer("<grey>packages/particle/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),           // flame on - no flipping please, they have orientation
+    new quadrenderer("packages/particle/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball1
+    new quadrenderer("packages/particle/ball2.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball2
+    new quadrenderer("packages/particle/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball3
+    new taperenderer("packages/particle/flare.jpg", PT_TAPE|PT_BRIGHT),                                   // streak
     &lightnings,                                                                                        // lightning
     &fireballs,                                                                                         // explosion fireball
     &bluefireballs,                                                                                     // bluish explosion fireball
-    new quadrenderer("media/particle/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                           // sparks
-    new quadrenderer("media/particle/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                           // edit mode entities
-    new quadrenderer("<grey>media/particle/snow.png", PT_PART|PT_FLIP|PT_RND4, -1),                    // colliding snow
-    new quadrenderer("media/particle/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("media/particle/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("media/particle/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("media/hud/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
-    new quadrenderer("<colorify:1/1/1>media/hud/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
+    new quadrenderer("packages/particle/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                           // sparks
+    new quadrenderer("packages/particle/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                           // edit mode entities
+    new quadrenderer("<grey>packages/particle/snow.png", PT_PART|PT_FLIP|PT_RND4, -1),                    // colliding snow
+    new quadrenderer("packages/particle/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("packages/particle/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("packages/particle/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
+    new quadrenderer("packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
+    new quadrenderer("<colorify:1/1/1>packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
     &texts,                                                                                             // text
     &texticons,                                                                                         // text icons
     &meters,                                                                                            // meter

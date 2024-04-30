@@ -90,7 +90,7 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
 {
     string name;
     validmapname(name, fname);
-    defformatstring(ogzname, "media/map/%s.ogz", name);
+    defformatstring(ogzname, "packages/map/%s.ogz", name);
     path(ogzname);
     stream *f = opengzfile(ogzname, "rb");
     if(!f) return false;
@@ -207,20 +207,20 @@ void setmapfilenames(const char *fname, const char *cname = NULL)
 {
     string name;
     validmapname(name, fname);
-    formatstring(ogzname, "media/map/%s.ogz", name);
-    formatstring(picname, "media/map/%s.png", name);
-    if(savebak==1) formatstring(bakname, "media/map/%s.BAK", name);
+    formatstring(ogzname, "packages/map/%s.ogz", name);
+    formatstring(picname, "packages/map/%s.png", name);
+    if(savebak==1) formatstring(bakname, "packages/map/%s.BAK", name);
     else
     {
         string baktime;
         time_t t = time(NULL);
         size_t len = strftime(baktime, sizeof(baktime), "%Y-%m-%d_%H.%M.%S", localtime(&t));
         baktime[min(len, sizeof(baktime)-1)] = '\0';
-        formatstring(bakname, "media/map/%s_%s.BAK", name, baktime);
+        formatstring(bakname, "packages/map/%s_%s.BAK", name, baktime);
     }
 
     validmapname(name, cname ? cname : fname);
-    formatstring(cfgname, "media/map/%s.cfg", name);
+    formatstring(cfgname, "packages/map/%s.cfg", name);
 
     path(ogzname);
     path(bakname);
@@ -233,7 +233,7 @@ void mapcfgname()
     const char *mname = game::getclientmap();
     string name;
     validmapname(name, mname);
-    defformatstring(cfgname, "media/map/%s.cfg", name);
+    defformatstring(cfgname, "packages/map/%s.cfg", name);
     path(cfgname);
     result(cfgname);
 }

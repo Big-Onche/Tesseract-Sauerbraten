@@ -278,7 +278,7 @@ void startmusic(char *name, char *cmd)
     stopmusic();
     if(soundvol && musicvol && *name)
     {
-        defformatstring(file, "media/%s", name);
+        defformatstring(file, "packages/%s", name);
         path(file);
         if(loadmusic(file))
         {
@@ -327,14 +327,14 @@ bool soundsample::load(const char *dir, bool msg)
     string filename;
     loopi(sizeof(exts)/sizeof(exts[0]))
     {
-        formatstring(filename, "media/sound/%s%s%s", dir, name, exts[i]);
+        formatstring(filename, "packages/sound/%s%s%s", dir, name, exts[i]);
         if(msg && !i) renderprogress(0, filename);
         path(filename);
         chunk = loadwav(filename);
         if(chunk) return true;
     }
 
-    conoutf(CON_ERROR, "failed to load sample: media/sound/%s%s", dir, name);
+    conoutf(CON_ERROR, "failed to load sample: packages/sound/%s%s", dir, name);
     return false;
 }
 

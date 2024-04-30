@@ -428,7 +428,7 @@ model *loadmodel(const char *name, int i, bool msg)
         if(!name[0] || loadingmodel || failedmodels.find(name, NULL)) return NULL;
         if(msg)
         {
-            defformatstring(filename, "media/model/%s", name);
+            defformatstring(filename, "packages/model/%s", name);
             renderprogress(loadprogress, filename);
         }
         loopi(NUMMODELTYPES)
@@ -1112,8 +1112,8 @@ void loadskin(const char *dir, const char *altdir, Texture *&skin, Texture *&mas
         } \
     }
 
-    defformatstring(mdir, "media/model/%s", dir);
-    defformatstring(maltdir, "media/model/%s", altdir);
+    defformatstring(mdir, "packages/model/%s", dir);
+    defformatstring(maltdir, "packages/model/%s", altdir);
     masks = notexture;
     tryload(skin, NULL, NULL, "skin");
     tryload(masks, NULL, NULL, "masks");
