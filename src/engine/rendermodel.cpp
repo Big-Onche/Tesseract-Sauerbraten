@@ -1124,6 +1124,8 @@ VAR(animoverride, -1, 0, NUMANIMS-1);
 VAR(testanims, 0, 0, 1);
 VAR(testpitch, -90, 0, 90);
 
+#include "game.h"
+
 void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int hold, int attack, int attackdelay, int lastaction, int lastpain, float fade, bool ragdoll)
 {
     int anim = hold ? hold : ANIM_IDLE|ANIM_LOOP;
@@ -1184,7 +1186,8 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     else flags |= MDL_CULL_DIST;
     if(d->state==CS_LAGGED) fade = min(fade, 0.3f);
     if(drawtex == DRAWTEX_MODELPREVIEW) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
-    rendermodel(mdlname, anim, o, yaw, 0, pitch, flags, d, attachments, basetime, 0, fade);
+    bool isplayer1 = d==game::player1 && game::player1->state==CS_ALIVE;
+    rendermodel(mdlname, anim, o, yaw, 0, isplayer1 ? pitch/3.f : pitch, isplayer1 ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
 }
 
 void setbbfrommodel(dynent *d, const char *mdl)
