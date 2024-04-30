@@ -1,3 +1,5 @@
+// serverbrowser.cpp: eihrul's concurrent resolver, and server browser window management
+
 #include "engine.h"
 
 struct resolverthread
@@ -255,11 +257,9 @@ struct pingattempts
 
 };
 
-static int currentprotocol = server::protocolversion();
-
 enum { UNRESOLVED = 0, RESOLVING, RESOLVED };
 
-struct serverinfo : servinfo, pingattempts
+struct serverinfo : pingattempts
 {
     enum
     {
@@ -268,15 +268,18 @@ struct serverinfo : servinfo, pingattempts
         MAXPINGS = 3
     };
 
-    int resolved, lastping, nextping;
+    string name, map, sdesc;
+    int port, numplayers, resolved, ping, lastping, nextping;
     int pings[MAXPINGS];
+    vector<int> attr;
     ENetAddress address;
     bool keep;
     const char *password;
 
     serverinfo()
-     : resolved(UNRESOLVED), keep(false), password(NULL)
+        : port(-1), numplayers(0), resolved(UNRESOLVED), keep(false), password(NULL)
     {
+        name[0] = map[0] = sdesc[0] = '\0';
         clearpings();
         setoffset();
     }
@@ -298,9 +301,8 @@ struct serverinfo : servinfo, pingattempts
     void cleanup()
     {
         clearpings();
-        protocol = -1;
-        numplayers = maxplayers = 0;
         attr.setsize(0);
+        numplayers = 0;
     }
 
     void reset()
@@ -330,24 +332,12 @@ struct serverinfo : servinfo, pingattempts
         calcping();
     }
 
-    const char *status() const
-    {
-        if(address.host == ENET_HOST_ANY) return "[unknown host]";
-        if(ping == WAITING) return "[waiting for response]";
-        if(protocol < currentprotocol) return "[older protocol]";
-        if(protocol > currentprotocol) return "[newer protocol]";
-        return NULL;
-    }
-
-    bool valid() const { return !status(); }
-
     static bool compare(serverinfo *a, serverinfo *b)
     {
-        if(a->protocol == currentprotocol)
-        {
-            if(b->protocol != currentprotocol) return true;
-        }
-        else if(b->protocol == currentprotocol) return false;
+        bool ac = server::servercompatible(a->name, a->sdesc, a->map, a->ping, a->attr, a->numplayers),
+             bc = server::servercompatible(b->name, b->sdesc, b->map, b->ping, b->attr, b->numplayers);
+        if(ac > bc) return true;
+        if(bc > ac) return false;
         if(a->keep > b->keep) return true;
         if(a->keep < b->keep) return false;
         if(a->numplayers < b->numplayers) return false;
@@ -356,10 +346,20 @@ struct serverinfo : servinfo, pingattempts
         if(a->ping < b->ping) return true;
         int cmp = strcmp(a->name, b->name);
         if(cmp != 0) return cmp < 0;
-        if(a->address.port < b->address.port) return true;
-        if(a->address.port > b->address.port) return false;
+        if(a->port < b->port) return true;
+        if(a->port > b->port) return false;
         return false;
     }
+
+    const char *status() const
+    {
+        if(address.host == ENET_HOST_ANY) return "[unknown host]";
+        if(ping == WAITING) return "[waiting for response]";
+        //if(compare(serverinfo *a, serverinfo *b)) return "[older protocol]";
+        return NULL;
+    }
+
+    bool valid() const { return !status(); }
 };
 
 vector<serverinfo *> servers;
@@ -370,9 +370,10 @@ static serverinfo *newserver(const char *name, int port, uint ip = ENET_HOST_ANY
 {
     serverinfo *si = new serverinfo;
     si->address.host = ip;
-    si->address.port = port;
+    si->address.port = server::serverinfoport(port);
     if(ip!=ENET_HOST_ANY) si->resolved = RESOLVED;
 
+    si->port = port;
     if(name) copystring(si->name, name);
     else if(ip==ENET_HOST_ANY || enet_address_get_host_ip(&si->address, si->name, sizeof(si->name)) < 0)
     {
@@ -392,7 +393,7 @@ void addserver(const char *name, int port, const char *password, bool keep)
     loopv(servers)
     {
         serverinfo *s = servers[i];
-        if(strcmp(s->name, name) || s->address.port != port) continue;
+        if(strcmp(s->name, name) || s->port != port) continue;
         if(password && (!s->password || strcmp(s->password, password)))
         {
             DELETEA(s->password);
@@ -417,7 +418,6 @@ pingattempts lanpings;
 template<size_t N> static inline void buildping(ENetBuffer &buf, uchar (&ping)[N], pingattempts &a)
 {
     ucharbuf p(ping, N);
-    p.put(0xFF); p.put(0xFF);
     putint(p, a.addattempt(totalmillis));
     buf.data = ping;
     buf.dataLength = p.length();
@@ -526,21 +526,19 @@ void checkpings()
         else if(!searchlan || !lanpings.checkattempt(millis, false)) continue;
         else
         {
-            si = newserver(NULL, addr.port, addr.host);
+            si = newserver(NULL, server::serverport(addr.port), addr.host);
             millis = lanpings.decodeping(millis);
         }
         int rtt = clamp(totalmillis - millis, 0, min(servpingdecay, totalmillis));
         if(millis >= lastreset && rtt < servpingdecay) si->addping(rtt, millis);
-        si->protocol = getint(p);
         si->numplayers = getint(p);
-        si->maxplayers = getint(p);
         int numattr = getint(p);
         si->attr.setsize(0);
         loopj(numattr) { int attr = getint(p); if(p.overread()) break; si->attr.add(attr); }
         getstring(text, p);
         filtertext(si->map, text, false);
         getstring(text, p);
-        filtertext(si->desc, text, true, true);
+        filtertext(si->sdesc, text, true, true);
     }
 }
 
@@ -587,7 +585,7 @@ ICOMMAND(servinfodesc, "i", (int *i),
     GETSERVERINFO_(*i, si,
     {
         const char *status = si.status();
-        result(status ? status : si.desc);
+        result(status ? status : si.sdesc);
     }));
 ICOMMAND(servinfoname, "i", (int *i), GETSERVERINFO_(*i, si, result(si.name)));
 ICOMMAND(servinfoport, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.address.port)));
@@ -596,55 +594,53 @@ ICOMMAND(servinfokeep, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.keep ? 1 
 ICOMMAND(servinfomap, "i", (int *i), GETSERVERINFO(*i, si, result(si.map)));
 ICOMMAND(servinfoping, "i", (int *i), GETSERVERINFO(*i, si, intret(si.ping)));
 ICOMMAND(servinfonumplayers, "i", (int *i), GETSERVERINFO(*i, si, intret(si.numplayers)));
-ICOMMAND(servinfomaxplayers, "i", (int *i), GETSERVERINFO(*i, si, intret(si.maxplayers)));
+ICOMMAND(servinfomaxplayers, "i", (int *i), GETSERVERINFO(*i, si, intret(si.attr[3]))); // attr[3] = maxplayers
 ICOMMAND(servinfoplayers, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
-        if(si.maxplayers <= 0) intret(si.numplayers);
-        else result(tempformatstring(si.numplayers >= si.maxplayers ? "\f3%d/%d" : "%d/%d", si.numplayers, si.maxplayers));
+        if(si.attr[3] <= 0) intret(si.numplayers);
+        else result(tempformatstring(si.numplayers >= si.attr[3] ? "\f3%d/%d" : "%d/%d", si.numplayers, si.attr[3]));
     }));
 ICOMMAND(servinfoattr, "ii", (int *i, int *n), GETSERVERINFO(*i, si, { if(si.attr.inrange(*n)) intret(si.attr[*n]); }));
-ICOMMAND(servinfomode, "i", (int *i), GETSERVINFOATTR(*i, 0, mode, intret(mode)));
+ICOMMAND(servinfomode, "i", (int *i), /*GETSERVINFOATTR(*i, 0, mode, intret(mode))*/);
 ICOMMAND(servinfomodename, "i", (int *i),
-    GETSERVINFOATTR(*i, 0, mode,
+    GETSERVERINFO(*i, si,
     {
-        const char *name = server::modename(mode, NULL);
+        const char *name = server::modename(si.attr[0], NULL);
         if(name) result(name);
     }));
-ICOMMAND(servinfomastermode, "i", (int *i), GETSERVINFOATTR(*i, 2, mm, intret(mm)));
+ICOMMAND(servinfomastermode, "i", (int *i), /*GETSERVINFOATTR(*i, 2, mm, intret(mm))*/);
 ICOMMAND(servinfomastermodename, "i", (int *i),
-    GETSERVINFOATTR(*i, 2, mm,
-    {
-        const char *name = server::mastermodename(mm, NULL);
-        if(name) stringret(newconcatstring(game::mastermodecolor(mm, ""), name));
-    }));
+//    GETSERVINFOATTR(*i, 2, mm,
+//    {
+//        const char *name = server::mastermodename(mm, NULL);
+//        if(name) stringret(newconcatstring(game::mastermodecolor(mm, ""), name));
+//    })
+);
 ICOMMAND(servinfotime, "ii", (int *i, int *raw),
-    GETSERVINFOATTR(*i, 1, secs,
+    GETSERVERINFO(*i, si,
     {
-        secs = clamp(secs, 0, 59*60+59);
-        if(*raw) intret(secs);
-        else
+        if(si.attr.length()>=3 && si.attr[2] > 0)
         {
-            int mins = secs/60;
-            secs %= 60;
-            result(tempformatstring("%d:%02d", mins, secs));
+            int secs = clamp(si.attr[2], 0, 59*60+59);
+            if(*raw) intret(secs);
+            else
+            {
+                int mins = secs/60;
+                secs %= 60;
+                result(tempformatstring("%d:%02d", mins, secs));
+            }
         }
     }
     ));
 ICOMMAND(servinfoicon, "i", (int *i),
-    GETSERVINFO(*i, si,
+    GETSERVERINFO(*i, si,
     {
-        int mm = si->attr.inrange(2) ? si->attr[2] : MM_INVALID;
-        result(si->maxplayers > 0 && si->numplayers >= si->maxplayers ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
+        int mm = si.attr.inrange(2) ? si.attr[2] : MM_INVALID;
+        result(si.attr[3] > 0 && si.numplayers >= si.attr[3] ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
     }
     ));
-
 ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port, pw[0] ? pw : si.password)));
-
-servinfo *getservinfo(int i)
-{
-    return servers.inrange(i) && servers[i]->valid() ? servers[i] : NULL;
-}
 
 void clearservers(bool full = false)
 {
@@ -768,8 +764,8 @@ void writeservercfg()
         if(s->keep)
         {
             if(!kept) f->printf("// servers that should never be cleared from the server list\n\n");
-            if(s->password) f->printf("keepserver %s %d %s\n", escapeid(s->name), s->address.port, escapestring(s->password));
-            else f->printf("keepserver %s %d\n", escapeid(s->name), s->address.port);
+            if(s->password) f->printf("keepserver %s %d %s\n", escapeid(s->name), s->port, escapestring(s->password));
+            else f->printf("keepserver %s %d\n", escapeid(s->name), s->port);
             kept++;
         }
     }
@@ -780,8 +776,8 @@ void writeservercfg()
         serverinfo *s = servers[i];
         if(!s->keep)
         {
-            if(s->password) f->printf("addserver %s %d %s\n", escapeid(s->name), s->address.port, escapestring(s->password));
-            else f->printf("addserver %s %d\n", escapeid(s->name), s->address.port);
+            if(s->password) f->printf("addserver %s %d %s\n", escapeid(s->name), s->port, escapestring(s->password));
+            else f->printf("addserver %s %d\n", escapeid(s->name), s->port);
         }
     }
     delete f;
