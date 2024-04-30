@@ -652,7 +652,7 @@ struct ctfclientmode : clientmode
 
     vec interpflagpos(flag &f) { float angle; return interpflagpos(f, angle); }
 
-    void rendergame()
+        void rendergame()
     {
         loopv(flags)
         {
@@ -663,11 +663,14 @@ struct ctfclientmode : clientmode
             float angle;
             vec pos = interpflagpos(f, angle);
             if(m_hold)
-            {
-                const int animFlags = ANIM_MAPMODEL|ANIM_LOOP;
-                rendermodel(flagname, animFlags, pos, angle, 0, 0, MDL_CULL_VFC, NULL, NULL, 0, 0, 0.5f + 0.5f*(2*fabs(fmod(lastmillis/1000.0f, 1.0f) - 0.5f)));
-                rendermodel(flagname, animFlags, pos, angle, 0, 0,  MDL_CULL_VFC | MDL_CULL_OCCLUDED, NULL, NULL, 0, 0, 0.3f + (f.vistime ? 0.7f*min((lastmillis - f.vistime)/1000.0f, 1.0f) : 0.0f));
-            }
+                rendermodel(flagname, ANIM_MAPMODEL|ANIM_LOOP,
+                        pos, angle, 0, 0,
+                        MDL_CULL_VFC,
+                        NULL, NULL, 0, 0, 0.5f + 0.5f*(2*fabs(fmod(lastmillis/1000.0f, 1.0f) - 0.5f)), vec4(0.5f, 0.5f, 0.5f, 0.5f));
+            rendermodel(flagname, ANIM_MAPMODEL|ANIM_LOOP,
+                        pos, angle, 0, 0,
+                        MDL_CULL_VFC | MDL_CULL_OCCLUDED,
+                        NULL, NULL, 0, 0, 0.3f + (f.vistime ? 0.7f*min((lastmillis - f.vistime)/1000.0f, 1.0f) : 0.0f));
 
             if(m_hold && canaddparticles() && f.team && f.holdtime)
             {
