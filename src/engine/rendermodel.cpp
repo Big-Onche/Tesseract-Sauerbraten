@@ -436,7 +436,7 @@ model *loadmodel(const char *name, int i, bool msg)
             m = modeltypes[i](name);
             if(!m) continue;
             loadingmodel = m;
-            if(m->load()) break;
+            if(m->load()) { loadingmodel->scale /= 4.f; break; } // a bad way to change tesseract's model scale for sauerbraten port
             DELETEP(m);
         }
         loadingmodel = NULL;
