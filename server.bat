@@ -9,4 +9,4 @@ IF /I "%PROCESSOR_ARCHITEW6432%" == "amd64" (
     set TESS_BIN=bin64
 )
 
-start %TESS_BIN%\tesseract.exe "-u$HOME\My Games\Tesseract" -gserver-log.txt -d %*
+start %TESS_BIN%\tesseract.exe "-u$HOME\My Games\Sauerract" -gserver-log.txt -d %*
