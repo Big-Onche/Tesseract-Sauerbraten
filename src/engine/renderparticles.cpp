@@ -553,7 +553,7 @@ struct texticonrenderer : listrenderer
             gle::attrib(p->color, blend);
     }
 };
-static texticonrenderer texticons("packages/hud/items.png", PT_TEXTUP|PT_LERP);
+static texticonrenderer texticons("packages/interface/items.png", PT_TEXTUP|PT_LERP);
 
 template<int T>
 static inline void modifyblend(const vec &o, int &blend)
@@ -904,8 +904,8 @@ static partrenderer *parts[] =
     new quadrenderer("packages/particle/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
     new quadrenderer("packages/particle/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
     new quadrenderer("packages/particle/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
-    new quadrenderer("<colorify:1/1/1>packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
+    new quadrenderer("packages/interface/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
+    new quadrenderer("<colorify:1/1/1>packages/interface/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
     &texts,                                                                                             // text
     &texticons,                                                                                         // text icons
     &meters,                                                                                            // meter
