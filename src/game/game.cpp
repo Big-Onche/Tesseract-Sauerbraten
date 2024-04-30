@@ -1182,41 +1182,6 @@ namespace game
         return (n>=MM_START && size_t(n-MM_START)<sizeof(mastermodeicons)/sizeof(mastermodeicons[0])) ? mastermodeicons[n-MM_START] : unknown;
     }
 
-    //ICOMMAND(servinfomode, "i", (int *i), GETSERVINFOATTR(*i, 0, mode, intret(mode)));
-    //ICOMMAND(servinfomodename, "i", (int *i),
-        //GETSERVINFOATTR(*i, 0, mode,
-        //{
-        //    const char *name = server::modeprettyname(mode, NULL);
-        //    if(name) result(name);
-        //}));
-    //ICOMMAND(servinfomastermode, "i", (int *i), GETSERVINFOATTR(*i, 2, mm, intret(mm)));
-    //ICOMMAND(servinfomastermodename, "i", (int *i),
-        //GETSERVINFOATTR(*i, 2, mm,
-        //{
-        //    const char *name = server::mastermodename(mm, NULL);
-        //    if(name) stringret(newconcatstring(mastermodecolor(mm, ""), name));
-        //}));
-    //ICOMMAND(servinfotime, "ii", (int *i, int *raw),
-        //GETSERVINFOATTR(*i, 1, secs,
-        //{
-        //    secs = clamp(secs, 0, 59*60+59);
-        //    if(*raw) intret(secs);
-        //    else
-        //    {
-        //        int mins = secs/60;
-        //        secs %= 60;
-        //        result(tempformatstring("%d:%02d", mins, secs));
-        //    }
-        //}
-    //));
-    //ICOMMAND(servinfoicon, "i", (int *i),
-        //GETSERVINFO(*i, si,
-        //{
-        //    int mm = si->attr.inrange(2) ? si->attr[2] : MM_INVALID;
-        //    result(si->maxplayers > 0 && si->numplayers >= si->maxplayers ? "serverfull" : mastermodeicon(mm, "serverunk"));
-        //}
-    //));
-
     // any data written into this vector will get saved with the map data. Must take care to do own versioning, and endianess if applicable. Will not get called when loading maps from other games, so provide defaults.
     void writegamedata(vector<char> &extras) {}
     void readgamedata(vector<char> &extras) {}

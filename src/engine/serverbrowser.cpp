@@ -580,6 +580,8 @@ ICOMMAND(numservers, "", (), intret(servers.length()))
     }
 #define GETSERVERINFO(idx, si, body) GETSERVERINFO_(idx, si, if(si.valid()) { body; })
 
+#include "game.h"
+
 ICOMMAND(servinfovalid, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.valid() ? 1 : 0)));
 ICOMMAND(servinfodesc, "i", (int *i),
     GETSERVERINFO_(*i, si,
@@ -602,6 +604,40 @@ ICOMMAND(servinfoplayers, "i", (int *i),
         else result(tempformatstring(si.numplayers >= si.maxplayers ? "\f3%d/%d" : "%d/%d", si.numplayers, si.maxplayers));
     }));
 ICOMMAND(servinfoattr, "ii", (int *i, int *n), GETSERVERINFO(*i, si, { if(si.attr.inrange(*n)) intret(si.attr[*n]); }));
+ICOMMAND(servinfomode, "i", (int *i), GETSERVINFOATTR(*i, 0, mode, intret(mode)));
+ICOMMAND(servinfomodename, "i", (int *i),
+    GETSERVINFOATTR(*i, 0, mode,
+    {
+        const char *name = server::modename(mode, NULL);
+        if(name) result(name);
+    }));
+ICOMMAND(servinfomastermode, "i", (int *i), GETSERVINFOATTR(*i, 2, mm, intret(mm)));
+ICOMMAND(servinfomastermodename, "i", (int *i),
+    GETSERVINFOATTR(*i, 2, mm,
+    {
+        const char *name = server::mastermodename(mm, NULL);
+        if(name) stringret(newconcatstring(game::mastermodecolor(mm, ""), name));
+    }));
+ICOMMAND(servinfotime, "ii", (int *i, int *raw),
+    GETSERVINFOATTR(*i, 1, secs,
+    {
+        secs = clamp(secs, 0, 59*60+59);
+        if(*raw) intret(secs);
+        else
+        {
+            int mins = secs/60;
+            secs %= 60;
+            result(tempformatstring("%d:%02d", mins, secs));
+        }
+    }
+    ));
+ICOMMAND(servinfoicon, "i", (int *i),
+    GETSERVINFO(*i, si,
+    {
+        int mm = si->attr.inrange(2) ? si->attr[2] : MM_INVALID;
+        result(si->maxplayers > 0 && si->numplayers >= si->maxplayers ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
+    }
+    ));
 
 ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port, pw[0] ? pw : si.password)));
 
