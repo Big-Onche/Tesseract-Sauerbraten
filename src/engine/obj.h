@@ -167,11 +167,11 @@ struct obj : vertloader<obj>
     {
         part &mdl = addpart();
         const char *pname = parentdir(name);
-        defformatstring(name1, "packages/model/%s/tris.obj", name);
+        defformatstring(name1, "packages/models/%s/tris.obj", name);
         mdl.meshes = sharemeshes(path(name1));
         if(!mdl.meshes)
         {
-            defformatstring(name2, "packages/model/%s/tris.obj", pname);    // try obj in parent folder (vert sharing)
+            defformatstring(name2, "packages/models/%s/tris.obj", pname);    // try obj in parent folder (vert sharing)
             mdl.meshes = sharemeshes(path(name2));
             if(!mdl.meshes) return false;
         }
