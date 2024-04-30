@@ -69,7 +69,7 @@ enum
     MATSURF_EDIT_ONLY
 };
 
-#define TEX_SCALE 16.0f
+#define TEX_SCALE 8.0f
 
 struct vertex { vec pos; bvec4 norm; vec tc; bvec4 tangent; };
 
