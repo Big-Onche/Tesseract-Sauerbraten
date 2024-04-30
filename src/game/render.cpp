@@ -425,10 +425,10 @@ namespace game
 #endif
         const playermodelinfo &mdl = getplayermodelinfo(d);
         defformatstring(gunname, "%s/%s", hudgunsdir[0] ? hudgunsdir : mdl.hudguns, guns[d->gunselect].file);
-
-        if((m_teammode || teamskins) && teamhudguns) concatstring(gunname, d==player1 || isteam(d->team, player1->team) ? "/blue" : "/red");
-        else if(testteam > 1) concatstring(gunname, testteam==2 ? "/blue" : "/red");
-
+        if((m_teammode || teamskins) && teamhudguns)
+            concatstring(gunname, d==player1 || isteam(d->team, player1->team) ? "/blue" : "/red");
+        else if(testteam > 1)
+            concatstring(gunname, testteam==2 ? "/blue" : "/red");
         modelattach a[2];
         d->muzzle = vec(-1, -1, -1);
         a[0] = modelattach("tag_muzzle", &d->muzzle);
@@ -439,7 +439,7 @@ namespace game
             base = 0;
             interp = &guninterp;
         }
-        rendermodel(gunname, anim, sway, d->yaw, d->pitch, 0, MDL_NOBATCH, interp, a, base, (int)ceil(speed));
+        rendermodel(gunname, anim, sway, d->yaw+90, 0, d->pitch, MDL_NOBATCH, interp, a, base, (int)ceil(speed));
         if(d->muzzle.x >= 0) d->muzzle = calcavatarpos(d->muzzle, 12);
     }
 
