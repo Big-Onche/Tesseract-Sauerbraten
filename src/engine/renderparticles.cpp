@@ -886,7 +886,7 @@ struct softquadrenderer : quadrenderer
 
 static partrenderer *parts[] =
 {
-    new quadrenderer("<grey>packages/particle/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),   // blood spats (note: rgb is inverted)
+    new quadrenderer("<grey>packages/stain/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),      // blood spats (note: rgb is inverted)
     new trailrenderer("packages/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
     new quadrenderer("<grey>packages/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
     new quadrenderer("<grey>packages/particle/steam.png", PT_PART|PT_FLIP),                               // steam

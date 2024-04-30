@@ -256,7 +256,7 @@ namespace game
                     int qdam = guns[GUN_GL].damage*(bnc.owner->quadmillis ? 4 : 1);
                     hits.setsize(0);
                     explode(bnc.local, bnc.owner, bnc.o, NULL, qdam, GUN_GL);
-                    addstain(STAIN_PULSE_SCORCH, bnc.o, vec(0, 0, 1), guns[GUN_GL].exprad/2);
+                    addstain(STAIN_SCORCH, bnc.o, vec(0, 0, 1), guns[GUN_GL].exprad/2);
                     if(bnc.local)
                         addmsg(N_EXPLODE, "rci3iv", bnc.owner, lastmillis-maptime, GUN_GL, bnc.id-maptime,
                                 hits.length(), hits.length()*sizeof(hitmsg)/sizeof(int), hits.getbuf());
@@ -460,7 +460,7 @@ namespace game
         else
         {
             explode(p.local, p.owner, v, safe, damage, GUN_RL);
-            addstain(STAIN_PULSE_SCORCH, v, vec(p.dir).neg(), guns[p.gun].exprad/2);
+            addstain(STAIN_SCORCH, v, vec(p.dir).neg(), guns[p.gun].exprad/2);
         }
     }
 
@@ -478,7 +478,7 @@ namespace game
                         vec pos(p.o);
                         pos.add(vec(p.offset).mul(p.offsetmillis/float(OFFSETMILLIS)));
                         explode(p.local, p.owner, pos, NULL, 0, GUN_RL);
-                        addstain(STAIN_PULSE_SCORCH, pos, vec(p.dir).neg(), guns[gun].exprad/2);
+                        addstain(STAIN_SCORCH, pos, vec(p.dir).neg(), guns[gun].exprad/2);
                         projs.remove(i);
                         break;
                     }
@@ -492,7 +492,7 @@ namespace game
                     {
                         vec pos = b.offsetpos();
                         explode(b.local, b.owner, pos, NULL, 0, GUN_GL);
-                        addstain(STAIN_PULSE_SCORCH, pos, vec(0, 0, 1), guns[gun].exprad/2);
+                        addstain(STAIN_SCORCH, pos, vec(0, 0, 1), guns[gun].exprad/2);
                         delete bouncers.remove(i);
                         break;
                     }
@@ -601,7 +601,7 @@ namespace game
                 {
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
-                    if(!local) addstain(STAIN_RAIL_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
+                    if(!local) addstain(STAIN_BULLET_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
                 }
                 if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
                 break;
@@ -614,7 +614,7 @@ namespace game
                 particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, 0xFFC864, 0.28f);
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, gun==GUN_CG ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, gun==GUN_CG ? 2.25f : 1.25f, d);
-                if(!local) addstain(STAIN_RAIL_HOLE, to, vec(from).sub(to).safenormalize(), 2.0f);
+                if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 2.0f);
                 if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), gun==GUN_CG ? 30 : 15, vec(0.5f, 0.375f, 0.25f), gun==GUN_CG ? 50 : 100, gun==GUN_CG ? 50 : 100, DL_FLASH, 0, vec(0, 0, 0), d);
                 break;
             }
@@ -647,7 +647,7 @@ namespace game
                 particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, 0x404040, 0.6f, 20);
                 if(muzzleflash && d->muzzle.x >= 0)
                     particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
-                if(!local) addstain(STAIN_RAIL_HOLE, to, vec(from).sub(to).safenormalize(), 3.0f);
+                if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 3.0f);
                 if(muzzlelight) adddynlight(hudgunorigin(gun, d->o, to, d), 25, vec(0.5f, 0.375f, 0.25f), 75, 75, DL_FLASH, 0, vec(0, 0, 0), d);
                 break;
         }
@@ -743,7 +743,7 @@ namespace game
             loopi(maxrays)
             {
                 if((hits[i] = intersectclosest(from, rays[i], d, dist))) shorten(from, rays[i], dist);
-                else addstain(STAIN_RAIL_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
+                else addstain(STAIN_BULLET_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
             }
             loopi(maxrays) if(hits[i])
             {
@@ -763,7 +763,7 @@ namespace game
             shorten(from, to, dist);
             hitpush(qdam, o, d, from, to, d->gunselect, 1);
         }
-        else if(d->gunselect!=GUN_FIST && d->gunselect!=GUN_BITE) addstain(STAIN_RAIL_HOLE, to, vec(from).sub(to).safenormalize(), d->gunselect==GUN_RIFLE ? 3.0f : 2.0f);
+        else if(d->gunselect!=GUN_FIST && d->gunselect!=GUN_BITE) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), d->gunselect==GUN_RIFLE ? 3.0f : 2.0f);
     }
 
     void shoot(fpsent *d, const vec &targ)
