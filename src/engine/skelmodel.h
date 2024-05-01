@@ -1664,7 +1664,7 @@ template<class MDL> struct skelcommands : modelcommands<MDL, struct MDL::skelmes
         if(!mdl.meshes) conoutf(CON_ERROR, "could not load %s", filename);
         else
         {
-            if(mdl.meshes && ((meshgroup *)mdl.meshes)->skel->numbones > 0) mdl.disablepitch();  
+            if(mdl.meshes && ((meshgroup *)mdl.meshes)->skel->numbones > 0) mdl.disablepitch();
             mdl.initanimparts();
             mdl.initskins();
         }

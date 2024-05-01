@@ -100,8 +100,6 @@ namespace game
         return x->team && y->team && strcmp(x->team, y->team) < 0;
     }
 
-    //static vector<fpsent *> teamplayers[1+MAXTEAMS], spectators;
-
     static int groupplayers()
     {
         int numgroups = 0;
@@ -237,12 +235,12 @@ namespace game
     }
 
     COMMAND(refreshscoreboard, "");
-    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= MAXTEAMS ? players.length() : 0)));
+    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groupplayers() ? groups[*team-1]->players.length() : 0)));
     ICOMMAND(loopscoreboard, "rie", (ident *id, int *team, uint *body),
     {
-        if(*team > MAXTEAMS) return;
+        if(*team > groupplayers()) return;
         loopstart(id, stack);
-        vector<fpsent *> &p = *team < 0 ? spectators : players;
+        vector<fpsent *> &p = *team < 0 ? spectators : groups[m_teammode ? *team-1 : 0]->players;
         loopv(p)
         {
             loopiter(id, stack, p[i]->clientnum);
@@ -386,8 +384,6 @@ namespace game
             if(sg.score>=10000) formatstring(s, "%s: WIN", sg.team);
             else formatstring(s, "%s: %d", sg.team, sg.score);
             result(s);
-            //if(cmode && cmode->hidefrags()) intret(cmode->getteamscore(*team == 2 ? "evil" : "good"));
-            //else intret(teaminfos[*team-1].frags);
         }
     });
 
