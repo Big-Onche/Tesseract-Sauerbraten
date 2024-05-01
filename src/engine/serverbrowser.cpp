@@ -588,7 +588,7 @@ ICOMMAND(servinfodesc, "i", (int *i),
         result(status ? status : si.sdesc);
     }));
 ICOMMAND(servinfoname, "i", (int *i), GETSERVERINFO_(*i, si, result(si.name)));
-ICOMMAND(servinfoport, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.address.port)));
+ICOMMAND(servinfoport, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.address.port - 1)));
 ICOMMAND(servinfohaspassword, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.password && si.password[0] ? 1 : 0)));
 ICOMMAND(servinfokeep, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.keep ? 1 : 0)));
 ICOMMAND(servinfomap, "i", (int *i), GETSERVERINFO(*i, si, result(si.map)));
@@ -640,7 +640,7 @@ ICOMMAND(servinfoicon, "i", (int *i),
         result(si.attr[3] > 0 && si.numplayers >= si.attr[3] ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
     }
     ));
-ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port, pw[0] ? pw : si.password)));
+ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port - 1, pw[0] ? pw : si.password)));
 
 void clearservers(bool full = false)
 {
