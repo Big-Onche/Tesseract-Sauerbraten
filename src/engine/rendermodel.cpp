@@ -155,8 +155,8 @@ void mdlspin(float *yaw, float *pitch, float *roll)
 {
     checkmdl;
     loadingmodel->spinyaw = *yaw;
-    loadingmodel->spinpitch = *pitch;
-    loadingmodel->spinroll = *roll;
+    loadingmodel->spinpitch = *roll;
+    loadingmodel->spinroll = *pitch;
 }
 COMMAND(mdlspin, "fff");
 
