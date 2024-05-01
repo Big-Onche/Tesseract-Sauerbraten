@@ -264,7 +264,7 @@ namespace entities
             {
                 teleporteffects(d, n, e, true);
                 d->o = ents[e]->o;
-                d->yaw = ents[e]->attr1;
+                d->yaw = ents[e]->attr1 + 180; // another bad way to fix things :)
                 if(ents[e]->attr3 > 0)
                 {
                     vec dir;
