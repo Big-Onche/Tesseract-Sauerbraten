@@ -256,7 +256,6 @@ namespace aiman
         sendservmsg(msg);
     }
 
-
     void changemap()
     {
         dorefresh = true;

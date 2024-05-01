@@ -190,8 +190,7 @@ namespace game
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis)
         {
-            entitylight light;
-            rendermodel("quadrings", ANIM_MAPMODEL|ANIM_LOOP, vec(d->o).sub(vec(0, 0, d->eyeheight/2)), 360*lastmillis/1000.0f, 0, MDL_DYNSHADOW | MDL_CULL_VFC | MDL_CULL_DIST);
+            rendermodel("quadrings", ANIM_MAPMODEL|ANIM_LOOP, vec(d->o).sub(vec(0, 0, d->eyeheight/2)), 360*lastmillis/1000.0f, 0, 0, MDL_DYNSHADOW | MDL_CULL_VFC | MDL_CULL_DIST);
         }
 #endif
     }

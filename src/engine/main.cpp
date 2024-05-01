@@ -1206,7 +1206,7 @@ int main(int argc, char **argv)
     initing = INIT_LOAD;
     execfile("config/keymap.cfg");
     execfile("config/stdedit.cfg");
-    execfile(game::savedconfig());
+    execfile(game::gameconfig());
     execfile("config/sound.cfg");
     execfile("config/ui.cfg");
     execfile("config/heightmap.cfg");

@@ -278,27 +278,6 @@ namespace game
         player1->suicided = player1->respawned = -2;
     }
 
-    const char *getclientname(int cn)
-    {
-        fpsent *d = getclient(cn);
-        return d ? d->name : "";
-    }
-    ICOMMAND(getclientname, "i", (int *cn), result(getclientname(*cn)));
-
-    const char *getclientteam(int cn)
-    {
-        fpsent *d = getclient(cn);
-        return d ? d->team : "";
-    }
-    ICOMMAND(getclientteam, "i", (int *cn), result(getclientteam(*cn)));
-
-    int getclientmodel(int cn)
-    {
-        fpsent *d = getclient(cn);
-        return d ? d->playermodel : -1;
-    }
-    ICOMMAND(getclientmodel, "i", (int *cn), intret(getclientmodel(*cn)));
-
     const char *getclienticon(int cn)
     {
         fpsent *d = getclient(cn);
@@ -330,7 +309,7 @@ namespace game
     ICOMMAND(isadmin, "i", (int *cn), intret(isadmin(*cn) ? 1 : 0));
 
     ICOMMAND(getmastermode, "", (), intret(mastermode));
-    ICOMMAND(mastermodename, "i", (int *mm), result(server::mastermodename(*mm, "")));
+    ICOMMAND(getmastermodename, "i", (int *mm), result(server::mastermodename(*mm, "")));
 
     bool isspectator(int cn)
     {
@@ -541,6 +520,9 @@ namespace game
     }
     ICOMMAND(mode, "i", (int *val), setmode(*val));
     ICOMMAND(getmode, "", (), intret(gamemode));
+    ICOMMAND(getnextmode, "", (), intret(m_valid(nextmode) ? nextmode : (remote ? 1 : 0)));
+    ICOMMAND(getmodename, "i", (int *mode), result(server::modename(*mode, "")));
+    ICOMMAND(getmodeprettyname, "i", (int *mode), result(server::modename(*mode, ""))); // TODO
     ICOMMAND(timeremaining, "i", (int *formatted),
     {
         int val = max(maplimit - lastmillis + 999, 0)/1000;
@@ -551,6 +533,8 @@ namespace game
         }
         else intret(val);
     });
+    ICOMMAND(intermission, "", (), intret(intermission ? 1 : 0));
+
     ICOMMANDS("m_noitems", "i", (int *mode), { int gamemode = *mode; intret(m_noitems); });
     ICOMMANDS("m_noammo", "i", (int *mode), { int gamemode = *mode; intret(m_noammo); });
     ICOMMANDS("m_insta", "i", (int *mode), { int gamemode = *mode; intret(m_insta); });
@@ -569,6 +553,7 @@ namespace game
     ICOMMANDS("m_sp", "i", (int *mode), { int gamemode = *mode; intret(m_sp); });
     ICOMMANDS("m_dmsp", "i", (int *mode), { int gamemode = *mode; intret(m_dmsp); });
     ICOMMANDS("m_classicsp", "i", (int *mode), { int gamemode = *mode; intret(m_classicsp); });
+    ICOMMANDS("m_timed", "i", (int *mode), { int gamemode = *mode; intret(m_timed); });
 
     void changemap(const char *name, int mode) // request map change, server may ignore
     {
