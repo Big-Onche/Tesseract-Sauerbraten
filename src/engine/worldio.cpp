@@ -208,7 +208,7 @@ void setmapfilenames(const char *fname, const char *cname = NULL)
     string name;
     validmapname(name, fname);
     formatstring(ogzname, "packages/map/%s.ogz", name);
-    formatstring(picname, "packages/map/%s.png", name);
+    formatstring(picname, "packages/map/%s.jpg", name);
     if(savebak==1) formatstring(bakname, "packages/map/%s.BAK", name);
     else
     {

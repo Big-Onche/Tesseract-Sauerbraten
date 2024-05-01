@@ -219,6 +219,8 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
             resethudshader();
             glBindTexture(GL_TEXTURE_2D, mapshot->id);
             bgquad(x, y, sz, sz);
+            settexture("packages/interface/guioverlay.png", 3);
+            bgquad(x, y, sz, sz);
         }
         if(mapname)
         {
@@ -659,7 +661,7 @@ void resetgl()
        !reloadtexture("<premul>packages/interface/logo_1024.png") ||
        !reloadtexture("packages/interface/background.png") ||
        !reloadtexture("packages/interface/shadow.png") ||
-       !reloadtexture("packages/interface/mapshot_frame.png") ||
+       !reloadtexture("packages/interface/guioverlay.png") ||
        !reloadtexture("packages/interface/loading_frame.png") ||
        !reloadtexture("packages/interface/loading_bar.png"))
         fatal("failed to reload core texture");
