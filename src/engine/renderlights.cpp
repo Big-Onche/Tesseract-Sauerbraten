@@ -3591,6 +3591,16 @@ void collectlights()
     {
         const extentity *e = ents[i];
         if(e->type != ET_LIGHT || e->attr1 <= 0) continue;
+        if(e->attr1 > 1250)
+        {   // skip large lights to avoid lighting bugs and lags. They are used mostly for sunlight, if so, a true sunlight is defined in the map's config file
+            static bool warned = false;
+            if(!warned)
+            {
+                conoutf(CON_WARN, "Warning: Ignoring light at %f, %f, %f (radius > 1250 (%d))", e->o.x, e->o.y, e->o.z, e->attr1);
+                warned = true;
+            }
+            return;
+        }
 
         if(smviscull)
         {
