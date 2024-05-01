@@ -2405,6 +2405,7 @@ void texgrass(char *name)
     s.grass = name[0] ? newstring(makerelpath("packages/texture", name)) : NULL;
 }
 COMMAND(texgrass, "s");
+ICOMMAND(autograss, "s", (char *name), texgrass(name));
 
 void texscroll(float *scrollS, float *scrollT)
 {

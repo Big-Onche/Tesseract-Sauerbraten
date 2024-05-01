@@ -96,6 +96,10 @@ void mdlgloss(int *gloss)
 }
 COMMAND(mdlgloss, "i");
 
+// mdlglare to mdlgloss
+ICOMMAND(mdlglare, "i", (int *i), mdlgloss(i));
+ICOMMAND(md5glare, "i", (int *i), mdlgloss(i));
+
 void mdlalphatest(float *cutoff)
 {
     checkmdl;
@@ -228,6 +232,11 @@ void mdlname()
     result(loadingmodel->name);
 }
 COMMAND(mdlname, "");
+
+// dummy vars to calm down errors messages when loading Sauer's models
+VAR(mdlalphadepth, -INT_MAX, 0, INT_MAX);
+VAR(mdlalphablend, -INT_MAX, 0, INT_MAX);
+VAR(mdlambient, -INT_MAX, 0, INT_MAX);
 
 #define checkragdoll \
     checkmdl; \
@@ -1185,8 +1194,8 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     else flags |= MDL_CULL_DIST;
     if(d->state==CS_LAGGED) fade = min(fade, 0.3f);
     if(drawtex == DRAWTEX_MODELPREVIEW) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
-    bool isplayer1 = d==game::player1 && game::player1->state==CS_ALIVE;
-    rendermodel(mdlname, anim, o, yaw, 0, isplayer1 ? pitch/3.f : pitch, isplayer1 ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
+    bool onlyshadow = (d==game::hudplayer() && game::hudplayer()->state==CS_ALIVE) || editmode;
+    rendermodel(mdlname, anim, o, yaw, 0, onlyshadow ? pitch/3.f : pitch, onlyshadow ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
 }
 
 void setbbfrommodel(dynent *d, const char *mdl)
