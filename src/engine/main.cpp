@@ -153,7 +153,10 @@ void bgquad(float x, float y, float w, float h, float tx = 0, float ty = 0, floa
 void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, const char *mapname, const char *mapinfo)
 {
     static int lastupdate = -1, lastw = -1, lasth = -1;
-    static float backgroundu = 0, backgroundv = 0;
+    static float backgroundu = 0, backgroundv = 0, detailu = 0, detailv = 0;
+    static int numdecals = 0;
+    static struct decal { float x, y, size; int side; } decals[12];
+
     if((renderedframe && !mainmenu && lastupdate != lastmillis) || lastw != w || lasth != h)
     {
         lastupdate = lastmillis;
@@ -162,6 +165,15 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
 
         backgroundu = rndscale(1);
         backgroundv = rndscale(1);
+
+        numdecals = sizeof(decals)/sizeof(decals[0]);
+        numdecals = numdecals/3 + rnd((numdecals*2)/3 + 1);
+        float maxsize = min(w, h)/16.0f;
+        loopi(numdecals)
+        {
+            decal d = { rndscale(w), rndscale(h), maxsize/2 + rndscale(maxsize/2), rnd(2) };
+            decals[i] = d;
+        }
     }
     else if(lastupdate != lastmillis) lastupdate = lastmillis;
 
@@ -173,11 +185,24 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
     gle::deftexcoord0();
 
     settexture("packages/interface/background.png", 0);
-    float bu = w*0.67f/256.0f, bv = h*0.67f/256.0f;
-    bgquad(0, 0, w, h, backgroundu, backgroundv, bu, bv);
-
-    glEnable(GL_BLEND);
+    float bu = w*0.67f/256.0f + backgroundu, bv = h*0.67f/256.0f + backgroundv;
+    bgquad(0, 0, w, h, 0, 0, bu, bv);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_BLEND);
+    settexture("packages/interface/background_detail.png", 0);
+    float du = w*0.8f/512.0f + detailu, dv = h*0.8f/512.0f + detailv;
+    bgquad(0, 0, w, h, 0, 0, du, dv);
+    settexture("packages/interface/background_decal.png", 3);
+    gle::begin(GL_QUADS);
+    loopj(numdecals)
+    {
+        float hsz = decals[j].size, hx = clamp(decals[j].x, hsz, w-hsz), hy = clamp(decals[j].y, hsz, h-hsz), side = decals[j].side;
+        gle::attribf(hx-hsz, hy-hsz); gle::attribf(side,   0);
+        gle::attribf(hx+hsz, hy-hsz); gle::attribf(1-side, 0);
+        gle::attribf(hx+hsz, hy+hsz); gle::attribf(1-side, 1);
+        gle::attribf(hx-hsz, hy+hsz); gle::attribf(side,   1);
+    }
+    gle::end();
 
     settexture("packages/interface/shadow.png", 3);
     bgquad(0, 0, w, h);
