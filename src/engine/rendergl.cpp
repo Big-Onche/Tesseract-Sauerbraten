@@ -1914,7 +1914,7 @@ static void blendfog(int fogmat, float below, float blend, float logblend, float
 
         default:
             fogc.add(fogcolour.tocolor().mul(blend));
-            start += logblend*(fog+64)/8;
+            start += logblend*(fog+64)/4;
             end += logblend*fog;
             break;
     }
