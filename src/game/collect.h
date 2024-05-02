@@ -430,7 +430,7 @@ struct collectclientmode : clientmode
     void drawbaseblip(fpsent *d, float x, float y, float s, int i)
     {
         base &b = bases[i];
-        settexture(b.team==collectteambase(player1->team) ? "media/hud/blip_blue.png" : "media/hud/blip_red.png", 3);
+        settexture(b.team==collectteambase(player1->team) ? "packages/interface/blip_blue.png" : "packages/interface/blip_red.png", 3);
         drawblip(d, x, y, s, b.o);
     }
 
@@ -460,10 +460,10 @@ struct collectclientmode : clientmode
         if(minimapalpha >= 1) glEnable(GL_BLEND);
         gle::colorf(1, 1, 1);
         float margin = 0.04f, roffset = s*margin, rsize = s + 2*roffset;
-        settexture("media/hud/radar.png", 3);
+        settexture("packages/interface/radar.png", 3);
         drawradar(x - roffset, y - roffset, rsize);
         #if 0
-        settexture("media/hud/compass.png", 3);
+        settexture("packages/interface/compass.png", 3);
         pushhudmatrix();
         hudmatrix.translate(x - roffset + 0.5f*rsize, y - roffset + 0.5f*rsize, 0);
         hudmatrix.rotate_around_z((camera1->yaw + 180)*-RAD);
@@ -479,7 +479,7 @@ struct collectclientmode : clientmode
             drawbaseblip(d, x, y, s, i);
         }
         int team = collectteambase(d->team);
-        settexture(team == collectteambase(player1->team) ? "media/hud/blip_red_skull.png" : "media/hud/blip_blue_skull.png", 3);
+        settexture(team == collectteambase(player1->team) ? "packages/interface/blip_red_skull.png" : "packages/interface/blip_blue_skull.png", 3);
         loopv(players)
         {
             fpsent *o = players[i];

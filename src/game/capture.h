@@ -465,10 +465,10 @@ struct captureclientmode : clientmode
         if(minimapalpha >= 1) glEnable(GL_BLEND);
         gle::colorf(1, 1, 1);
         float margin = 0.04f, roffset = s*margin, rsize = s + 2*roffset;
-        settexture("media/hud/radar.png", 3);
+        settexture("packages/interface/radar.png", 3);
         drawradar(x - roffset, y - roffset, rsize);
         #if 0
-        settexture("media/hud/compass.png", 3);
+        settexture("packages/interface/compass.png", 3);
         pushhudmatrix();
         hudmatrix.translate(x - roffset + 0.5f*rsize, y - roffset + 0.5f*rsize, 0);
         hudmatrix.rotate_around_z((camera1->yaw + 180)*-RAD);
@@ -484,7 +484,7 @@ struct captureclientmode : clientmode
             setfont("digit_blue");
             text_bounds(" ", fw, fh);
         }
-        else settexture("media/hud/blip_blue.png", 3);
+        else settexture("packages/interface/blip_blue.png", 3);
         float blipsize = basenumbers ? 0.1f : 0.05f;
         pushhudmatrix();
         hudmatrix.translate(x + 0.5f*s, y + 0.5f*s, 0);
@@ -492,10 +492,10 @@ struct captureclientmode : clientmode
         flushhudmatrix();
         drawblips(d, blipsize, fw, fh, 1, showenemies);
         if(basenumbers) setfont("digit_grey");
-        else settexture("media/hud/blip_grey.png", 3);
+        else settexture("packages/interface/blip_grey.png", 3);
         drawblips(d, blipsize, fw, fh, 0, showenemies);
         if(basenumbers) setfont("digit_red");
-        else settexture("media/hud/blip_red.png", 3);
+        else settexture("packages/interface/blip_red.png", 3);
         drawblips(d, blipsize, fw, fh, -1, showenemies);
         if(showenemies) drawblips(d, blipsize, fw, fh, -2);
         pophudmatrix();
