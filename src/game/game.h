@@ -30,7 +30,6 @@ enum                            // static entity types
     PARTICLES = ET_PARTICLES,
     MAPSOUND = ET_SOUND,
     SPOTLIGHT = ET_SPOTLIGHT,
-    DECAL = ET_DECAL,
 
     I_SHELLS, I_BULLETS, I_ROCKETS, I_ROUNDS, I_GRENADES, I_CARTRIDGES,
     I_HEALTH, I_BOOST,
@@ -50,6 +49,8 @@ enum                            // static entity types
     PLATFORM,                   // attr1 = angle, attr2 = idx, attr3 = tag, attr4 = speed
     ELEVATOR,                   // attr1 = angle, attr2 = idx, attr3 = tag, attr4 = speed
     FLAG,                       // attr1 = angle, attr2 = team
+
+    DECAL = ET_DECAL,
 
     MAXENTTYPES
 };

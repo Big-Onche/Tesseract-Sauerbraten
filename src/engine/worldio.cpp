@@ -75,10 +75,10 @@ static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octahe
 
 static void fixent(entity &e, int version)
 {
-    if(version <= 0)
+    if(version == 0) // sauerbraten map
     {
-        if(e.type >= ET_DECAL) e.type++;
-        if(e.type == ET_MAPMODEL) // pentaract | invert mdl id and pitch for sauerbraten port
+        //if(e.type >= ET_DECAL) e.type++;
+        if(e.type == ET_MAPMODEL) // sauerract | invert mdl id and pitch for sauerbraten port
         {
             int attr1 = e.attr1, attr2 = e.attr2;
             e.attr1 = attr2, e.attr2 = attr1;

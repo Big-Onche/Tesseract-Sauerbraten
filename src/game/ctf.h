@@ -652,7 +652,7 @@ struct ctfclientmode : clientmode
 
     vec interpflagpos(flag &f) { float angle; return interpflagpos(f, angle); }
 
-        void rendergame()
+    void rendergame()
     {
         loopv(flags)
         {

@@ -63,7 +63,7 @@ namespace entities
     {
         static const char * const entmdlnames[] =
         {
-            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
             "ammo/shells", "ammo/bullets", "ammo/rockets", "ammo/rrounds", "ammo/grenades", "ammo/cartridges",
             "health", "boost", "armor/green", "armor/yellow", "quad", "teleporter",
             NULL, NULL,
@@ -72,6 +72,7 @@ namespace entities
             "checkpoint",
             NULL, NULL,
             NULL, NULL,
+            NULL,
             NULL
         };
         return entmdlnames[type];
@@ -672,7 +673,7 @@ namespace entities
     {
         static const char * const entnames[] =
         {
-            "none?", "light", "mapmodel", "playerstart", "envmap", "particles", "sound", "spotlight", "decal",
+            "none?", "light", "mapmodel", "playerstart", "envmap", "particles", "sound", "spotlight",
             "shells", "bullets", "rockets", "riflerounds", "grenades", "cartridges",
             "health", "healthboost", "greenarmour", "yellowarmour", "quaddamage",
             "teleport", "teledest",
@@ -681,7 +682,7 @@ namespace entities
             "box", "barrel",
             "platform", "elevator",
             "flag",
-            "decal",
+            "decal,"
             "", "", "", "",
         };
         return i>=0 && size_t(i)<sizeof(entnames)/sizeof(entnames[0]) ? entnames[i] : "";

@@ -791,7 +791,7 @@ namespace game
         else printvar(id, gamespeed);
     });
 
-    float gameSpeedScale() { return gamespeed / 100.f; }; // pentaract
+    float gameSpeedScale() { return gamespeed / 100.f; }; // sauerract
 
     int scaletime(int t) { return t*gamespeed; }
 
