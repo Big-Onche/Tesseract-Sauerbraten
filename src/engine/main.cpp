@@ -303,21 +303,23 @@ void renderprogressview(int w, int h, float bar, const char *text)   // also use
     gle::defvertex(2);
     gle::deftexcoord0();
 
-    float fh = 0.060f*min(w, h), fw = fh*15,
+    float fh = 0.075f*min(w, h), fw = fh*10,
           fx = renderedframe ? w - fw - fh/4 : 0.5f*(w - fw),
-          fy = renderedframe ? fh/4 : h - fh*1.5f;
+          fy = renderedframe ? fh/4 : h - fh*1.5f,
+          fu1 = 0/512.0f, fu2 = 511/512.0f,
+          fv1 = 0/64.0f, fv2 = 52/64.0f;
     settexture("packages/interface/loading_frame.png", 3);
-    bgquad(fx, fy, fw, fh);
+    bgquad(fx, fy, fw, fh, fu1, fv1, fu2-fu1, fv2-fv1);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    float bw = fw*(512 - 2*8)/512.0f, bh = fh*20/32.0f,
-          bx = fx + fw*8/512.0f, by = fy + fh*6/32.0f,
-          su1 = 0/32.0f, su2 = 8/32.0f, sw = fw*8/512.0f,
-          eu1 = 24/32.0f, eu2 = 32/32.0f, ew = fw*8/512.0f,
+    float bw = fw*(511 - 2*17)/511.0f, bh = fh*20/52.0f,
+          bx = fx + fw*17/511.0f, by = fy + fh*16/52.0f,
+          su1 = 0/32.0f, su2 = 7/32.0f, sw = fw*7/511.0f,
+          eu1 = 23/32.0f, eu2 = 30/32.0f, ew = fw*7/511.0f,
           mw = bw - sw - ew,
-          ex = bx+sw + max(mw*bar, fw*8/512.0f);
+          ex = bx+sw + max(mw*bar, fw*7/511.0f);
     if(bar > 0)
     {
         settexture("packages/interface/loading_bar.png", 3);
@@ -329,7 +331,7 @@ void renderprogressview(int w, int h, float bar, const char *text)   // also use
     if(text)
     {
         int tw = text_width(text);
-        float tsz = bh*0.6f/FONTH;
+        float tsz = bh*0.8f/FONTH;
         if(tw*tsz > mw) tsz = mw/tw;
 
         pushhudtranslate(bx+sw, by + (bh - FONTH*tsz)/2, tsz);
