@@ -1195,7 +1195,7 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     if(d->state==CS_LAGGED) fade = min(fade, 0.3f);
     if(drawtex == DRAWTEX_MODELPREVIEW) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
     bool onlyshadow = (d==game::hudplayer() && game::hudplayer()->state==CS_ALIVE) || editmode;
-    rendermodel(mdlname, anim, o, yaw, 0, onlyshadow ? pitch/3.f : pitch, onlyshadow ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
+    rendermodel(mdlname, anim, o, yaw, 0, onlyshadow ? pitch/3.f : pitch, onlyshadow && !thirdperson ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
 }
 
 void setbbfrommodel(dynent *d, const char *mdl)
