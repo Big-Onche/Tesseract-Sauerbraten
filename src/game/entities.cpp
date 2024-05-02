@@ -682,7 +682,7 @@ namespace entities
             "box", "barrel",
             "platform", "elevator",
             "flag",
-            "decal,"
+            "decal",
             "", "", "", "",
         };
         return i>=0 && size_t(i)<sizeof(entnames)/sizeof(entnames[0]) ? entnames[i] : "";
