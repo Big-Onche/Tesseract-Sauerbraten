@@ -259,7 +259,7 @@ struct pingattempts
 
 enum { UNRESOLVED = 0, RESOLVING, RESOLVED };
 
-struct serverinfo : pingattempts
+struct serverinfo : servinfo, pingattempts
 {
     enum
     {
@@ -602,21 +602,20 @@ ICOMMAND(servinfoplayers, "i", (int *i),
         else result(tempformatstring(si.numplayers >= si.attr[3] ? "\f3%d/%d" : "%d/%d", si.numplayers, si.attr[3]));
     }));
 ICOMMAND(servinfoattr, "ii", (int *i, int *n), GETSERVERINFO(*i, si, { if(si.attr.inrange(*n)) intret(si.attr[*n]); }));
-ICOMMAND(servinfomode, "i", (int *i), /*GETSERVINFOATTR(*i, 0, mode, intret(mode))*/);
+ICOMMAND(servinfomode, "i", (int *i), GETSERVINFOATTR(*i, 1, mode, intret(mode)));
 ICOMMAND(servinfomodename, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
-        const char *name = server::modename(si.attr[0], NULL);
+        const char *name = server::modename(si.attr[1], NULL);
         if(name) result(name);
     }));
-ICOMMAND(servinfomastermode, "i", (int *i), /*GETSERVINFOATTR(*i, 2, mm, intret(mm))*/);
+ICOMMAND(servinfomastermode, "i", (int *i), GETSERVERINFO(*i, si, {if(si.attr.inrange(4)) intret(si.attr[4]); }));
 ICOMMAND(servinfomastermodename, "i", (int *i),
-//    GETSERVINFOATTR(*i, 2, mm,
-//    {
-//        const char *name = server::mastermodename(mm, NULL);
-//        if(name) stringret(newconcatstring(game::mastermodecolor(mm, ""), name));
-//    })
-);
+    GETSERVERINFO(*i, si,
+    {
+        if(si.attr.inrange(4)) result(tempformatstring("%s%s", game::mastermodecolor( si.attr[4], NULL), server::mastermodename( si.attr[4], NULL)));
+    }));
+
 ICOMMAND(servinfotime, "ii", (int *i, int *raw),
     GETSERVERINFO(*i, si,
     {
@@ -641,6 +640,11 @@ ICOMMAND(servinfoicon, "i", (int *i),
     }
     ));
 ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port - 1, pw[0] ? pw : si.password)));
+
+servinfo *getservinfo(int i)
+{
+    return servers.inrange(i) && servers[i]->valid() ? servers[i] : NULL;
+}
 
 void clearservers(bool full = false)
 {
