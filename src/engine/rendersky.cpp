@@ -105,40 +105,40 @@ void drawenvbox(Texture **sky = NULL, float z1clip = 0.0f, float z2clip = 1.0f, 
     gle::deftexcoord0();
 
     if(faces&0x01)
-        drawenvboxface(1.0f, v2,  -w, -w, z2,
-                       0.0f, v2,  -w,  w, z2,
-                       0.0f, v1,  -w,  w, z1,
-                       1.0f, v1,  -w, -w, z1, sky[0]);
+        drawenvboxface(0.0f, v2,  -w, -w, z2,
+                       1.0f, v2,  -w,  w, z2,
+                       1.0f, v1,  -w,  w, z1,
+                       0.0f, v1,  -w, -w, z1, sky[0]);
 
     if(faces&0x02)
-        drawenvboxface(0.0f, v1, w, -w, z1,
-                       1.0f, v1, w,  w, z1,
-                       1.0f, v2, w,  w, z2,
-                       0.0f, v2, w, -w, z2, sky[1]);
+        drawenvboxface(1.0f, v1, w, -w, z1,
+                       0.0f, v1, w,  w, z1,
+                       0.0f, v2, w,  w, z2,
+                       1.0f, v2, w, -w, z2, sky[1]);
 
     if(faces&0x04)
-        drawenvboxface(0.0f, v1, -w, -w, z1,
-                       1.0f, v1,  w, -w, z1,
-                       1.0f, v2,  w, -w, z2,
-                       0.0f, v2, -w, -w, z2, sky[2]);
+        drawenvboxface(1.0f, v1,  w,  w, z1,
+                       0.0f, v1, -w,  w, z1,
+                       0.0f, v2, -w,  w, z2,
+                       1.0f, v2,  w,  w, z2, sky[2]);
 
     if(faces&0x08)
-        drawenvboxface(0.0f, v1,  w,  w, z1,
-                       1.0f, v1, -w,  w, z1,
-                       1.0f, v2, -w,  w, z2,
-                       0.0f, v2,  w,  w, z2, sky[3]);
+        drawenvboxface(1.0f, v1, -w, -w, z1,
+                       0.0f, v1,  w, -w, z1,
+                       0.0f, v2,  w, -w, z2,
+                       1.0f, v2, -w, -w, z2, sky[3]);
 
     if(z1clip <= 0 && faces&0x10)
-        drawenvboxface(1.0f, 1.0f, -w,  w,  -w,
-                       1.0f, 0.0f,  w,  w,  -w,
-                       0.0f, 0.0f,  w, -w,  -w,
-                       0.0f, 1.0f, -w, -w,  -w, sky[4]);
+        drawenvboxface(0.0f, 1.0f, -w,  w,  -w,
+                       0.0f, 0.0f,  w,  w,  -w,
+                       1.0f, 0.0f,  w, -w,  -w,
+                       1.0f, 1.0f, -w, -w,  -w, sky[4]);
 
     if(z2clip >= 1 && faces&0x20)
-        drawenvboxface(1.0f, 1.0f,  w,  w, w,
-                       1.0f, 0.0f, -w,  w, w,
-                       0.0f, 0.0f, -w, -w, w,
-                       0.0f, 1.0f,  w, -w, w, sky[5]);
+        drawenvboxface(0.0f, 1.0f,  w,  w, w,
+                       0.0f, 0.0f, -w,  w, w,
+                       1.0f, 0.0f, -w, -w, w,
+                       1.0f, 1.0f,  w, -w, w, sky[5]);
 }
 
 void drawenvoverlay(Texture *overlay = NULL, float tx = 0, float ty = 0)
@@ -156,7 +156,7 @@ void drawenvoverlay(Texture *overlay = NULL, float tx = 0, float ty = 0)
         vec p(1, 1, 0);
         p.rotate_around_z((-2.0f*M_PI*i)/cloudsubdiv);
         gle::attribf(p.x*psz, p.y*psz, z);
-            gle::attribf(tx - p.x*tsz, ty + p.y*tsz);
+            gle::attribf(tx + p.x*tsz, ty + p.y*tsz);
     }
     xtraverts += gle::end();
     float tsz2 = 0.5f/cloudscale;
@@ -169,10 +169,10 @@ void drawenvoverlay(Texture *overlay = NULL, float tx = 0, float ty = 0)
         vec p(1, 1, 0);
         p.rotate_around_z((-2.0f*M_PI*i)/cloudsubdiv);
         gle::attribf(p.x*psz, p.y*psz, z);
-            gle::attribf(tx - p.x*tsz, ty + p.y*tsz);
+            gle::attribf(tx + p.x*tsz, ty + p.y*tsz);
             gle::attrib(color, cloudalpha);
         gle::attribf(p.x*w, p.y*w, z);
-            gle::attribf(tx - p.x*tsz2, ty + p.y*tsz2);
+            gle::attribf(tx + p.x*tsz2, ty + p.y*tsz2);
             gle::attrib(color, 0.0f);
     }
     xtraverts += gle::end();
@@ -511,7 +511,7 @@ void drawskybox(bool clear)
 
         matrix4 skymatrix = cammatrix, skyprojmatrix;
         skymatrix.settranslation(0, 0, 0);
-        skymatrix.rotate_around_z((spinsky*lastmillis/1000.0f+yawsky-90)*-RAD);
+        skymatrix.rotate_around_z((spinsky*lastmillis/1000.0f+yawsky)*-RAD);
         skyprojmatrix.mul(projmatrix, skymatrix);
         LOCALPARAM(skymatrix, skyprojmatrix);
 
