@@ -1,8 +1,15 @@
 # Tesseract: Sauerbraten
 
-This project attempts to port Sauerbraten to its fork Tesseract.
-While the game is fully playable both online and offline (except SP, not tested) the project is still in an early phase and a lot of stuff must be fixed, finished, and polished (scoreboard, menus, etc.), note that older maps (such as ~~face-camper~~ face-capture) are currently not playable.
+This project attempts to port fully Sauerbraten to its fork Tesseract, while keepig it compatible with legacy Sauerbraten's servers.
 
+The game is playable but still in an early phase and a lot of stuff must be fixed, finished, and polished (scoreboard, menus, etc.), note that older maps (such as ~~face-camper~~ face-capture) are currently not playable and lights are broken on some other maps.
+
+**Here is the roadmap:**
+* 1) finish menus with all of Sauerbraten's UI features
+* 2) repair unplayable maps (light glitches and older maps not loading)
+* 3) fix every broken thing until we get a perfect Sauerbraten port
+* 4) improve audio and gfx with optional new effects
+* 5) remaster maps with higher-res textures
 
 ## What Tesseract provides?
 
