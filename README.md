@@ -1,6 +1,6 @@
 # Tesseract: Sauerbraten
 
-This project attempts to port fully Sauerbraten to its fork Tesseract, while keepig it compatible with legacy Sauerbraten's servers.
+This project attempts to port fully Sauerbraten to its fork Tesseract, while keeping it compatible with legacy Sauerbraten's servers.
 
 The game is playable but still in an early phase and a lot of stuff must be fixed, finished, and polished (scoreboard, menus, etc.), note that older maps (such as ~~face-camper~~ face-capture) are currently not playable and lights are broken on some other maps.
 
