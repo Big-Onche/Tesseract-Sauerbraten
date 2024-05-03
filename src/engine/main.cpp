@@ -204,8 +204,10 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
     }
     gle::end();
 
+    gle::colorf(0.6f, 0.6f, 0.6f, 0.6f);
     settexture("packages/interface/shadow.png", 3);
     bgquad(0, 0, w, h);
+    gle::colorf(1, 1, 1, 1);
 
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
