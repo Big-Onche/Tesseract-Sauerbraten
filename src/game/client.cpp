@@ -158,7 +158,11 @@ namespace game
         else if(!*numargs) printteam();
         else result(player1->team);
     });
-    ICOMMAND(getteam, "", (), result(player1->team));
+    ICOMMAND(getteam, "", (),
+        if(!m_teammode) intret(0); // no team
+        else if(!strcmp(player1->team, "good")) intret(1); // team good
+        else intret(2); // team evil
+    );
 
     void switchplayermodel(int playermodel)
     {
