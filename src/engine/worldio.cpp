@@ -757,6 +757,7 @@ static uint mapcrc = 0;
 
 uint getmapcrc() { return mapcrc; }
 void clearmapcrc() { mapcrc = 0; }
+extern void loadLightEntities(bool msg, const char *mapName);
 
 bool load_world(const char *mname, const char *cname)        // still supports all map formats that have existed since the earliest cube betas!
 {
@@ -963,6 +964,9 @@ bool load_world(const char *mname, const char *cname)        // still supports a
     renderbackground("loading...", mapshot, mname, game::getmapinfo());
 
     if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
+
+    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
+    mpcalclight(true); // sauerract | some maps needs a remip to have good looking lights
 
     startmap(cname ? cname : mname);
 

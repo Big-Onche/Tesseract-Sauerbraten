@@ -1561,3 +1561,63 @@ void mpeditent(int i, const vec &o, int type, int attr1, int attr2, int attr3, i
 int getworldsize() { return worldsize; }
 int getmapversion() { return mapversion; }
 
+void saveLightEntities() // Sauerract | Save light entities in a separate file to fix lights on some maps
+{
+    defformatstring(filePath, "packages/map/%s.lit", game::getclientmap());
+    stream *lightFile = openutf8file(filePath, "w"); // Open a file to write the light data
+    if(!lightFile) { conoutf(CON_ERROR, "unable to create light file"); return; }
+
+    const vector<extentity *> &ents = entities::getents(); // Get all entities on the loaded map
+    int numLights = 0;
+
+    loopv(ents) // Loop through ents vector length (= all entities)
+    {
+        const extentity &e = *ents[i];
+        if(e.type==ET_LIGHT) // Write light coordinates and attributes on each line
+        {
+            lightFile->printf("%s\n", tempformatstring("%f %f %f %d %d %d %d %d", e.o.x, e.o.y, e.o.z, e.attr1, e.attr2, e.attr3, e.attr4, e.attr5));
+            numLights++;
+        }
+    }
+    conoutf("saved %d lights in %s", numLights, filePath);
+    lightFile->close();
+}
+ICOMMAND(savelights, "", (), saveLightEntities());
+
+void loadLightEntities(bool msg = true, const char *mapName = NULL) // Sauerract | Load lights from a .lit file
+{
+    defformatstring(filePath, "packages/map/%s.lit", mapName ? mapName : game::getclientmap());
+    stream *lightFile = openfile(filePath, "r"); // Open a file to read the light data
+
+    if(!lightFile)
+    {
+        if(msg) conoutf(CON_ERROR, "unable to read light file");
+        return;
+    }
+
+    const vector<extentity *> &ents = entities::getents(); // Get all entities on the loaded map
+
+    loopv(ents) // Loop through ents vector length (= all entities)
+    {
+        extentity &e = *ents[i];
+        if(e.type==ET_LIGHT) e.type = ET_EMPTY; // Delete current lights
+    }
+
+    int numLights = 0;
+    char buf[128];
+
+    while(lightFile->getline(buf, sizeof(buf)))
+    {
+        float coords[3] = {0};
+        int attrs[5] = {0};
+        sscanf(buf, "%f %f %f %d %d %d %d %d", &coords[0], &coords[1], &coords[2], &attrs[0], &attrs[1], &attrs[2], &attrs[3], &attrs[4]);
+        int idx;
+        newentity(true, vec(coords[0], coords[1], coords[2]), ET_LIGHT, attrs[0], attrs[1], attrs[2], attrs[3], attrs[4], idx);
+        numLights++;
+    }
+
+    if(msg) conoutf("loaded %d lights in %s", numLights, filePath);
+    lightFile->close();
+}
+ICOMMAND(loadlights, "", (), loadLightEntities());
+

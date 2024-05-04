@@ -1752,7 +1752,6 @@ void allchanged(bool load)
         updateblendtextures();
         seedparticles();
         genenvmaps();
-        execute("calclight"); // sauerract | some maps needs a remip to have good looking lights
         drawminimap();
     }
 }
