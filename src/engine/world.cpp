@@ -1604,15 +1604,15 @@ void loadLightEntities(bool msg = true, const char *mapName = NULL) // Sauerract
     }
 
     int numLights = 0;
+    float coords[3] = {0};
+    int attrs[5] = {0};
     char buf[128];
 
-    while(lightFile->getline(buf, sizeof(buf)))
+    while(lightFile->getline(buf, sizeof(buf))) // Read each light file lines
     {
-        float coords[3] = {0};
-        int attrs[5] = {0};
         sscanf(buf, "%f %f %f %d %d %d %d %d", &coords[0], &coords[1], &coords[2], &attrs[0], &attrs[1], &attrs[2], &attrs[3], &attrs[4]);
         int idx;
-        newentity(true, vec(coords[0], coords[1], coords[2]), ET_LIGHT, attrs[0], attrs[1], attrs[2], attrs[3], attrs[4], idx);
+        newentity(true, vec(coords[0], coords[1], coords[2]), ET_LIGHT, attrs[0], attrs[1], attrs[2], attrs[3], attrs[4], idx); // Add new light entities from the file
         numLights++;
     }
 
