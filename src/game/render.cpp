@@ -320,11 +320,11 @@ namespace game
 
             if(d==player1)
             {
-                renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, false);
+                renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, true);
                 continue;
             }
+            else renderplayer(d, getplayermodelinfo(d), team, 1, false);
 
-            renderplayer(d, getplayermodelinfo(d), team, 1, false);
 
             vec dir = vec(d->o).sub(camera1->o);
             float dist = dir.magnitude();
