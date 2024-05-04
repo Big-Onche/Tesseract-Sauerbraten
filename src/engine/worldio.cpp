@@ -959,14 +959,14 @@ bool load_world(const char *mname, const char *cname)        // still supports a
 
     entitiesinoctanodes();
     attachentities();
+    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
+    mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
+
     allchanged(true);
 
     renderbackground("loading...", mapshot, mname, game::getmapinfo());
 
     if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
-
-    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
-    mpcalclight(true); // sauerract | some maps needs a remip to have good looking lights
 
     startmap(cname ? cname : mname);
 

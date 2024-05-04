@@ -1,6 +1,7 @@
 #include "engine.h"
 
 CVAR1R(ambient, 0x191919);
+CVAR1R(shadowmapambient, 0x191919);
 FVARR(ambientscale, 0, 1, 16);
 
 CVAR1R(skylight, 0);
@@ -506,7 +507,7 @@ static Uint32 calclighttimer(Uint32 interval, void *param)
     return interval;
 }
 
-void calclight()
+void calclight(bool cancelable = true)
 {
     renderbackground("computing lighting... (esc to abort)");
     remip();
@@ -524,18 +525,18 @@ void calclight()
     if(timer) SDL_RemoveTimer(timer);
     renderbackground("lighting done...");
     allchanged();
-    if(calclight_canceled)
+    if(calclight_canceled && cancelable)
         conoutf("calclight aborted");
     else
         conoutf("computed lighting (%.1f seconds)",
             (end - start) / 1000.0f);
 }
 
-void mpcalclight(bool local)
+void mpcalclight(bool local, bool cancelable)
 {
     extern selinfo sel;
     if(local) game::edittrigger(sel, EDIT_CALCLIGHT);
-    calclight();
+    calclight(cancelable);
 }
 
 ICOMMAND(calclight, "", (), mpcalclight(true));

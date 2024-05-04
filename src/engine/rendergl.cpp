@@ -2115,9 +2115,10 @@ void drawminimap()
     float zscale = max(float(minimapheight), minimapcenter.z + minimapradius.z + 1) + 1;
 
     projmatrix.ortho(-minimapradius.x, minimapradius.x, -minimapradius.y, minimapradius.y, 0, 2*zscale);
+    projmatrix.a.mul(-1);
     setcamprojmatrix();
 
-    glEnable(GL_CULL_FACE);
+    //glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
 
     xtravertsva = xtraverts = glde = gbatches = vtris = vverts = 0;
@@ -2144,7 +2145,7 @@ void drawminimap()
     }
 
     glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
+    //glDisable(GL_CULL_FACE);
 
     farplane = oldfarplane;
     vieww = oldvieww;
