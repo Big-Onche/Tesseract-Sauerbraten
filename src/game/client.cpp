@@ -314,6 +314,10 @@ namespace game
 
     ICOMMAND(getmastermode, "", (), intret(mastermode));
     ICOMMAND(getmastermodename, "i", (int *mm), result(server::mastermodename(*mm, "")));
+    ICOMMAND(servicon, "", (),
+        const char *icon = game::mastermodeicon(mastermode, "serverunk");
+        result(icon);
+    );
 
     bool isspectator(int cn)
     {
