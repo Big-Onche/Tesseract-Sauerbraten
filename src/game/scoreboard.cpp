@@ -381,7 +381,7 @@ namespace game
         {
             string s;
             scoregroup &sg = *groups[*team];
-            if(sg.score>=10000) formatstring(s, "%s: WIN", sg.team);
+            if(sg.score >= (m_ctf || m_hold || m_protect ? 10 : 10000)) formatstring(s, "%s: WIN", sg.team); // 10 = FLAGLIMIT, 10000 = Capture mode win (all bases captured)
             else formatstring(s, "%s: %d", sg.team, sg.score);
             result(s);
         }
