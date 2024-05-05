@@ -235,7 +235,7 @@ namespace game
     }
 
     COMMAND(refreshscoreboard, "");
-    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groups.length() ? groups[*team]->players.length() : 0)));
+    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groupplayers()-1 ? groups[*team]->players.length() : 0)));
     ICOMMAND(loopscoreboard, "rie", (ident *id, int *team, uint *body),
     {
 
