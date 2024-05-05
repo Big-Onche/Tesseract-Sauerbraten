@@ -343,16 +343,18 @@ void renderprogressview(int w, int h, float bar, const char *text)   // also use
 
     float bw = fw*(511 - 2*17)/511.0f, bh = fh*20/52.0f,
           bx = fx + fw*17/511.0f, by = fy + fh*16/52.0f,
+          bv1 = 0/32.0f, bv2 = 20/32.0f,
           su1 = 0/32.0f, su2 = 7/32.0f, sw = fw*7/511.0f,
           eu1 = 23/32.0f, eu2 = 30/32.0f, ew = fw*7/511.0f,
           mw = bw - sw - ew,
           ex = bx+sw + max(mw*bar, fw*7/511.0f);
+
     if(bar > 0)
     {
         settexture("packages/interface/loading_bar.png", 3);
-        bgquad(bx, by, sw, bh, su1, 0, su2-su1, 1);
-        bgquad(bx+sw, by, ex-(bx+sw), bh, su2, 0, eu1-su2, 1);
-        bgquad(ex, by, ew, bh, eu1, 0, eu2-eu1, 1);
+        bgquad(bx, by, sw, bh, su1, bv1, su2-su1, bv2-bv1);
+        bgquad(bx+sw, by, ex-(bx+sw), bh, su2, bv1, eu1-su2, bv2-bv1);
+        bgquad(ex, by, ew, bh, eu1, bv1, eu2-eu1, bv2-bv1);
     }
 
     if(text)
