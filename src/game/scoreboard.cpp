@@ -238,7 +238,6 @@ namespace game
     ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groupplayers()-1 ? groups[*team]->players.length() : 0)));
     ICOMMAND(loopscoreboard, "rie", (ident *id, int *team, uint *body),
     {
-
         if(*team > groupplayers()-1) return;
         vector<fpsent *> &p = *team < 0 ? spectators : groups[*team]->players;
         loopstart(id, stack);
@@ -378,13 +377,21 @@ namespace game
 
     ICOMMAND(getteamscore, "i", (int *team),
     {
-        if(m_teammode && *team <= groupplayers())
+        if(m_teammode && *team <= groupplayers() -1)
         {
             string s;
-            scoregroup &sg = *groups[*team-1];
+            scoregroup &sg = *groups[*team];
             if(sg.score>=10000) formatstring(s, "%s: WIN", sg.team);
             else formatstring(s, "%s: %d", sg.team, sg.score);
             result(s);
+        }
+    });
+    ICOMMAND(getteamname, "i", (int *team),
+    {
+        if(m_teammode && *team <= groupplayers() -1)
+        {
+            scoregroup &sg = *groups[*team];
+            result(sg.team);
         }
     });
 
