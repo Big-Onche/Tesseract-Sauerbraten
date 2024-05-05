@@ -1,0 +1,7 @@
+*.o
+*.obj
+*.gch
+
+/bin/
+/bin64/
+/src/vcpp/

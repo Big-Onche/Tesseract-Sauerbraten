@@ -4,6 +4,11 @@ override CXXFLAGS+= -Wall -fsigned-char -fno-exceptions -fno-rtti
 PLATFORM= $(shell uname -s | tr '[:lower:]' '[:upper:]')
 PLATFORM_ARCH= $(shell uname -m)
 PLATFORM_PREFIX= native
+ifdef OS
+    ifeq ($(OS),Windows_NT)
+        PLATFORM = MINGW
+    endif
+endif
 
 INCLUDES= -Ishared -Iengine -Igame -Ienet/include
 
@@ -119,6 +124,8 @@ CLIENT_OBJS= \
 	game/scoreboard.o \
 	game/server.o \
 	game/waypoint.o \
+	game/monster.o \
+	game/movable.o \
 	game/weapon.o
 
 CLIENT_PCH= shared/cube.h.gch engine/engine.h.gch game/game.h.gch
@@ -452,9 +459,11 @@ game/entities.o: shared/glemu.h shared/iengine.h shared/igame.h game/ai.h
 game/game.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/game.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 game/game.o: shared/iengine.h shared/igame.h game/ai.h
+game/game.o: game/monster.h
 game/render.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/render.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 game/render.o: shared/iengine.h shared/igame.h game/ai.h
+game/render.o: game/monster.h
 game/scoreboard.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/scoreboard.o: shared/ents.h shared/command.h shared/glexts.h
 game/scoreboard.o: shared/glemu.h shared/iengine.h shared/igame.h game/ai.h
@@ -462,12 +471,21 @@ game/server.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/server.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 game/server.o: shared/iengine.h shared/igame.h game/ai.h game/ctf.h
 game/server.o: game/extinfo.h game/aiman.h
+game/monster.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
+game/monster.o: shared/ents.h shared/command.h shared/glexts.h
+game/monster.o: shared/glemu.h shared/iengine.h shared/igame.h game/ai.h
+game/monster.o: game/monster.h
+game/movable.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
+game/movable.o: shared/ents.h shared/command.h shared/glexts.h
+game/movable.o: shared/glemu.h shared/iengine.h shared/igame.h
+game/movable.o: game/ai.h
 game/waypoint.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/waypoint.o: shared/ents.h shared/command.h shared/glexts.h
 game/waypoint.o: shared/glemu.h shared/iengine.h shared/igame.h game/ai.h
 game/weapon.o: game/game.h shared/cube.h shared/tools.h shared/geom.h
 game/weapon.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 game/weapon.o: shared/iengine.h shared/igame.h game/ai.h
+game/weapon.o: game/monster.h
 
 shared/cube.h.gch: shared/tools.h shared/geom.h shared/ents.h
 shared/cube.h.gch: shared/command.h shared/glexts.h shared/glemu.h
@@ -479,7 +497,7 @@ engine/engine.h.gch: engine/octa.h engine/light.h engine/texture.h
 engine/engine.h.gch: engine/bih.h engine/model.h
 game/game.h.gch: shared/cube.h shared/tools.h shared/geom.h shared/ents.h
 game/game.h.gch: shared/command.h shared/glexts.h shared/glemu.h
-game/game.h.gch: shared/iengine.h shared/igame.h game/ai.h
+game/game.h.gch: shared/iengine.h shared/igame.h game/ai.h game/monster.h
 
 standalone/shared/crypto.o: shared/cube.h shared/tools.h shared/geom.h
 standalone/shared/crypto.o: shared/ents.h shared/command.h shared/iengine.h
@@ -519,4 +537,4 @@ standalone/engine/engine.h.gch: shared/iengine.h shared/igame.h
 standalone/engine/engine.h.gch: engine/world.h
 standalone/game/game.h.gch: shared/cube.h shared/tools.h shared/geom.h
 standalone/game/game.h.gch: shared/ents.h shared/command.h shared/iengine.h
-standalone/game/game.h.gch: shared/igame.h game/ai.h
+standalone/game/game.h.gch: shared/igame.h game/ai.h game/monster.h
