@@ -1146,14 +1146,7 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     {
         anim = ANIM_DYING|ANIM_NOPITCH;
         basetime = lastpain;
-        if(ragdoll)
-        {
-            if(!d->ragdoll || d->ragdoll->millis < basetime)
-            {
-                DELETEP(d->ragdoll);
-                anim |= ANIM_RAGDOLL;
-            }
-        }
+        if(ragdoll) anim |= ANIM_RAGDOLL; // mdl.ragdoll checked in renderplayer()
         else if(lastmillis-basetime>1000) anim = ANIM_DEAD|ANIM_LOOP|ANIM_NOPITCH;
     }
     else if(d->state==CS_EDITING || d->state==CS_SPECTATOR) anim = ANIM_EDIT|ANIM_LOOP;
