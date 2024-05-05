@@ -235,12 +235,13 @@ namespace game
     }
 
     COMMAND(refreshscoreboard, "");
-    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groupplayers() ? groups[*team-1]->players.length() : 0)));
+    ICOMMAND(numscoreboard, "i", (int *team), intret(*team < 0 ? spectators.length() : (*team <= groups.length() ? groups[*team]->players.length() : 0)));
     ICOMMAND(loopscoreboard, "rie", (ident *id, int *team, uint *body),
     {
-        if(*team > groupplayers()) return;
+
+        if(*team > groupplayers()-1) return;
+        vector<fpsent *> &p = *team < 0 ? spectators : groups[*team]->players;
         loopstart(id, stack);
-        vector<fpsent *> &p = *team < 0 ? spectators : groups[m_teammode ? *team-1 : 0]->players;
         loopv(p)
         {
             loopiter(id, stack, p[i]->clientnum);
