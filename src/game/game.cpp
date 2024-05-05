@@ -1051,25 +1051,29 @@ namespace game
 
     void gameplayhud(int w, int h)
     {
-        pushhudmatrix();
-        hudmatrix.scale(h/1800.0f, h/1800.0f, 1);
-        flushhudmatrix();
+        pushhudscale(h/1800.0f);
 
         if(player1->state==CS_SPECTATOR)
         {
-            int pw, ph, tw, th, fw, fh;
-            text_bounds("  ", pw, ph);
-            text_bounds("SPECTATOR", tw, th);
+            float pw, ph, tw, th, fw, fh;
+            text_boundsf("  ", pw, ph);
+            text_boundsf("SPECTATOR", tw, th);
             th = max(th, ph);
             fpsent *f = followingplayer();
-            text_bounds(f ? colorname(f) : " ", fw, fh);
+            text_boundsf(f ? colorname(f) : " ", fw, fh);
             fh = max(fh, ph);
             draw_text("SPECTATOR", w*1800/h - tw - pw, 1650 - th - fh);
             if(f)
             {
-                int color = statuscolor(f, 0xFFFFFF);
+                int color = f->state!=CS_DEAD ? 0xFFFFFF : 0x606060;
+                if(f->privilege)
+                {
+                    color = f->privilege>=PRIV_ADMIN ? 0xFF8000 : 0x40FF80;
+                    if(f->state==CS_DEAD) color = (color>>1)&0x7F7F7F;
+                }
                 draw_text(colorname(f), w*1800/h - fw - pw, 1650 - fh, (color>>16)&0xFF, (color>>8)&0xFF, color&0xFF);
             }
+            resethudshader();
         }
 
         fpsent *d = hudplayer();
