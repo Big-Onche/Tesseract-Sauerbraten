@@ -297,9 +297,9 @@ namespace game
         return offset;
     }
 
-    void rendergame()
+    void rendergame(bool mainpass)
     {
-        ai::render();
+        if(mainpass) ai::render();
 
         if(intermission)
         {
@@ -309,22 +309,14 @@ namespace game
             else getbestplayers(bestplayers);
         }
 
+        fpsent *exclude = isthirdperson() ? NULL : followingplayer();
         loopv(players)
         {
             fpsent *d = players[i];
-
-            if(d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || (d->state==CS_DEAD && hidedead)) continue;
-
+            if(d == player1 || d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
             int team = 0;
             if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
-
-            if(d==player1)
-            {
-                renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, isthirdperson());
-                continue;
-            }
-            else renderplayer(d, getplayermodelinfo(d), team, 1, false);
-
+            renderplayer(d, getplayermodelinfo(d), team, 1, mainpass);
 
             vec dir = vec(d->o).sub(camera1->o);
             float dist = dir.magnitude();
@@ -350,9 +342,9 @@ namespace game
             float fade = 1.0f;
             if(ragdollmillis && ragdollfade)
                 fade -= clamp(float(lastmillis - (d->lastupdate + max(ragdollmillis - ragdollfade, 0)))/min(ragdollmillis, ragdollfade), 0.0f, 1.0f);
-            renderplayer(d, getplayermodelinfo(d), team, fade, false);
+            renderplayer(d, getplayermodelinfo(d), team, fade, mainpass);
         }
-        //if(isthirdperson() && !followingplayer() && (player1->state!=CS_DEAD || hidedead != 1)) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, false);
+        if(player1->state!=CS_DEAD || hidedead != 1) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, mainpass);
         rendermonsters();
         rendermovables();
         entities::renderentities();
