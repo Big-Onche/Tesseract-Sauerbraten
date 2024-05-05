@@ -175,7 +175,10 @@ namespace game
                     a[ai++] = modelattach("tag_shield", mdl.armour[type], ANIM_SHIELD|ANIM_LOOP, 0);
             }
         }
-        if(mainpass)
+
+        bool onlyshadow = (d==game::hudplayer() && game::hudplayer()->state!=CS_DEAD);
+
+        if(mainpass && !onlyshadow)
         {
             d->muzzle = vec(-1, -1, -1);
             a[ai++] = modelattach("tag_muzzle", &d->muzzle);
@@ -186,7 +189,7 @@ namespace game
             case 1: mdlname = mdl.blueteam; break;
             case 2: mdlname = mdl.redteam; break;
         }
-        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll);
+        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis)
         {
