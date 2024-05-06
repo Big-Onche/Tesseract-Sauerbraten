@@ -75,6 +75,21 @@ void adddynlight(const vec &o, float radius, const vec &color, int fade, int pea
     dynlights.insert(insert, d);
 }
 
+void lighttrail(const vec &s, const vec &e, int radius, int fade, int peak, const vec &color) // sauerract | cast lights along a ray (mostly the same func as particle_trail
+{
+    vec v;
+    float d = e.dist(s, v);
+    int trails = (s.dist(e))/30;
+    int steps = clamp(int(d*2), 1, trails);
+    v.div(steps);
+    vec p = s;
+    loopi(steps)
+    {
+        p.add(v);
+        adddynlight(p, radius, color, fade, peak, L_NOSHADOW, 0, color);
+    }
+}
+
 void cleardynlights()
 {
     int faded = -1;

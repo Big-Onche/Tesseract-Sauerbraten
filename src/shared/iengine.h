@@ -293,7 +293,7 @@ enum
 };
 
 extern void adddynlight(const vec &o, float radius, const vec &color, int fade = 0, int peak = 0, int flags = 0, float initradius = 0, const vec &initcolor = vec(0, 0, 0), physent *owner = NULL, const vec &dir = vec(0, 0, 0), int spot = 0);
-extern void lightTrail(const vec &s, const vec &e, int radius, int fade, int peak, const vec &color);
+extern void lighttrail(const vec &s, const vec &e, int radius, int fade, int peak, const vec &color);
 extern void removetrackeddynlights(physent *owner = NULL);
 
 // rendergl

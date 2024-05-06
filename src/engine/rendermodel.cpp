@@ -233,10 +233,11 @@ void mdlname()
 }
 COMMAND(mdlname, "");
 
-// dummy vars to calm down errors messages when loading Sauer's models
+// sauerract | dummy vars to calm down errors messages when loading Sauer's models
 VAR(mdlalphadepth, -INT_MAX, 0, INT_MAX);
 VAR(mdlalphablend, -INT_MAX, 0, INT_MAX);
 VAR(mdlambient, -INT_MAX, 0, INT_MAX);
+VAR(md3ambient, -INT_MAX, 0, INT_MAX);
 
 #define checkragdoll \
     checkmdl; \
