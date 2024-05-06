@@ -758,6 +758,9 @@ static uint mapcrc = 0;
 uint getmapcrc() { return mapcrc; }
 void clearmapcrc() { mapcrc = 0; }
 extern void loadLightEntities(bool msg, const char *mapName);
+extern void replaceskycubes();
+
+VARR(fixskycubes, 0, 0, 1);
 
 bool load_world(const char *mname, const char *cname)        // still supports all map formats that have existed since the earliest cube betas!
 {
@@ -960,6 +963,7 @@ bool load_world(const char *mname, const char *cname)        // still supports a
     entitiesinoctanodes();
     attachentities();
     loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
+    if(fixskycubes) replaceskycubes();
     mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
 
     allchanged(true);

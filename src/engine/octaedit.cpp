@@ -2615,11 +2615,16 @@ bool mpreplacetex(int oldtex, int newtex, bool insel, selinfo &sel, ucharbuf &bu
     return true;
 }
 
-void replace(bool insel, int oldtex, int newtex, const char *err)
+void replace(bool insel, int oldtex, int newtex, const char *err, bool force = false)
 {
-    if(noedit()) return;
+    if(noedit() && !force) return;
     if(!vslots.inrange(oldtex) || !vslots.inrange(newtex)) { conoutf(CON_ERROR, "%s", err); return; }
     mpreplacetex(oldtex, newtex, insel, sel, true);
+}
+
+void replaceskycubes() // sauerract | change sky cubes with a non-alpha texture if needed
+{
+    replace(false, 0, 1, "failed to fix sky cubes", true);
 }
 
 ICOMMAND(replace, "", (), replace(false, reptex, lasttex, "can only replace after a texture edit"));
