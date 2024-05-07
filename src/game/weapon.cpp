@@ -619,7 +619,7 @@ namespace game
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
                     if(!local) addstain(STAIN_BULLET_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
-                    if(improveddynlights) lighttrail(hudgunorigin(gun, from, rays[i], d), rays[i], 30, 40, 20, vec(0.1, 0.05, 0.02f));
+                    if(improveddynlights) lighttrail(hudgunorigin(gun, from, rays[i], d), rays[i], 30, 40, 20, vec(0.05, 0.03, 0.01f));
                 }
                 if(muzzlelight)
                 {
