@@ -619,7 +619,7 @@ namespace game
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
                     if(!local) addstain(STAIN_BULLET_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
-                    if(improveddynlights) lighttrail(hudgunorigin(gun, from, rays[i], d), rays[i], 30, 40, 20, vec(0.25, 0.2, 0.05f));
+                    if(improveddynlights) lighttrail(hudgunorigin(gun, from, rays[i], d), rays[i], 30, 40, 20, vec(0.1, 0.05, 0.02f));
                 }
                 if(muzzlelight)
                 {
@@ -642,7 +642,7 @@ namespace game
                     if(improveddynlights) adddynlight(hudgunorigin(gun, d->o, to, d), isCg ? 45 : 25, vec(1.25f, 0.65f, 0.3f), isCg ? 50 : 75, isCg ? 50 : 75, DL_FLASH|DL_SHRINK, 25, vec(0, 0, 0), d);
                     else adddynlight(hudgunorigin(gun, d->o, to, d), isCg ? 30 : 15, vec(0.5f, 0.375f, 0.25f), isCg ? 50 : 100, isCg ? 50 : 100, DL_FLASH, 0, vec(0, 0, 0), d);
                 }
-                if(improveddynlights) lighttrail(hudgunorigin(gun, from, to, d), to, 30, 40, 20, vec(0.35, 0.25, 0.1f));
+                if(improveddynlights) lighttrail(hudgunorigin(gun, from, to, d), to, 30, 40, 20, vec(0.25, 0.2, 0.1f));
                 break;
             }
 
