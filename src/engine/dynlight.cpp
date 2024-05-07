@@ -79,7 +79,7 @@ void lighttrail(const vec &s, const vec &e, int radius, int fade, int peak, cons
 {
     vec v;
     float d = e.dist(s, v);
-    int trails = (s.dist(e))/30;
+    int trails = (s.dist(e))/15;
     int steps = clamp(int(d*2), 1, trails);
     v.div(steps);
     vec p = s;

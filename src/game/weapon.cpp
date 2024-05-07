@@ -624,7 +624,7 @@ namespace game
                 if(muzzlelight)
                 {
                     if(improveddynlights) adddynlight(hudgunorigin(gun, d->o, to, d), 50, vec(1.25f, 0.65f, 0.3f), 75, 50, DL_FLASH|DL_SHRINK, 25, vec(0, 0, 0), d);
-                    else adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.5f, 0.375f, 0.25f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
+                    else adddynlight(hudgunorigin(gun, d->o, to, d), 30, vec(0.25f, 0.16f, 0.13f), 100, 100, DL_FLASH, 0, vec(0, 0, 0), d);
                 }
                 break;
             }
@@ -642,7 +642,7 @@ namespace game
                     if(improveddynlights) adddynlight(hudgunorigin(gun, d->o, to, d), isCg ? 45 : 25, vec(1.25f, 0.65f, 0.3f), isCg ? 50 : 75, isCg ? 50 : 75, DL_FLASH|DL_SHRINK, 25, vec(0, 0, 0), d);
                     else adddynlight(hudgunorigin(gun, d->o, to, d), isCg ? 30 : 15, vec(0.5f, 0.375f, 0.25f), isCg ? 50 : 100, isCg ? 50 : 100, DL_FLASH, 0, vec(0, 0, 0), d);
                 }
-                if(improveddynlights) lighttrail(hudgunorigin(gun, from, to, d), to, 30, 40, 20, vec(0.45, 0.32, 0.1f));
+                if(improveddynlights) lighttrail(hudgunorigin(gun, from, to, d), to, 30, 40, 20, vec(0.35, 0.25, 0.1f));
                 break;
             }
 
