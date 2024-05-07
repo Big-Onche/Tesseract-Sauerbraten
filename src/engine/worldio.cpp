@@ -201,6 +201,8 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
 string ogzname, bakname, cfgname, picname;
 
 VARP(savebak, 0, 2, 2);
+VARP(useremasteredmaps, 0, 0, 1);
+VAR(loadremastered, 0, 0, 1);
 
 void setmapfilenames(const char *fname, const char *cname = NULL)
 {
@@ -219,7 +221,7 @@ void setmapfilenames(const char *fname, const char *cname = NULL)
     }
 
     validmapname(name, cname ? cname : fname);
-    formatstring(cfgname, "packages/map/%s.cfg", name);
+    formatstring(cfgname, "packages/map/%s%s.cfg", name, loadremastered && useremasteredmaps ? "_r" : "");
 
     path(ogzname);
     path(bakname);

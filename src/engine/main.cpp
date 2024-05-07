@@ -691,6 +691,8 @@ void resetgl()
        !reloadtexture("<premul>packages/interface/logo.png") ||
        !reloadtexture("<premul>packages/interface/logo_1024.png") ||
        !reloadtexture("packages/interface/background.png") ||
+       !reloadtexture("packages/interface/background_detail.png") ||
+       !reloadtexture("packages/interface/background_decal.png") ||
        !reloadtexture("packages/interface/shadow.png") ||
        !reloadtexture("packages/interface/guioverlay.png") ||
        !reloadtexture("packages/interface/loading_frame.png") ||
