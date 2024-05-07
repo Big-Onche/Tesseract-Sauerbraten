@@ -2617,7 +2617,7 @@ bool mpreplacetex(int oldtex, int newtex, bool insel, selinfo &sel, ucharbuf &bu
 
 void replace(bool insel, int oldtex, int newtex, const char *err, bool force = false)
 {
-    if(noedit() && !force) return;
+    if(!force && noedit()) return;
     if(!vslots.inrange(oldtex) || !vslots.inrange(newtex)) { conoutf(CON_ERROR, "%s", err); return; }
     mpreplacetex(oldtex, newtex, insel, sel, true);
 }
