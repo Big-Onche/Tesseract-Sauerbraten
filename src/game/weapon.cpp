@@ -900,7 +900,6 @@ namespace game
             else
             {
                 vectoyawpitch(vel, yaw, pitch);
-                yaw += 90;
                 bnc.lastyaw = yaw;
             }
             pitch = -bnc.roll;
