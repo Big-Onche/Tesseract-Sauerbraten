@@ -334,12 +334,12 @@ namespace game
         if(d) result(colorname(d));
     });
 
-    int getclientteam(int cn)
+    const char *getclientteam(int cn)
     {
         fpsent *d = getclient(cn);
-        return m_teammode && d ? !strcmp(d->team, "evil") ? 2 : 1 : 0;
+        return d ? d->team : "";
     }
-    ICOMMAND(getclientteam, "i", (int *cn), intret(getclientteam(*cn)));
+    ICOMMAND(getclientteam, "i", (int *cn), result(getclientteam(*cn)));
 
     int getclientmodel(int cn)
     {
@@ -392,6 +392,40 @@ namespace game
         {
             scoregroup &sg = *groups[*team];
             result(sg.team);
+        }
+    });
+
+    ICOMMAND(getteams, "", (),
+    {
+        if (m_teammode)
+        {
+            vector<char> s;
+            loopi(groupplayers())
+            {
+                scoregroup &sg = *groups[i];
+                if (i > 0) s.add(' ');
+                s.put(sg.team, strlen(sg.team));
+            }
+            s.add('\0');
+            result(s.getbuf());
+        }
+    });
+
+    ICOMMAND(getteamplayers, "i", (int *team),
+    {
+        if (m_teammode && *team <= groupplayers() - 1)
+        {
+            vector<char> s;
+            scoregroup &sg = *groups[*team];
+            loopvj(sg.players)
+            {
+                if (j > 0) s.add(' ');
+                fpsent *p = sg.players[j];
+                defformatstring(clientnum, "%d", p->clientnum);
+                s.put(clientnum, strlen(clientnum));
+            }
+            s.add('\0');
+            result(s.getbuf());
         }
     });
 
