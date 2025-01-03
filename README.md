@@ -1,17 +1,39 @@
 # Tesseract: Sauerbraten
 
-This project attempts to port fully Sauerbraten to its fork Tesseract, while keeping it compatible with legacy Sauerbraten's servers.
+This project aims to fully port **Cube 2: Sauerbraten** to its fork, **Tesseract**, while maintaining full compatibility with legacy Sauerbraten servers.
 
-The game is playable but still in an early phase and a lot of stuff must be fixed, finished, and polished (scoreboard, menus, etc.), note that older maps (such as ~~face-camper~~ face-capture) are currently not playable and lights are broken on some other maps.
+---
 
-**Here is the roadmap:**
-* finish menus with all of Sauerbraten's UI features
-* repair unplayable maps (light glitches and older maps not loading)
-* fix every broken thing until we get a perfect Sauerbraten port
-* improve audio and gfx with optional new effects
-* remaster maps with higher-res textures
+## 🚧 Project Status and Roadmap
 
-## What Tesseract provides?
+The game is **playable** but still in the early stages. Significant work remains to fix, complete, and polish various elements (e.g., the scoreboard, and menus). Some older maps, (such as ~~face-camper~~ face-capture), are currently not loadable, while others have lighting issues.
+
+### Playable Maps
+
+The following is the current status of maps that are playable in multiplayer and free of glitches:
+
+- **CTF Maps:** 🟩🟩🟩🟩🟩🟩🟩⬛⬛⬛ **71%** complete.
+
+### Roadmap
+
+   - Finish implementing all of Sauerbraten's UI features.
+   - Resolve light glitches.
+   - Ensure older maps load properly.
+   - Address all known issues for a perfect Sauerbraten port.
+   - Improve audio and graphics with optional new effects.
+   - Upgrade maps with higher-resolution textures.
+
+---
+
+## 🤝 Contribute
+We welcome all contributions!
+- Submit a patch or feature via a [GitHub Pull Request](https://github.com/Big-Onche/Tesseract-Sauerbraten/pulls).
+- Report bugs or suggest features on the [GitHub Issue Tracker](https://github.com/Big-Onche/Tesseract-Sauerbraten/issues).
+- Fix lighting issues on maps (see 'maps status.xlsx') and this 'tutorial: [https://youtu.be/gTVatxg6p9s](https://youtu.be/gTVatxg6p9s)
+
+---
+
+## 🕹 Features Provided by Tesseract
 
 Tesseract is a fork of the Cube 2: Sauerbraten engine. The goal of Tesseract is to make mapping more fun by using modern dynamic rendering techniques, so that you can get instant feedback on lighting changes, not just geometry.
 
