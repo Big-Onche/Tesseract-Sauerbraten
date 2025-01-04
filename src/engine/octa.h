@@ -35,18 +35,40 @@ struct materialsurface
 struct vertinfo
 {
     ushort x, y, z, norm;
+    ushort u = 0, v = 0; // Optional fields for older maps
 
     void setxyz(ushort a, ushort b, ushort c) { x = a; y = b; z = c; }
     void setxyz(const ivec &v) { setxyz(v.x, v.y, v.z); }
+
+    // For newer maps
     void set(ushort a, ushort b, ushort c, ushort n = 0) { setxyz(a, b, c); norm = n; }
     void set(const ivec &v, ushort n = 0) { set(v.x, v.y, v.z, n); }
+
+    // For older maps
+    void set(ushort a, ushort b, ushort c, ushort s, ushort t, ushort n = 0)
+    {
+        setxyz(a, b, c);
+        u = s;
+        v = t;
+        norm = n;
+    }
+
+    void set(const ivec &v, ushort s, ushort t, ushort n = 0)
+    {
+        set(v.x, v.y, v.z, s, t, n);
+    }
+
     ivec getxyz() const { return ivec(x, y, z); }
 };
+
+
+enum { LMID_AMBIENT = 0, LMID_AMBIENT1, LMID_BRIGHT, LMID_BRIGHT1, LMID_DARK, LMID_DARK1, LMID_RESERVED };
 
 enum
 {
     LAYER_TOP    = (1<<5),
     LAYER_BOTTOM = (1<<6),
+    LAYER_DUP    = (1<<7),
 
     LAYER_BLEND  = LAYER_TOP|LAYER_BOTTOM,
 
@@ -55,18 +77,20 @@ enum
 
 struct surfaceinfo
 {
+    uchar lmid[2];
     uchar verts, numverts;
 
-    int totalverts() const { return numverts&MAXFACEVERTS; }
-    bool used() const { return (numverts&~LAYER_TOP) != 0; }
-    void clear() { numverts = (numverts&MAXFACEVERTS) | LAYER_TOP; }
-    void brighten() { clear(); }
+    int totalverts() const { return numverts&LAYER_DUP ? (numverts&MAXFACEVERTS)*2 : numverts&MAXFACEVERTS; }
+    bool used() const { return lmid[0] != LMID_AMBIENT || lmid[1] != LMID_AMBIENT || numverts&~LAYER_TOP; }
+    void clear() { lmid[0] = LMID_AMBIENT; lmid[1] = LMID_AMBIENT; numverts = (numverts&MAXFACEVERTS) | LAYER_TOP; }
+    void brighten() { lmid[0] = LMID_BRIGHT; lmid[1] = LMID_AMBIENT; numverts = (numverts&MAXFACEVERTS) | LAYER_TOP; clear(); }
 };
 
 static const surfaceinfo topsurface = {0, LAYER_TOP};
 static const surfaceinfo bottomsurface = {0, LAYER_BOTTOM};
-#define brightsurface topsurface
-#define ambientsurface topsurface
+static const surfaceinfo ambientsurface = {{LMID_AMBIENT, LMID_AMBIENT}, 0, LAYER_TOP};
+static const surfaceinfo brightsurface = {{LMID_BRIGHT, LMID_AMBIENT}, 0, LAYER_TOP};
+static const surfaceinfo brightbottomsurface = {{LMID_AMBIENT, LMID_BRIGHT}, 0, LAYER_BOTTOM};
 
 struct grasstri
 {
