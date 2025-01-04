@@ -75,13 +75,27 @@ static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octahe
 
 static void fixent(entity &e, int version)
 {
-    if(version == 0) // sauerbraten map
+    if(version != 0) // sauerract | version '0' are newer maps
     {
-        if(e.type == ET_MAPMODEL) // sauerract | invert mdl id and pitch for sauerbraten port
+        if(version <= 10 && e.type >= 7) e.type++;
+        if(version <= 12 && e.type >= 8) e.type++;
+        if(version <= 14 && e.type >= ET_MAPMODEL && e.type <= 16)
         {
-            int attr1 = e.attr1, attr2 = e.attr2;
-            e.attr1 = attr2, e.attr2 = attr1;
+            if(e.type == 16) e.type = ET_MAPMODEL;
+            else e.type++;
         }
+        if(version <= 20 && e.type >= ET_ENVMAP) e.type++;
+        if(version <= 21 && e.type >= ET_PARTICLES) e.type++;
+        if(version <= 22 && e.type >= ET_SOUND) e.type++;
+        if(version <= 23 && e.type >= ET_SPOTLIGHT) e.type++;
+        if(version <= 30 && (e.type == ET_MAPMODEL || e.type == ET_PLAYERSTART)) e.attr1 = (int(e.attr1)+180)%360;
+        if(version <= 31 && e.type == ET_MAPMODEL) { int yaw = (int(e.attr1)%360 + 360)%360 + 7; e.attr1 = yaw - yaw%15; }
+    }
+
+    if(e.type == ET_MAPMODEL && version < 33) // sauerract | invert mdl id and pitch for sauerbraten port
+    {
+        int attr1 = e.attr1, attr2 = e.attr2;
+        e.attr1 = attr2, e.attr2 = attr1;
     }
 }
 
@@ -1116,6 +1130,32 @@ extern void replaceskycubes();
 
 VARR(fixskycubes, 0, 0, 1);
 
+void finishload(const char *mname, const char *cname, Texture *mapshot)
+{
+    preloadusedmapmodels(true);
+
+    game::preload();
+    flushpreloadedmodels();
+
+    preloadmapsounds();
+
+    entitiesinoctanodes();
+
+    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
+    attachentities();
+
+    if(fixskycubes) replaceskycubes();
+    mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
+
+    allchanged(true);
+
+    renderbackground("loading...", mapshot, mname, game::getmapinfo());
+
+    if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
+
+    startmap(cname ? cname : mname);
+}
+
 bool trynewmap(const char *mname, const char *cname)
 {
     int loadingstart = SDL_GetTicks();
@@ -1307,26 +1347,7 @@ bool trynewmap(const char *mname, const char *cname)
     execfile(cfgname, false);
     identflags &= ~IDF_OVERRIDDEN;
 
-    preloadusedmapmodels(true);
-
-    game::preload();
-    flushpreloadedmodels();
-
-    preloadmapsounds();
-
-    entitiesinoctanodes();
-    attachentities();
-    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
-    if(fixskycubes) replaceskycubes();
-    mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
-
-    allchanged(true);
-
-    renderbackground("loading...", mapshot, mname, game::getmapinfo());
-
-    if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
-
-    startmap(cname ? cname : mname);
+    finishload(mname, cname, mapshot);
 
     return true;
 }
@@ -1337,24 +1358,21 @@ bool tryoldmap(const char *mname, const char *cname)        // still supports al
     setmapfilenames(mname, cname);
     stream *f = opengzfile(ogzname, "rb");
     if(!f) { conoutf(CON_ERROR, "could not read map %s", ogzname); return false; }
-
     octaheader hdr;
-    compatheader chdr;
-
-    if(f->read(&hdr, 7*sizeof(int)) != 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+    if(f->read(&hdr, 7*sizeof(int)) != 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
     lilswap(&hdr.version, 6);
-    if(memcmp(hdr.magic, "OCTA", 4) || hdr.worldsize <= 0|| hdr.numents < 0) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
-    if(hdr.version>MAPVERSION) { conoutf(CON_ERROR, "map %s requires a newer version of Cube 2: Sauerbraten", ogzname); return false; }
-
+    if(memcmp(hdr.magic, "OCTA", 4) || hdr.worldsize <= 0|| hdr.numents < 0) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
+    if(hdr.version>MAPVERSION) { conoutf(CON_ERROR, "map %s requires a newer version of Cube 2: Sauerbraten", ogzname); delete f; return false; }
+    compatheader chdr;
     if(hdr.version <= 28)
     {
-        if(f->read(&chdr.lightprecision, sizeof(chdr) - 7*sizeof(int)) != sizeof(chdr) - 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(f->read(&chdr.lightprecision, sizeof(chdr) - 7*sizeof(int)) != sizeof(chdr) - 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
     }
     else
     {
         int extra = 0;
         if(hdr.version <= 29) extra++;
-        if(f->read(&hdr.blendmap, sizeof(hdr) - (7+extra)*sizeof(int)) != sizeof(hdr) - (7+extra)*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(f->read(&hdr.blendmap, sizeof(hdr) - (7+extra)*sizeof(int)) != sizeof(hdr) - (7+extra)*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); delete f; return false; }
     }
 
     resetmap();
@@ -1547,7 +1565,7 @@ bool tryoldmap(const char *mname, const char *cname)        // still supports al
 
     if(!failed)
     {
-        if(mapversion <= 0) loopi(hdr.lightmaps)
+        if(hdr.version >= 7) loopi(hdr.lightmaps)
         {
             int type = f->getchar();
             if(type&0x80)
@@ -1576,34 +1594,14 @@ bool tryoldmap(const char *mname, const char *cname)        // still supports al
     execfile(cfgname, false);
     identflags &= ~IDF_OVERRIDDEN;
 
-    preloadusedmapmodels(true);
-
-    game::preload();
-    flushpreloadedmodels();
-
-    preloadmapsounds();
-
-    entitiesinoctanodes();
-    attachentities();
-
-    loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
-    if(fixskycubes) replaceskycubes();
-    mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
-
-    allchanged(true);
-
-    renderbackground("loading...", mapshot, mname, game::getmapinfo());
-
-    if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
-
-    startmap(cname ? cname : mname);
+    finishload(mname, cname, mapshot);
 
     return true;
 }
 
 bool load_world(const char *mname, const char *cname)
 {
-    if(trynewmap(mname, cname)) {conoutf("Loading new map"); return true;}
+    if(trynewmap(mname, cname)) return true;
     else if(tryoldmap(mname, cname)) return true;
     return false;
 }

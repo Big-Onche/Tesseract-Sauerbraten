@@ -1405,6 +1405,7 @@ void resetmap()
     smalphalights = 0;
     volumetricsmalphalights = 0;
 }
+
 void startmap(const char *name)
 {
     game::startmap(name);
