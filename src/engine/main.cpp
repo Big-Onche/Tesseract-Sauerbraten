@@ -1257,6 +1257,9 @@ int main(int argc, char **argv)
     }
     execfile(game::autoexec(), false);
 
+    extern int musicvol;
+    if(musicvol) execute("playMusic");
+
     identflags &= ~IDF_PERSIST;
 
     initing = INIT_GAME;
