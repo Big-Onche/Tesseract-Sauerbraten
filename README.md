@@ -6,7 +6,7 @@ This project aims to fully port **Cube 2: Sauerbraten** to its fork, **Tesseract
 
 ## 🚧 Project Status and Roadmap
 
-The game is **playable** but still in the early stages. Significant work remains to fix, complete, and polish various elements (e.g., the scoreboard, and menus). Some older maps, (such as ~~face-camper~~ face-capture), are currently not loadable, while others have lighting issues.
+The game is almost fully **playable** but the project is still in the early stages. Significant work remains to fix, complete, and polish various elements (e.g., the scoreboard, and menus). Some maps have poorly optimized lighting or even light flickering issues.
 
 ### Playable Maps
 
@@ -21,7 +21,7 @@ The following is the current status of maps that are playable in multiplayer and
    - Resolve light glitches.
    - Ensure older maps load properly.
    - Address all known issues for a perfect Sauerbraten port.
-   - Improve audio and graphics with optional new effects.
+   - Improve audio and graphics with new, optional effects.
    - Upgrade maps with higher-resolution textures.
 
 ---
