@@ -507,7 +507,7 @@ static Uint32 calclighttimer(Uint32 interval, void *param)
     return interval;
 }
 
-void calclight(bool cancelable = true)
+void calclight(bool cancelable = true, bool msg = true)
 {
     renderbackground("computing lighting... (esc to abort)");
     remip();
@@ -527,16 +527,16 @@ void calclight(bool cancelable = true)
     allchanged();
     if(calclight_canceled && cancelable)
         conoutf("calclight aborted");
-    else
+    else if(msg)
         conoutf("computed lighting (%.1f seconds)",
             (end - start) / 1000.0f);
 }
 
-void mpcalclight(bool local, bool cancelable)
+void mpcalclight(bool local, bool cancelable, bool msg)
 {
     extern selinfo sel;
     if(local) game::edittrigger(sel, EDIT_CALCLIGHT);
-    calclight(cancelable);
+    calclight(cancelable, msg);
 }
 
 ICOMMAND(calclight, "", (), mpcalclight(true));

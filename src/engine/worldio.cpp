@@ -1145,7 +1145,7 @@ void finishload(const char *mname, const char *cname, Texture *mapshot)
     attachentities();
 
     if(fixskycubes) replaceskycubes();
-    mpcalclight(true, false); // sauerract | some maps needs a remip to have good looking lights
+    mpcalclight(true, false, false); // sauerract | some maps needs a remip to have good looking lights
 
     allchanged(true);
 

@@ -110,7 +110,7 @@ extern bool mpreplacetex(int oldtex, int newtex, bool insel, selinfo &sel, uchar
 extern void mpdelcube(selinfo &sel, bool local);
 extern void mpremip(bool local);
 extern bool mpeditvslot(int delta, int allfaces, selinfo &sel, ucharbuf &buf);
-extern void mpcalclight(bool local, bool cancelable = true);
+extern void mpcalclight(bool local, bool cancelable = true, bool msg = true);
 
 // command
 extern int variable(const char *name, int min, int cur, int max, int *storage, identfun fun, int flags);
