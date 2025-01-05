@@ -42,22 +42,22 @@ void getmapfilenames(const char *fname, const char *cname, char *pakname, char *
 
 static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octaheader &ohdr)
 {
-    if(f->read(&hdr, 3*sizeof(int)) != 3*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+    if(f->read(&hdr, 3*sizeof(int)) != 3*sizeof(int)) return false;
     lilswap(&hdr.version, 2);
 
     if(!memcmp(hdr.magic, "TMAP", 4))
     {
-        if(hdr.version>MAPVERSION) { conoutf(CON_ERROR, "map %s requires a newer version of Tesseract", ogzname); return false; }
-        if(f->read(&hdr.worldsize, 6*sizeof(int)) != 6*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(hdr.version>MAPVERSION)  return false;
+        if(f->read(&hdr.worldsize, 6*sizeof(int)) != 6*sizeof(int)) return false;
         lilswap(&hdr.worldsize, 6);
-        if(hdr.worldsize <= 0|| hdr.numents < 0) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(hdr.worldsize <= 0|| hdr.numents < 0) return false;
     }
     else if(!memcmp(hdr.magic, "OCTA", 4))
     {
-        if(hdr.version!=OCTAVERSION) { conoutf(CON_ERROR, "map %s uses an unsupported map format version", ogzname); return false; }
-        if(f->read(&ohdr.worldsize, 7*sizeof(int)) != 7*sizeof(int)) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(hdr.version!=OCTAVERSION) return false;
+        if(f->read(&ohdr.worldsize, 7*sizeof(int)) != 7*sizeof(int)) return false;
         lilswap(&ohdr.worldsize, 7);
-        if(ohdr.worldsize <= 0|| ohdr.numents < 0) { conoutf(CON_ERROR, "map %s has malformatted header", ogzname); return false; }
+        if(ohdr.worldsize <= 0|| ohdr.numents < 0) return false;
         memcpy(hdr.magic, "TMAP", 4);
         hdr.version = 0;
         hdr.headersize = sizeof(hdr);
@@ -68,7 +68,7 @@ static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octahe
         hdr.numvars = ohdr.numvars;
         hdr.numvslots = ohdr.numvslots;
     }
-    else { conoutf(CON_ERROR, "map %s uses an unsupported map type", ogzname); return false; }
+    else return false;
 
     return true;
 }
@@ -1130,7 +1130,7 @@ extern void replaceskycubes();
 
 VARR(fixskycubes, 0, 0, 1);
 
-void finishload(const char *mname, const char *cname, Texture *mapshot)
+void finishload(const char *mname, const char *cname, Texture *mapshot) // sauerract | finishing to load and prepare map
 {
     preloadusedmapmodels(true);
 
@@ -1156,7 +1156,7 @@ void finishload(const char *mname, const char *cname, Texture *mapshot)
     startmap(cname ? cname : mname);
 }
 
-bool trynewmap(const char *mname, const char *cname)
+bool trynewmap(const char *mname, const char *cname) // sauerract | try to load newer maps
 {
     int loadingstart = SDL_GetTicks();
     setmapfilenames(mname, cname);
@@ -1352,7 +1352,7 @@ bool trynewmap(const char *mname, const char *cname)
     return true;
 }
 
-bool tryoldmap(const char *mname, const char *cname)        // still supports all map formats that have existed since the earliest cube betas!
+bool tryoldmap(const char *mname, const char *cname) // sauerract | fallback to load older maps // still supports all map formats that have existed since the earliest cube betas!
 {
     int loadingstart = SDL_GetTicks();
     setmapfilenames(mname, cname);
