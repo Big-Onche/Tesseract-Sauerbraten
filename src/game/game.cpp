@@ -928,6 +928,7 @@ namespace game
             draw_textf("/%d", (HICON_X + HICON_SIZE + HICON_SPACE + width*2)/scale, (HICON_TEXTY + height)/scale, d->maxhealth);
 
             pophudmatrix();
+            resethudshader();
         }
 
         drawicon(HICON_HEALTH, HICON_X, HICON_Y);
