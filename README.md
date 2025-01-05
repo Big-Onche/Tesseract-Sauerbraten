@@ -11,8 +11,9 @@ The game is **playable** but still in the early stages. Significant work remains
 ### Playable Maps
 
 The following is the current status of maps that are playable in multiplayer and free of glitches:
+- **DM Maps:**  🟩🟩🟩🟩🟩🟩🟩🟩🟩⬛ **93%** complete.
+- **CTF Maps:** 🟩🟩🟩🟩🟩🟩🟩🟩⬛⬛ **81%** complete.
 
-- **CTF Maps:** 🟩🟩🟩🟩🟩🟩🟩⬛⬛⬛ **71%** complete.
 
 ### Roadmap
 
