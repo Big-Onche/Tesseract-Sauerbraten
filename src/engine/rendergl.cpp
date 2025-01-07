@@ -1408,6 +1408,16 @@ void modifyorient(float yaw, float pitch)
     }
 }
 
+VAR(smoothmouse, 0, 0, 1);
+FVARP(smoothingfactor, 0.001f, 0.02f, 1.0f);
+FVARP(smoothingminspeed, 0.0f, 0.01f, 1.0f);
+FVARP(smoothingblend, 0.01f, 0.5f, 1.0f);
+static float curhspeed = 0.0f;
+static float curvspeed = 0.0f;
+static float lasthspeed = 0.0f;
+static float lastvspeed = 0.0f;
+static bool residualmovement = false;
+
 void mousemove(int dx, int dy)
 {
     if(!game::allowmouselook()) return;
@@ -1425,9 +1435,76 @@ void mousemove(int dx, int dy)
             curaccel = zoomaccel;
         }
     }
-    if(curaccel && curtime && (dx || dy)) cursens += curaccel * sqrtf(dx*dx + dy*dy)/curtime;
+
+    if(curaccel && curtime && (dx || dy))cursens += curaccel * sqrtf(dx*dx + dy*dy)/curtime;
+
     cursens /= sensitivityscale;
-    modifyorient(dx*cursens, dy*cursens*(invmouse ? 1 : -1));
+
+    float targethspeed = dx * cursens;
+    float targetvspeed = dy * cursens * (invmouse ? 1 : -1);
+
+    if(smoothmouse)
+    {
+        // Store last frame's speeds
+        lasthspeed = curhspeed;
+        lastvspeed = curvspeed;
+
+        if(dx || dy)  // If there's new input
+        {
+            // Blend new movement with existing momentum
+            float blend = residualmovement ? smoothingblend : 1.0f;
+            float invblend = 1.0f - blend;
+
+            // Calculate new target speed as a blend of current momentum and new input
+            float blendedtargeth = (targethspeed * blend) + (lasthspeed * invblend);
+            float blendedtargetv = (targetvspeed * blend) + (lastvspeed * invblend);
+
+            // Smooth transition to new blended target
+            curhspeed = curhspeed + (blendedtargeth - curhspeed) * smoothingfactor;
+            curvspeed = curvspeed + (blendedtargetv - curvspeed) * smoothingfactor;
+        }
+        else
+        {
+            // Normal smoothing decay when no new input
+            curhspeed = curhspeed + (targethspeed - curhspeed) * smoothingfactor;
+            curvspeed = curvspeed + (targetvspeed - curvspeed) * smoothingfactor;
+        }
+
+        // Check if we still have significant movement
+        residualmovement = (fabs(curhspeed) > smoothingminspeed || fabs(curvspeed) > smoothingminspeed);
+
+        if(residualmovement) modifyorient(curhspeed, curvspeed);
+    }
+    else
+    {
+        residualmovement = false;
+        curhspeed = curvspeed = 0;
+        lasthspeed = lastvspeed = 0;
+        modifyorient(targethspeed, targetvspeed);
+    }
+}
+
+void checkresidualmovement()
+{
+    if(smoothmouse && residualmovement)
+    {
+        lasthspeed = curhspeed;
+        lastvspeed = curvspeed;
+
+        // Decay current speeds
+        curhspeed = curhspeed * (1.0f - smoothingfactor);
+        curvspeed = curvspeed * (1.0f - smoothingfactor);
+
+        // Check if movement is still significant
+        residualmovement = (fabs(curhspeed) > smoothingminspeed || fabs(curvspeed) > smoothingminspeed);
+
+        if(residualmovement) modifyorient(curhspeed, curvspeed);
+        else
+        {
+            curhspeed = curvspeed = 0;
+            lasthspeed = lastvspeed = 0;
+        }
+    }
 }
 
 void recomputecamera()

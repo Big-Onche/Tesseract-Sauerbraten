@@ -1118,6 +1118,8 @@ int getclockmillis()
     return max(millis, totalmillis);
 }
 
+extern void checkresidualmovement();
+
 VAR(numcpus, 1, 1, 16);
 
 int main(int argc, char **argv)
@@ -1313,6 +1315,7 @@ int main(int argc, char **argv)
         updatetime();
 
         checkinput();
+        checkresidualmovement();
         UI::update();
         menuprocess();
         tryedit();
