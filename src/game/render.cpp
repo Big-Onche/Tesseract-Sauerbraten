@@ -189,7 +189,8 @@ namespace game
             case 1: mdlname = mdl.blueteam; break;
             case 2: mdlname = mdl.redteam; break;
         }
-        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
+
+        if(d->state==CS_ALIVE || d->state==CS_LAGGED) renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis)
         {
@@ -312,11 +313,11 @@ namespace game
             else getbestplayers(bestplayers);
         }
 
-        fpsent *exclude = isthirdperson() ? NULL : followingplayer();
+        fpsent *exclude = isthirdperson() ? NULL : hudplayer();
         loopv(players)
         {
             fpsent *d = players[i];
-            if(d == player1 || d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
+            if(d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
             int team = 0;
             if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
             renderplayer(d, getplayermodelinfo(d), team, 1, mainpass);
@@ -331,7 +332,7 @@ namespace game
             }
 
             copystring(d->info, colorname(d));
-            if(d->state!=CS_DEAD)
+            if(d->state!=CS_DEAD && d!=hudplayer())
             {
                 float offset = renderstatusbars(d, team);
                 renderstatusicons(d, team, offset);
