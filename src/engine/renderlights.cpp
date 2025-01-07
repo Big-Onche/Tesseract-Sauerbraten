@@ -951,7 +951,7 @@ VAR(hdraccummillis, 1, 33, 1000);
 VAR(hdrreduce, 0, 2, 2);
 VARFP(hdrprec, 0, 2, 3, cleanupgbuffer());
 FVARFP(hdrgamma, 1e-3f, 2, 1e3f, initwarning("HDR setup", INIT_LOAD, CHANGE_SHADERS));
-FVARR(hdrbright, 1e-4f, 1.6f, 1e4f);
+FVARR(hdrbright, 1e-4f, 1.2f, 1e4f);
 FVAR(hdrsaturate, 1e-3f, 0.85f, 1e3f);
 FVAR(hdrminexposure, 0, 0.03f, 1);
 FVAR(hdrmaxexposure, 0, 0.3f, 1);
@@ -3581,6 +3581,8 @@ void viewlightscissor()
     }
 }
 
+VARR(keeplargelights, 0 , 0, 1);
+
 void collectlights()
 {
     if(lights.length()) return;
@@ -3591,7 +3593,7 @@ void collectlights()
     {
         const extentity *e = ents[i];
         if(e->type != ET_LIGHT || e->attr1 <= 0) continue;
-        if(e->attr1 > 1250)
+        if(e->attr1 > 1250 && !keeplargelights)
         {   // skip large lights to avoid lighting bugs and lags. They are used mostly for sunlight, if so, a true sunlight is defined in the map's config file
             static bool warned = false;
             if(!warned)
