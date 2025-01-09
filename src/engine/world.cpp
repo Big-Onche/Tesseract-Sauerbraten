@@ -1621,3 +1621,18 @@ void loadLightEntities(bool msg = true, const char *mapName = NULL) // Sauerract
 }
 ICOMMAND(loadlights, "", (), loadLightEntities());
 
+VARR(maxspotangle, 0, 90, 90);
+
+void clampSpotAngles()
+{
+    const vector<extentity *> &ents = entities::getents();
+
+    loopv(ents)
+    {
+        extentity &e = *ents[i];
+        if(e.type==ET_SPOTLIGHT && e.attr1 > maxspotangle) e.attr1 = maxspotangle;
+    }
+}
+
+
+

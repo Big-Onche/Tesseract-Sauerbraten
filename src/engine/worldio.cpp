@@ -1126,6 +1126,8 @@ static uint mapcrc = 0;
 uint getmapcrc() { return mapcrc; }
 void clearmapcrc() { mapcrc = 0; }
 extern void loadLightEntities(bool msg, const char *mapName);
+extern int maxspotangle;
+extern void clampSpotAngles();
 extern void replaceskycubes();
 
 VARR(fixskycubes, 0, 0, 1);
@@ -1143,6 +1145,8 @@ void finishload(const char *mname, const char *cname, Texture *mapshot) // sauer
 
     loadLightEntities(false, mname); // sauerract | load light files for maps with broken lighting
     attachentities();
+
+    if(maxspotangle!=90) clampSpotAngles();
 
     if(fixskycubes) replaceskycubes();
     mpcalclight(true, false, false); // sauerract | some maps needs a remip to have good looking lights

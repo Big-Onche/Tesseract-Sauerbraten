@@ -368,8 +368,8 @@ bool checkquery(occludequery *query, bool nowait)
             glGetQueryObjectiv_(query->id, GL_QUERY_RESULT_AVAILABLE, &avail);
             if(!avail) return false;
         }
-     
-        GLuint fragments;   
+
+        GLuint fragments;
         glGetQueryObjectuiv_(query->id, GL_QUERY_RESULT, &fragments);
         query->fragments = querytarget() == GL_SAMPLES_PASSED || !fragments ? int(fragments) : oqfrags;
     }
@@ -2440,7 +2440,7 @@ static void renderdecalbatches(decalrenderer &cur, int pass)
         {
             updateshader(cur);
         }
- 
+
         renderdecalbatch(cur, pass, b);
     }
 
