@@ -12,7 +12,7 @@ namespace entities
 
     void readent(entity &e, char *buf, int ver)     // read from disk, and init
     {
-        if(ver <= 30) switch(e.type)
+        if(ver >= 30 || !ver) switch(e.type)
         {
             case FLAG:
             case MONSTER:
