@@ -190,7 +190,7 @@ namespace game
             case 2: mdlname = mdl.redteam; break;
         }
 
-        if(d->state==CS_ALIVE || d->state==CS_LAGGED) renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
+        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis)
         {
@@ -348,7 +348,7 @@ namespace game
                 fade -= clamp(float(lastmillis - (d->lastupdate + max(ragdollmillis - ragdollfade, 0)))/min(ragdollmillis, ragdollfade), 0.0f, 1.0f);
             renderplayer(d, getplayermodelinfo(d), team, fade, mainpass);
         }
-        if(player1->state!=CS_DEAD || hidedead != 1) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, mainpass);
+        if(isthirdperson() && !followingplayer() && (player1->state != CS_DEAD || hidedead != 1)) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, mainpass);
         rendermonsters();
         rendermovables();
         entities::renderentities();
