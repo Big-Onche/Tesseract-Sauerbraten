@@ -5,8 +5,3 @@
 /bin/
 /bin64/
 /src/vcpp/
-
-/**/*.a
-src/tess_client
-src/tess_server
-

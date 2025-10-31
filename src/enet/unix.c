@@ -45,10 +45,6 @@
 #endif
 #endif
 
-#ifdef __socklen_t_defined
-#define HAS_SOCKLEN_T 1
-#endif
-
 #ifdef HAS_FCNTL
 #include <fcntl.h>
 #endif
