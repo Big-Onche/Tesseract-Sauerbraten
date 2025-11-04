@@ -1434,6 +1434,37 @@ void seedparticles()
     }
 }
 
+VARP(sunflare, 0, 0, 1);
+VARR(sunflareyaw, 0, 0, 360);
+VARR(sunflarepitch, -90, 90, 90);
+CVARR(sunflarecolour, 0x000000);
+
+void showsunflare()
+{
+    static bvec goalflare(0, 0, 0);
+    static bvec curflare(0, 0, 0);
+
+    auto rad = [](float d){ return d * M_PI / 180.0f; };
+    vec flaredir(
+        cosf(rad(sunlightpitch)) * cosf(rad(fmod(sunlightyaw + 90.0f, 360.0f))),
+        cosf(rad(sunlightpitch)) * sinf(rad(fmod(sunlightyaw + 90.0f, 360.0f))),
+        sinf(rad(sunlightpitch))
+    );
+
+    float maxdist = INT_MAX;
+    if(raycube(camera1->o, flaredir, maxdist, RAY_CLIPMAT|RAY_POLY) < maxdist) goalflare = bvec(0, 0, 0);
+    else goalflare = sunflarecolour;
+
+    curflare.lerp(curflare, goalflare, curtime / 50.f);
+
+    if(curflare != bvec(0, 0, 0))
+    {
+        vec flarepos = camera1->o;
+        flarepos.add(vec(flaredir).mul(32.0f));
+        flares.addflare(flarepos, curflare.x, curflare.y, curflare.z, true, false);
+    }
+}
+
 void updateparticles()
 {
     if(regenemitters) addparticleemitters();
@@ -1454,6 +1485,8 @@ void updateparticles()
 
     if(!editmode || showparticles)
     {
+        if(sunflare && (sunflarecolour != bvec(0, 0, 0))) showsunflare();
+
         int emitted = 0, replayed = 0;
         addedparticles = 0;
         loopv(emitters)
