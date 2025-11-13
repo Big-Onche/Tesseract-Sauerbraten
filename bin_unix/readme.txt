@@ -8,7 +8,7 @@ Please run "tesseract_unix" from the root Tesseract dir (NOT from inside the "bi
 directory) to launch these, or set the TESS_DATA variable at the top of the "tesseract_unix" 
 script to an absolute path to allow it to be run from any location. Note that the "tesseract_unix" 
 script is set up to write any files (saved maps, configs, etc.) into the user's home 
-directory at "~/.tesseract".
+directory at "~/.sauerract".
 
 Clients will need the following dynamic link libraries present:
 * libGL (OpenGL)
@@ -22,7 +22,7 @@ Clients will need the following dynamic link libraries present:
 If native binaries for your platform are not included, then try the following:
 1) Ensure you have the DEVELOPMENT VERSIONS of the above libraries installed.
 2) Type "make -C src install".
-3) Re-run the "tesseract_unix" script if it succeeded.
+3) Re-run the "sauerract_unix" script if it succeeded.
 
 The servers (bin_unix/linux_server or bin_unix/native_server) should need no libs 
 other than libstdc++ and zlib. Note that for the server to see the "config/server-init.cfg", 
@@ -88,9 +88,9 @@ A simple script for the server, which assumes a global default "config/server-in
 but allows per-user overriding via the home directory, might be:
 
 #!/bin/sh
-TESS_DATA=/usr/share/games/tesseract
+TESS_DATA=/usr/share/games/sauerract
 TESS_SERV_BIN=/usr/bin/tesseract_server
-TESS_SERV_OPTIONS="-u${HOME}/.tesseract"
+TESS_SERV_OPTIONS="-u${HOME}/.sauerract"
 
 cd ${TESS_DATA}
 exec ${TESS_SERV_BIN} ${TESS_SERV_OPTIONS} "$@"
