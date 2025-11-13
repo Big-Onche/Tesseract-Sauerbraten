@@ -12,8 +12,8 @@ The game is almost fully playable, but some maps have poorly optimized lighting 
 ### Playable Maps
 
 The following is the current status of maps that are playable in multiplayer and free of glitches:
-- **DM Maps:**  🟩🟩🟩🟩🟩🟩🟩🟩🟩⬛ **95%** complete.
-- **CTF Maps:** 🟩🟩🟩🟩🟩🟩🟩🟩⬛⬛ **85%** complete.
+- **DM Maps:**  🟩🟩🟩🟩🟩🟩🟩🟩🟩⬛ **96%** complete.
+- **CTF Maps:** 🟩🟩🟩🟩🟩🟩🟩🟩🟩⬛ **90%** complete.
 
 ### Roadmap
    - Finish implementing all of Sauerbraten's UI features.
