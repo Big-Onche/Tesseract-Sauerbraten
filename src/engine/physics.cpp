@@ -1942,7 +1942,7 @@ template<class E, class O>
 static inline bool platformcollide(physent *d, const vec &dir, physent *o, float margin)
 {
     E entvol(d);
-    O obvol(o);
+    O obvol(o, margin);
     vec cp;
     if(mpr::collide(entvol, obvol, NULL, NULL, &cp))
     {

@@ -365,6 +365,7 @@ namespace game
     VARP(hudgunsway, 0, 1, 1);
     VARP(teamhudguns, 0, 1, 1);
     VARP(chainsawhudgun, 0, 1, 1);
+    VAR(testhudgun, 0, 0, 1);
 
     FVAR(swaystep, 1, 35.0f, 100);
     FVAR(swayside, 0, 0.04f, 1);
@@ -442,7 +443,7 @@ namespace game
             base = 0;
             interp = &guninterp;
         }
-        rendermodel(gunname, anim, sway, d->yaw+90, 0, d->pitch, MDL_NOBATCH, interp, a, base, (int)ceil(speed));
+        rendermodel(gunname, anim, sway, testhudgun ? 0 : d->yaw + 90, 0, testhudgun ? 0 : d->pitch, MDL_NOBATCH, interp, a, base, (int)ceil(speed));
         if(d->muzzle.x >= 0) d->muzzle = calcavatarpos(d->muzzle, 12);
     }
 
