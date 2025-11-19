@@ -135,7 +135,7 @@ namespace game
         loopi(sizeof(animnames)/sizeof(animnames[0])) if(matchanim(animnames[i], pattern)) anims.add(i);
     }
 
-    void renderplayer(fpsent *d, const playermodelinfo &mdl, int team, float fade, bool mainpass)
+    void renderplayer(fpsent *d, const playermodelinfo &mdl, bool onlyshadow, int team, float fade = 1, bool mainpass = true)
     {
         int lastaction = d->lastaction, hold = mdl.vwep || d->gunselect==GUN_PISTOL ? 0 : (ANIM_HOLD1+d->gunselect)|ANIM_LOOP, attack = ANIM_ATTACK1+d->gunselect, delay = mdl.vwep ? 300 : guns[d->gunselect].attackdelay+50;
         if(intermission && d->state!=CS_DEAD)
@@ -175,8 +175,6 @@ namespace game
                     a[ai++] = modelattach("tag_shield", mdl.armour[type], ANIM_SHIELD|ANIM_LOOP, 0);
             }
         }
-
-        bool onlyshadow = (d==game::hudplayer() && game::hudplayer()->state!=CS_DEAD);
 
         if(mainpass && !onlyshadow)
         {
@@ -301,9 +299,16 @@ namespace game
         return offset;
     }
 
-    void rendergame(bool mainpass)
+    static inline void renderplayer(fpsent *d, float fade = 1, bool onlyshadow = false)
     {
-        if(mainpass) ai::render();
+        int team = 0;
+        if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
+        renderplayer(d, getplayermodelinfo(d), onlyshadow, team, fade);
+    }
+
+    void rendergame()
+    {
+        ai::render();
 
         if(intermission)
         {
@@ -313,26 +318,17 @@ namespace game
             else getbestplayers(bestplayers);
         }
 
-        fpsent *exclude = isthirdperson() ? NULL : hudplayer();
+        bool third = isthirdperson();
+        fpsent *f = followingplayer(), *exclude = third ? NULL : f;
         loopv(players)
         {
             fpsent *d = players[i];
-            if(d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
+            if(d == player1 || d->state==CS_SPECTATOR || d->state==CS_SPAWNING || d->lifesequence < 0 || d == exclude || (d->state==CS_DEAD && hidedead)) continue;
             int team = 0;
             if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
-            renderplayer(d, getplayermodelinfo(d), team, 1, mainpass);
-
-            vec dir = vec(d->o).sub(camera1->o);
-            float dist = dir.magnitude();
-            dir.div(dist);
-            if(d->state!=CS_EDITING && raycube(camera1->o, dir, dist, 0) < dist)
-            {
-                d->info[0] = '\0';
-                continue;
-            }
-
+            renderplayer(d);
             copystring(d->info, colorname(d));
-            if(d->state!=CS_DEAD && d!=hudplayer())
+            if(d->state!=CS_DEAD)
             {
                 float offset = renderstatusbars(d, team);
                 renderstatusicons(d, team, offset);
@@ -341,21 +337,21 @@ namespace game
         loopv(ragdolls)
         {
             fpsent *d = ragdolls[i];
-            int team = 0;
-            if(teamskins || m_teammode) team = isteam(player1->team, d->team) ? 1 : 2;
             float fade = 1.0f;
             if(ragdollmillis && ragdollfade)
                 fade -= clamp(float(lastmillis - (d->lastupdate + max(ragdollmillis - ragdollfade, 0)))/min(ragdollmillis, ragdollfade), 0.0f, 1.0f);
-            renderplayer(d, getplayermodelinfo(d), team, fade, mainpass);
+            renderplayer(d, fade);
         }
-        if(isthirdperson() && !followingplayer() && (player1->state != CS_DEAD || hidedead != 1)) renderplayer(player1, getplayermodelinfo(player1), teamskins || m_teammode ? 1 : 0, 1, mainpass);
+        if(exclude)
+            renderplayer(exclude, 1, true);
+        else if(!f && (player1->state==CS_ALIVE || (player1->state==CS_EDITING && third) || (player1->state==CS_DEAD && !hidedead)))
+            renderplayer(player1, 1, third ? false : true);
         rendermonsters();
         rendermovables();
         entities::renderentities();
         renderbouncers();
         renderprojectiles();
         if(cmode) cmode->rendergame();
-
 #if 0
         if(dbgspawns) renderspawns();
 #endif

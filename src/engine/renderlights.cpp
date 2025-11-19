@@ -4855,7 +4855,7 @@ void workinoq()
 
     if(drawtex) return;
 
-    game::rendergame(true);
+    game::rendergame();
 
     if(shouldworkinoq())
     {

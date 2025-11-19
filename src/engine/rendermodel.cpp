@@ -1193,7 +1193,7 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     else flags |= MDL_CULL_DIST;
     if(d->state==CS_LAGGED) fade = min(fade, 0.3f);
     if(drawtex == DRAWTEX_MODELPREVIEW) flags &= ~(MDL_FULLBRIGHT | MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY | MDL_CULL_DIST);
-    rendermodel(mdlname, anim, o, yaw, pitch, 0, onlyshadow && !thirdperson ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
+    rendermodel(mdlname, anim, o, yaw, pitch, 0, onlyshadow ? MDL_ONLYSHADOW : flags, d, attachments, basetime, 0, fade);
 }
 
 void setbbfrommodel(dynent *d, const char *mdl)

@@ -516,7 +516,6 @@ struct collectclientmode : clientmode
         {
             base &b = bases[i];
 
-
             const char *basename = b.team==team ? "base/blue" : "base/red";
             rendermodel(basename, animFlags, b.o, 0, 0, 0, mdlFlags);
             float fradius = 1.0f, fheight = 0.5f;
