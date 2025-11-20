@@ -422,13 +422,13 @@ bool ellipseboxcollide(physent *d, const vec &dir, const vec &o, const vec &cent
         }
         if(yo.z < 0)
         {
-            if(dir.iszero() || (dir.z > 0 && (d->type!=ENT_PLAYER || below >= d->zmargin-(d->eyeheight+d->aboveeye)/4.0f)))
+            if(dir.iszero() || (dir.z > 0 && (d->type>=ENT_INANIMATE || below >= d->zmargin-(d->eyeheight+d->aboveeye)/4.0f)))
             {
                 collidewall = vec(0, 0, -1);
                 return true;
             }
         }
-        else if(dir.iszero() || (dir.z < 0 && (d->type!=ENT_PLAYER || above >= d->zmargin-(d->eyeheight+d->aboveeye)/3.0f)))
+        else if(dir.iszero() || (dir.z < 0 && (d->type>=ENT_INANIMATE || above >= d->zmargin-(d->eyeheight+d->aboveeye)/3.0f)))
         {
             collidewall = vec(0, 0, 1);
             return true;
@@ -460,13 +460,13 @@ bool ellipsecollide(physent *d, const vec &dir, const vec &o, const vec &center,
         }
         if(d->o.z < yo.z)
         {
-            if(dir.iszero() || (dir.z > 0 && (d->type!=ENT_PLAYER || below >= d->zmargin-(d->eyeheight+d->aboveeye)/4.0f)))
+            if(dir.iszero() || (dir.z > 0 && (d->type>=ENT_INANIMATE || below >= d->zmargin-(d->eyeheight+d->aboveeye)/4.0f)))
             {
                 collidewall = vec(0, 0, -1);
                 return true;
             }
         }
-        else if(dir.iszero() || (dir.z < 0 && (d->type!=ENT_PLAYER || above >= d->zmargin-(d->eyeheight+d->aboveeye)/3.0f)))
+        else if(dir.iszero() || (dir.z < 0 && (d->type>=ENT_INANIMATE || above >= d->zmargin-(d->eyeheight+d->aboveeye)/3.0f)))
         {
             collidewall = vec(0, 0, 1);
             return true;
@@ -842,7 +842,7 @@ static bool fuzzycollidesolid(physent *d, const vec &dir, float cutoff, const cu
         if(!dir.iszero()) \
         { \
             if(dotval >= -cutoff*dir.magnitude()) continue; \
-            if(d->type==ENT_PLAYER && dotval < 0 && dist < margin) continue; \
+            if(d->type<ENT_CAMERA && dotval < 0 && dist < margin) continue; \
         } \
         collidewall = normal; \
         bestdist = dist; \
@@ -922,7 +922,7 @@ static bool fuzzycollideplanes(physent *d, const vec &dir, float cutoff, const c
         if(!dir.iszero())
         {
             if(w.dot(dir) >= -cutoff*dir.magnitude()) continue;
-            if(d->type==ENT_PLAYER &&
+            if(d->type<ENT_CAMERA &&
                 dist < (dir.z*w.z < 0 ?
                     d->zmargin-(d->eyeheight+d->aboveeye)/(dir.z < 0 ? 3.0f : 4.0f) :
                     (dir.x*w.x < 0 || dir.y*w.y < 0 ? -d->radius : 0)))
@@ -1006,7 +1006,7 @@ static bool cubecollideplanes(physent *d, const vec &dir, float cutoff, const cu
         if(!dir.iszero())
         {
             if(w.dot(dir) >= -cutoff*dir.magnitude()) continue;
-            if(d->type==ENT_PLAYER &&
+            if(d->type<ENT_CAMERA &&
                 dist < (dir.z*w.z < 0 ?
                     d->zmargin-(d->eyeheight+d->aboveeye)/(dir.z < 0 ? 3.0f : 4.0f) :
                     (dir.x*w.x < 0 || dir.y*w.y < 0 ? -d->radius : 0)))
@@ -1408,7 +1408,7 @@ bool move(physent *d, vec &dir)
     bool collided = false, slidecollide = false;
     vec obstacle;
     d->o.add(dir);
-    if(collide(d, dir))
+    if(collide(d, dir) || ((d->type==ENT_AI || d->type==ENT_INANIMATE) && collide(d, vec(0, 0, 0), 0, false)))
     {
         obstacle = collidewall;
         /* check to see if there is an obstacle that would prevent this one from being used as a floor (or ceiling bump) */
