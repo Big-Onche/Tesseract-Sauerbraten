@@ -72,7 +72,7 @@ namespace game
             weight = t.weight;
             if(_state!=M_SLEEP) spawnplayer(this);
             trigger = lastmillis+_trigger;
-            targetyaw = yaw = (float)_yaw;
+            targetyaw = yaw = float(_yaw)+ 180.f;  // sauerract | fix monster spawn angle
             move = _move;
             enemy = player1;
             gunselect = t.gun;
