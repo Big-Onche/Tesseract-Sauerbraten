@@ -483,7 +483,7 @@ namespace game
         previewent->gunselect = clamp(weap, int(GUN_FIST), int(GUN_PISTOL));
         const playermodelinfo *mdlinfo = getplayermodelinfo(model);
         if(!mdlinfo) return;
-        renderplayer(previewent, *mdlinfo, team >= 0 && team <= 2 ? team : 0, 1, false);
+        renderplayer(previewent, *mdlinfo, false, team >= 0 && team <= 2 ? team : 0, 1, false);
     }
 
     vec hudgunorigin(int gun, const vec &from, const vec &to, fpsent *d)
