@@ -581,8 +581,19 @@ namespace game
                             case PART_FIREBALL1: color = 0xFFC8C8; break;
                          }
                          particle_splash(guns[p.gun].part, 1, 1, pos, color, 4.8f, 150, 20);
+                         if(improveddynlights)
+                         {
+                            float r = ((color >> 16) & 0xFF) / 255.0f;
+                            float g = ((color >> 8) & 0xFF) / 255.0f;
+                            float b = (color & 0xFF) / 255.0f;
+                            adddynlight(pos, 50, vec(r*0.5f, g*0.5f, b*0.5f), 20, 30, NULL, 50, vec(0, 0, 0));
+                         }
                     }
-                    else regular_particle_splash(PART_SMOKE, 2, 300, pos, 0x404040, 2.4f, 50, -20);
+                    else
+                    {
+                        regular_particle_splash(PART_SMOKE, 2, 300, pos, 0x404040, 2.4f, 50, -20);
+                        if(improveddynlights) adddynlight(pos, 70, vec(1.0f, 0.6f, 0.f), 20, 10, DL_SHRINK, 10, vec(0, 0, 0));
+                    }
                 }
             }
             if(exploded)
