@@ -15,7 +15,6 @@ namespace entities
         if(ver >= 30 || !ver) switch(e.type)
         {
             case FLAG:
-            case MONSTER:
             case TELEDEST:
             case RESPAWNPOINT:
             case BOX:
@@ -25,6 +24,8 @@ namespace entities
                 e.attr1 = (int(e.attr1)+180)%360;
                 break;
         }
+        else if(e.type==MONSTER) e.attr1 = (int(e.attr1)+180)%360; // sauerract | fix monster spawn angle
+
         if(ver <= 31) switch(e.type)
         {
             case BOX:
@@ -35,6 +36,7 @@ namespace entities
                 e.attr1 = yaw - yaw%15;
                 break;
         }
+
     }
 
 #ifndef STANDALONE
