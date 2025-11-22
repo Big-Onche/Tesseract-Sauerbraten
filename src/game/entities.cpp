@@ -12,19 +12,29 @@ namespace entities
 
     void readent(entity &e, char *buf, int ver)     // read from disk, and init
     {
+        if(e.type==PLATFORM)
+        {
+            e.attr1 = (int(e.attr1)+180)%360;
+        }
+
+
         if(ver >= 30 || !ver) switch(e.type)
         {
             case FLAG:
             case TELEDEST:
-            case RESPAWNPOINT:
-            case BOX:
-            case BARREL:
-            case PLATFORM:
-            case ELEVATOR:
                 e.attr1 = (int(e.attr1)+180)%360;
                 break;
         }
-        else if(e.type==MONSTER) e.attr1 = (int(e.attr1)+180)%360; // sauerract | fix monster spawn angle
+        else switch(e.type)
+        {
+            case BOX:
+            case BARREL:
+            case ELEVATOR:
+            case RESPAWNPOINT:
+            case MONSTER:
+                e.attr1 = (int(e.attr1)+180)%360; // sauerract | fix monster spawn angle
+                break;
+        }
 
         if(ver <= 31) switch(e.type)
         {
