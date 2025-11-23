@@ -14,7 +14,7 @@ namespace entities
     {
         if(e.type==PLATFORM)
         {
-            e.attr1 = (int(e.attr1)+180)%360;
+            e.attr1 = int(e.attr1)%360;
         }
 
 

@@ -113,9 +113,9 @@ void writeinitcfg()
     f->printf("fullscreen %d\n", fullscreen);
     f->printf("screenw %d\n", scr_w);
     f->printf("screenh %d\n", scr_h);
-    extern int sound, soundchans, soundfreq, soundbufferlen;
+    extern int usesound, soundchans, soundfreq, soundbufferlen;
     extern char *audiodriver;
-    f->printf("sound %d\n", sound);
+    f->printf("sound %d\n", usesound);
     f->printf("soundchans %d\n", soundchans);
     f->printf("soundfreq %d\n", soundfreq);
     f->printf("soundbufferlen %d\n", soundbufferlen);
