@@ -97,11 +97,11 @@ static void fixent(entity &e, int version)
         if(version <= 31 && e.type == ET_MAPMODEL) { int yaw = (int(e.attr1)%360 + 360)%360 + 7; e.attr1 = yaw - yaw%15; }
     }
 
-    if(e.type == ET_MAPMODEL && version < 33) // sauerract | invert mdl id and pitch for sauerbraten port
+    /*if(e.type == ET_MAPMODEL && version < 33) // sauerract | invert mdl id and pitch for sauerbraten port
     {
         int attr1 = e.attr1, attr2 = e.attr2;
         e.attr1 = attr2, e.attr2 = attr1;
-    }
+    }*/
 }
 
 bool loadents(const char *fname, vector<entity> &ents, uint *crc)
@@ -1766,19 +1766,19 @@ void writecollideobj(char *name)
         conoutf(CON_ERROR, "could not find map model in selection");
         return;
     }
-    model *m = loadmapmodel(mm->attr1);
+    model *m = loadmapmodel(mm->attr2);
     if(!m)
     {
-        mapmodelinfo *mmi = getmminfo(mm->attr1);
+        mapmodelinfo *mmi = getmminfo(mm->attr2);
         if(mmi) conoutf(CON_ERROR, "could not load map model: %s", mmi->name);
-        else conoutf(CON_ERROR, "could not find map model: %d", mm->attr1);
+        else conoutf(CON_ERROR, "could not find map model: %d", mm->attr2);
         return;
     }
 
     matrix4x3 xform;
     m->calctransform(xform);
     float scale = mm->attr5 > 0 ? mm->attr5/100.0f : 1;
-    int yaw = mm->attr2, pitch = mm->attr3, roll = mm->attr4;
+    int yaw = mm->attr1, pitch = mm->attr3, roll = mm->attr4;
     matrix3 orient;
     orient.identity();
     if(scale != 1) orient.scale(scale);
