@@ -738,12 +738,12 @@ bool mmcollide(physent *d, const vec &dir, float cutoff, octaentities &oc) // co
     loopv(oc.mapmodels)
     {
         extentity &e = *ents[oc.mapmodels[i]];
-        if(e.flags&EF_NOCOLLIDE || !mapmodels.inrange(e.attr1)) continue;
-        mapmodelinfo &mmi = mapmodels[e.attr1];
+        if(e.flags&EF_NOCOLLIDE || !mapmodels.inrange(e.attr2)) continue;
+        mapmodelinfo &mmi = mapmodels[e.attr2];
         model *m = mmi.collide;
         if(!m)
         {
-            if(!mmi.m && !loadmodel(NULL, e.attr1)) continue;
+            if(!mmi.m && !loadmodel(NULL, e.attr2)) continue;
             if(mmi.m->collidemodel) m = loadmodel(mmi.m->collidemodel);
             if(!m) m = mmi.m;
             mmi.collide = m;
@@ -755,7 +755,7 @@ bool mmcollide(physent *d, const vec &dir, float cutoff, octaentities &oc) // co
         float rejectradius = m->collisionbox(center, radius), scale = e.attr5 > 0 ? e.attr5/100.0f : 1;
         if(d->o.reject(e.o, d->radius + rejectradius*scale)) continue;
 
-        int yaw = e.attr2, pitch = e.attr3, roll = e.attr4;
+        int yaw = e.attr1, pitch = e.attr3, roll = e.attr4;
         if(mcol == COLLIDE_TRI || testtricol)
         {
             if(!m->bih && !m->setBIH()) continue;

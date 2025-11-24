@@ -14,7 +14,7 @@ VAR(entselradius, 0, 2, 10);
 static inline void transformbb(const entity &e, vec &center, vec &radius)
 {
     if(e.attr5 > 0) { float scale = e.attr5/100.0f; center.mul(scale); radius.mul(scale); }
-    rotatebb(center, radius, e.attr2, e.attr3, e.attr4);
+    rotatebb(center, radius, e.attr1, e.attr3, e.attr4);
 }
 
 static inline void mmboundbox(const entity &e, model *m, vec &center, vec &radius)
@@ -55,7 +55,7 @@ bool getentboundingbox(const extentity &e, ivec &o, ivec &r)
                 break;
             }
         case ET_MAPMODEL:
-            if(model *m = loadmapmodel(e.attr1))
+            if(model *m = loadmapmodel(e.attr2))
             {
                 vec center, radius;
                 mmboundbox(e, m, center, radius);
@@ -106,7 +106,7 @@ void modifyoctaentity(int flags, int id, extentity &e, cube *c, const ivec &cor,
                     oe.bbmax.max(br).min(ivec(oe.o).add(oe.size));
                     break;
                 case ET_MAPMODEL:
-                    if(loadmapmodel(e.attr1))
+                    if(loadmapmodel(e.attr2))
                     {
                         if(va)
                         {
@@ -153,7 +153,7 @@ void modifyoctaentity(int flags, int id, extentity &e, cube *c, const ivec &cor,
                     oe.bbmax.min(ivec(oe.o).add(oe.size));
                     break;
                 case ET_MAPMODEL:
-                    if(loadmapmodel(e.attr1))
+                    if(loadmapmodel(e.attr2))
                     {
                         oe.mapmodels.removeobj(id);
                         if(va)
@@ -563,7 +563,7 @@ void entselectionbox(const entity &e, vec &eo, vec &es)
         eo.y += e.o.y;
         eo.z = e.o.z - entselradius + es.z;
     }
-    else if(e.type == ET_MAPMODEL && (m = loadmapmodel(e.attr1)))
+    else if(e.type == ET_MAPMODEL && (m = loadmapmodel(e.attr2)))
     {
         mmcollisionbox(e, m, eo, es);
         es.max(entselradius);
@@ -786,7 +786,7 @@ void renderentradius(extentity &e, bool color)
             if(color) gle::colorf(0, 1, 1);
             entities::entradius(e, color);
             vec dir;
-            vecfromyawpitch(e.attr2, e.attr3, 1, 0, dir);
+            vecfromyawpitch(e.attr1, e.attr3, 1, 0, dir);
             renderentarrow(e, dir, 4);
             break;
         }
@@ -1007,7 +1007,7 @@ bool dropentity(entity &e, int drop = -1)
     if(drop<0) drop = entdrop;
     if(e.type == ET_MAPMODEL)
     {
-        model *m = loadmapmodel(e.attr1);
+        model *m = loadmapmodel(e.attr2);
         if(m)
         {
             vec center;
@@ -1097,7 +1097,7 @@ extentity *newentity(bool local, const vec &o, int type, int v1, int v2, int v3,
                 }
                 break;
             case ET_MAPMODEL:
-                if(!e.attr2) e.attr2 = (int)camera1->yaw;
+                if(!e.attr1) e.attr1 = (int)camera1->yaw;
                 break;
             case ET_PLAYERSTART:
                 e.attr5 = e.attr4;

@@ -2,6 +2,8 @@
 
 #include "engine.h"
 
+static const char *const tesscompatvar = "__sauerract_mapversion";
+
 void validmapname(char *dst, const char *src, const char *prefix = NULL, const char *alt = "untitled", size_t maxlen = 100)
 {
     if(prefix) while(*prefix) *dst++ = *prefix++;
@@ -54,7 +56,10 @@ static bool loadmapheader(stream *f, const char *ogzname, mapheader &hdr, octahe
     }
     else if(!memcmp(hdr.magic, "OCTA", 4))
     {
-        if(hdr.version!=OCTAVERSION) return false;
+        memcpy(ohdr.magic, hdr.magic, 4);
+        ohdr.version = hdr.version;
+        ohdr.headersize = hdr.headersize;
+        if(ohdr.version!=OCTAVERSION) return false;
         if(f->read(&ohdr.worldsize, 7*sizeof(int)) != 7*sizeof(int)) return false;
         lilswap(&ohdr.worldsize, 7);
         if(ohdr.worldsize <= 0|| ohdr.numents < 0) return false;
@@ -92,11 +97,11 @@ static void fixent(entity &e, int version)
         if(version <= 31 && e.type == ET_MAPMODEL) { int yaw = (int(e.attr1)%360 + 360)%360 + 7; e.attr1 = yaw - yaw%15; }
     }
 
-    if(e.type == ET_MAPMODEL && version < 33) // sauerract | invert mdl id and pitch for sauerbraten port
+    /*if(e.type == ET_MAPMODEL && version < 33) // sauerract | invert mdl id and pitch for sauerbraten port
     {
         int attr1 = e.attr1, attr2 = e.attr2;
         e.attr1 = attr2, e.attr2 = attr1;
-    }
+    }*/
 }
 
 bool loadents(const char *fname, vector<entity> &ents, uint *crc)
@@ -1033,23 +1038,24 @@ bool save_world(const char *mname, bool nolms)
     savemapprogress = 0;
     renderprogress(0, "saving map...");
 
-    mapheader hdr;
-    memcpy(hdr.magic, "TMAP", 4);
-    hdr.version = MAPVERSION;
+    octaheader hdr;
+    memcpy(hdr.magic, "OCTA", 4);
+    hdr.version = OCTAVERSION;
     hdr.headersize = sizeof(hdr);
     hdr.worldsize = worldsize;
     hdr.numents = 0;
     const vector<extentity *> &ents = entities::getents();
     loopv(ents) if(ents[i]->type!=ET_EMPTY || nolms) hdr.numents++;
     hdr.numpvs = nolms ? 0 : getnumviewcells();
+    hdr.lightmaps = 0;
     hdr.blendmap = shouldsaveblendmap();
-    hdr.numvars = 0;
+    hdr.numvars = 1;
     hdr.numvslots = numvslots;
     enumerate(idents, ident, id,
     {
         if((id.type == ID_VAR || id.type == ID_FVAR || id.type == ID_SVAR) && id.flags&IDF_OVERRIDE && !(id.flags&IDF_READONLY) && id.flags&IDF_OVERRIDDEN) hdr.numvars++;
     });
-    lilswap(&hdr.version, 8);
+    lilswap(&hdr.version, 9);
     f->write(&hdr, sizeof(hdr));
 
     enumerate(idents, ident, id,
@@ -1077,6 +1083,11 @@ bool save_world(const char *mname, bool nolms)
                 break;
         }
     });
+
+    f->putchar(ID_VAR);
+    f->putlil<ushort>(strlen(tesscompatvar));
+    f->write(tesscompatvar, strlen(tesscompatvar));
+    f->putlil<int>(MAPVERSION);
 
     if(dbgvars) conoutf(CON_DEBUG, "wrote %d vars", hdr.numvars);
 
@@ -1177,8 +1188,6 @@ bool trynewmap(const char *mname, const char *cname) // sauerract | try to load 
     Texture *mapshot = textureload(picname, 3, true, false);
     renderbackground("loading...", mapshot, mname, game::getmapinfo());
 
-    setvar("mapversion", hdr.version, true, false);
-
     renderprogress(0, "clearing world...");
 
     freeocta(worldroot);
@@ -1190,6 +1199,9 @@ bool trynewmap(const char *mname, const char *cname) // sauerract | try to load 
     setvar("mapscale", worldscale, true, false);
 
     renderprogress(0, "loading vars...");
+
+    bool hastessformat = false;
+    int tessversion = hdr.version;
 
     loopi(hdr.numvars)
     {
@@ -1215,6 +1227,15 @@ bool trynewmap(const char *mname, const char *cname) // sauerract | try to load 
                 break;
             }
             default: continue;
+        }
+        if(!strcmp(name, tesscompatvar))
+        {
+            if(type == ID_VAR)
+            {
+                tessversion = val.getint();
+                hastessformat = true;
+            }
+            continue;
         }
         if(id && id->flags&IDF_OVERRIDE) switch(id->type)
         {
@@ -1245,6 +1266,9 @@ bool trynewmap(const char *mname, const char *cname) // sauerract | try to load 
         }
     }
     if(dbgvars) conoutf(CON_DEBUG, "read %d vars", hdr.numvars);
+
+    if(hastessformat) hdr.version = tessversion;
+    setvar("mapversion", hdr.version, true, false);
 
     string gametype;
     bool samegame = true;
@@ -1742,19 +1766,19 @@ void writecollideobj(char *name)
         conoutf(CON_ERROR, "could not find map model in selection");
         return;
     }
-    model *m = loadmapmodel(mm->attr1);
+    model *m = loadmapmodel(mm->attr2);
     if(!m)
     {
-        mapmodelinfo *mmi = getmminfo(mm->attr1);
+        mapmodelinfo *mmi = getmminfo(mm->attr2);
         if(mmi) conoutf(CON_ERROR, "could not load map model: %s", mmi->name);
-        else conoutf(CON_ERROR, "could not find map model: %d", mm->attr1);
+        else conoutf(CON_ERROR, "could not find map model: %d", mm->attr2);
         return;
     }
 
     matrix4x3 xform;
     m->calctransform(xform);
     float scale = mm->attr5 > 0 ? mm->attr5/100.0f : 1;
-    int yaw = mm->attr2, pitch = mm->attr3, roll = mm->attr4;
+    int yaw = mm->attr1, pitch = mm->attr3, roll = mm->attr4;
     matrix3 orient;
     orient.identity();
     if(scale != 1) orient.scale(scale);

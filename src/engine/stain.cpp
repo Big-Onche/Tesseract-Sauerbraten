@@ -689,7 +689,7 @@ struct stainrenderer
         loopv(oe.mapmodels)
         {
             extentity &e = *ents[oe.mapmodels[i]];
-            model *m = loadmapmodel(e.attr1);
+            model *m = loadmapmodel(e.attr2);
             if(!m) continue;
 
             vec center, radius;
@@ -699,7 +699,7 @@ struct stainrenderer
 
             if(m->animated() || (!m->bih && !m->setBIH())) continue;
 
-            int yaw = e.attr2, pitch = e.attr3, roll = e.attr4;
+            int yaw = e.attr1, pitch = e.attr3, roll = e.attr4;
 
             m->bih->genstaintris(this, staincenter, stainradius, e.o, yaw, pitch, roll, scale);
         }

@@ -510,7 +510,7 @@ static inline void rendermapmodel(extentity &e)
     int anim = ANIM_MAPMODEL|ANIM_LOOP, basetime = 0;
     if(e.flags&EF_ANIM) entities::animatemapmodel(e, anim, basetime);
     //rendermapmodel(e.attr1, anim, e.o, e.attr2, e.attr3, e.attr4, MDL_CULL_VFC | MDL_CULL_DIST, basetime, e.attr5 > 0 ? e.attr5/100.0f : 1.0f);
-    rendermapmodel(e.attr1, anim, e.o, e.attr2, 0, 0, MDL_CULL_VFC | MDL_CULL_DIST, basetime, 1.0f);
+    rendermapmodel(e.attr2, anim, e.o, e.attr1, 0, 0, MDL_CULL_VFC | MDL_CULL_DIST, basetime, 1.0f);
 }
 
 void rendermapmodels()
@@ -2692,12 +2692,12 @@ static void genshadowmeshmapmodels(shadowmesh &m, int sides, shadowdrawinfo draw
         e.flags &= ~EF_RENDER;
 
 
-        model *mm = loadmapmodel(e.attr1);
+        model *mm = loadmapmodel(e.attr2);
         if(!mm || !mm->shadow || mm->animated() || (mm->alphashadow && mm->alphatested())) continue;
 
         matrix4x3 orient;
         orient.identity();
-        if(e.attr2) orient.rotate_around_z(sincosmod360(e.attr2));
+        if(e.attr1) orient.rotate_around_z(sincosmod360(e.attr1));
         if(e.attr3) orient.rotate_around_x(sincosmod360(e.attr3));
         if(e.attr4) orient.rotate_around_y(sincosmod360(-e.attr4));
         if(e.attr5 > 0) orient.scale(e.attr5/100.0f);
