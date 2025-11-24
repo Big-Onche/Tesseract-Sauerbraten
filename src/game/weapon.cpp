@@ -317,6 +317,7 @@ namespace game
     }
 
     VARP(blood, 0, 1, 1);
+    VARP(improvedparticles, 0, 0, 1);
 
     void damageeffect(int damage, fpsent *d, bool thirdperson)
     {
@@ -438,6 +439,12 @@ namespace game
                 adddynlight(v, 1.5f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100, DL_EXPAND, guns[gun].exprad/2, vec(1, 0.75f, 0.5f));
             }
             else adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100, 0, guns[gun].exprad/2, vec(1, 0.75f, 0.5f));
+
+            if(improvedparticles)
+            {
+                particle_splash(PART_SPARK, 10, 500, v, 0xFFFF44, 0.5f, 1500, 200);
+                particle_splash(PART_SMOKE, 4, 1500, v, 0x222222, 30.0f, 100, -100);
+            }
         }
         else if(gun==GUN_GL)
         {
@@ -447,6 +454,12 @@ namespace game
                 adddynlight(v, 1.5f*guns[gun].exprad, vec(0.5f, 1.5f, 2), 600, 100, DL_EXPAND, 8, vec(0.25f, 1, 1));
             }
             else adddynlight(v, 1.15f*guns[gun].exprad, vec(0.5f, 1.5f, 2), 600, 100, 0, 8, vec(0.25f, 1, 1));
+
+            if(improvedparticles)
+            {
+                particle_splash(PART_SPARK, 10, 500, v, 0x4444FF, 1.0f, 1500, 200);
+                particle_splash(PART_SMOKE, 4, 1500, v, 0x444444, 30.0f, 100, -100);
+            }
         }
         else adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100);
 
@@ -628,6 +641,7 @@ namespace game
                 loopi(guns[gun].rays)
                 {
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
+                    if(improvedparticles) particle_splash(PART_SMOKE, 2, 750, rays[i], 0x554433, 4.0f, 30, -100);
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
                     if(!local) addstain(STAIN_BULLET_HOLE, rays[i], vec(from).sub(rays[i]).safenormalize(), 2.0f);
                     if(improveddynlights) lighttrail(hudgunorigin(gun, from, rays[i], d), rays[i], 30, 40, 20, vec(0.05, 0.03, 0.01f));
@@ -645,6 +659,7 @@ namespace game
             {
                 bool isCg = (gun==GUN_CG);
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
+                if(improvedparticles) particle_splash(PART_SMOKE, 3, 750, to, 0x554433, 5.0f, 40, -100);
                 particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, 0xFFC864, 0.28f);
                 if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, isCg ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, isCg ? 2.25f : 1.25f, d);
                 if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 2.0f);
@@ -684,6 +699,7 @@ namespace game
 
             case GUN_RIFLE:
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
+                if(improvedparticles) particle_splash(PART_SMOKE, 4, 1000, to, 0x4A3A3A, 5.0f, 40, -100);
                 particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, 0x404040, 0.6f, 20);
                 if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
                 if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 3.0f);
