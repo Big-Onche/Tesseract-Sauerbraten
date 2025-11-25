@@ -13,8 +13,8 @@ VAR(entselradius, 0, 2, 10);
 
 static inline void transformbb(const entity &e, vec &center, vec &radius)
 {
-    if(e.attr5 > 0) { float scale = e.attr5/100.0f; center.mul(scale); radius.mul(scale); }
-    rotatebb(center, radius, e.attr1, e.attr3, e.attr4);
+    // if(e.attr5 > 0) { float scale = 1; center.mul(scale); radius.mul(scale); }
+    rotatebb(center, radius, e.attr1, 0, 0); // rotatebb(center, radius, e.attr1, e.attr3, e.attr4);
 }
 
 static inline void mmboundbox(const entity &e, model *m, vec &center, vec &radius)
