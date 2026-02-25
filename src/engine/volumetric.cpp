@@ -28,7 +28,7 @@ namespace vclouds
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
-    FVARR(vcdarkness, 0.0f, 4.0f, 8.0f);
+    FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
 
