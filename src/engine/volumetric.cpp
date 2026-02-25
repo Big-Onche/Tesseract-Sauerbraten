@@ -19,7 +19,7 @@ namespace vclouds
     VARR(vcthickness, 0, 20, 100);
     FVARR(vcdarkness, 0.0f, 4.0f, 8.0f);
     VARR(vcshadow, 0, 1, 1);
-    VARR(vcshadowmapsize, 64, 512, 2048);
+    VARP(vcshadowmapsize, 64, 512, 2048);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     VARR(vcshadowsamples, 1, 4, 8);
     VARR(vcshadowpcf, 0, 1, 2);
@@ -98,6 +98,7 @@ namespace vclouds
             vcfullw = vieww;
             vcfullh = viewh;
         }
+
         if((!vcshadow || !shadowmapshader || !shadowapplyshader || shadowstrength <= 1e-4f) && (vcshadowtex || vcshadowfbo))
             cleanupshadowmap();
 
@@ -148,6 +149,9 @@ namespace vclouds
             }
         }
 
+        glActiveTexture_(GL_TEXTURE8);
+        if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msnormaltex);
+        else glBindTexture(GL_TEXTURE_RECTANGLE, gnormaltex);
         glActiveTexture_(GL_TEXTURE9);
         if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
         else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
