@@ -331,11 +331,13 @@ extern matrix4 worldmatrix, screenmatrix;
 
 extern int transparentlayer;
 
+extern GLenum hdrformat;
 extern int gw, gh, gdepthformat, ghasstencil;
-extern GLuint gdepthtex, gcolortex, gnormaltex, gglowtex, gdepthrb, gstencilrb;
+extern GLuint hdrtex, gdepthtex, gcolortex, gnormaltex, gglowtex, gdepthrb, gstencilrb, refracttex;
 extern int msaasamples, msaalight;
-extern GLuint msdepthtex, mscolortex, msnormaltex, msglowtex, msdepthrb, msstencilrb;
+extern GLuint mshdrtex, msdepthtex, mscolortex, msnormaltex, msglowtex, msdepthrb, msstencilrb, msrefracttex;
 extern vector<vec2> msaapositions;
+extern GLuint hdrfbo, mshdrfbo;
 enum { AA_UNUSED = 0, AA_LUMA, AA_MASKED, AA_SPLIT, AA_SPLIT_LUMA, AA_SPLIT_MASKED };
 
 extern void cleanupgbuffer();
@@ -802,6 +804,17 @@ namespace recorder
 {
     extern void stop();
     extern void capture(bool overlay = true);
+    extern void cleanup();
+}
+
+// volumetric clouds
+
+namespace vclouds
+{
+    extern int volumetricclouds;
+
+    extern void init();
+    extern void render();
     extern void cleanup();
 }
 

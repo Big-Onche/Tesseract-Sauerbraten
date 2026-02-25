@@ -677,6 +677,7 @@ void resetgl()
     cleanuptextures();
     cleanupblendmap();
     cleanuplights();
+    vclouds::cleanup();
     cleanupshaders();
     cleanupgl();
 

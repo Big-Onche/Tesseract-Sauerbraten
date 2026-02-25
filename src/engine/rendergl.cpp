@@ -2532,10 +2532,16 @@ void gl_drawview()
     rendertransparent();
     GLERROR;
 
-    if(fogmat) setfog(fogmat, fogbelow, 1, abovemat);
-
     rendervolumetric();
     GLERROR;
+
+    if(!drawtex)
+    {
+        vclouds::render();
+        GLERROR;
+    }
+
+    if(fogmat) setfog(fogmat, fogbelow, 1, abovemat);
 
     if(editmode)
     {
