@@ -4,6 +4,7 @@ namespace vclouds
 {
     GLuint vctex = 0, vcfbo = 0;
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
+    GLuint vcbilateraltemptex = 0, vcbilateraltempfbo = 0;
     GLuint vcshadowtex = 0, vcshadowfbo = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
@@ -92,6 +93,11 @@ namespace vclouds
             glGenTextures(1, &vcbilateraltex);
             createtexture(vcbilateraltex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
+        if(!vcbilateraltemptex)
+        {
+            glGenTextures(1, &vcbilateraltemptex);
+            createtexture(vcbilateraltemptex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+        }
 
         if(!vcfbo)
         {
@@ -107,6 +113,14 @@ namespace vclouds
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcbilateraltex, 0);
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral buffer!");
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+        }
+        if(!vcbilateraltempfbo)
+        {
+            glGenFramebuffers_(1, &vcbilateraltempfbo);
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcbilateraltemptex, 0);
+            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral temp buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
         if(vcshadow && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f)
@@ -176,7 +190,11 @@ namespace vclouds
 
         if(vcblur && bilateralshader)
         {
-            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
+            GLOBALPARAMF(tvbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
+            GLOBALPARAMF(vcblurscale, float(vcblurscale));
+
+            // Pass 1: horizontal bilateral blur + upscale from low-res cloud buffer.
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
             glViewport(0, 0, vieww, viewh);
             glDisable(GL_BLEND);
             glClearColor(0, 0, 0, 0);
@@ -184,8 +202,22 @@ namespace vclouds
 
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, vctex);
-            GLOBALPARAMF(tvbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
-            GLOBALPARAMF(vcblurscale, float(vcblurscale));
+            GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
+            GLOBALPARAMF(tvcloudblurdir, 1.0f, 0.0f);
+            bilateralshader->set();
+            screenquad(vieww, viewh);
+
+            // Pass 2: vertical bilateral blur on full-res intermediate.
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
+            glViewport(0, 0, vieww, viewh);
+            glDisable(GL_BLEND);
+            glClearColor(0, 0, 0, 0);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, vcbilateraltemptex);
+            GLOBALPARAMF(tvcloudscale, 1.0f, 1.0f, 1.0f, 1.0f);
+            GLOBALPARAMF(tvcloudblurdir, 0.0f, 1.0f);
             bilateralshader->set();
             screenquad(vieww, viewh);
 
@@ -266,6 +298,16 @@ namespace vclouds
         {
             glDeleteTextures(1, &vcbilateraltex);
             vcbilateraltex = 0;
+        }
+        if(vcbilateraltempfbo)
+        {
+            glDeleteFramebuffers_(1, &vcbilateraltempfbo);
+            vcbilateraltempfbo = 0;
+        }
+        if(vcbilateraltemptex)
+        {
+            glDeleteTextures(1, &vcbilateraltemptex);
+            vcbilateraltemptex = 0;
         }
         cleanupshadowmap();
         vcw = vch = vcfullw = vcfullh = 0;
