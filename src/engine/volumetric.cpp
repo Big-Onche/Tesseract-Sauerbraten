@@ -4,25 +4,76 @@ namespace vclouds
 {
     GLuint vctex = 0, vcfbo = 0;
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
+    GLuint vcshadowtex = 0, vcshadowfbo = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
+    int vcshadowsz = 0;
 
     VARP(volumetricclouds, 0, 1, 1);
     VARP(vcblur, 0, 1, 1);
     VARP(vcblurscale, 1, 1, 4);
     FVARR(vcscale, 0.25f, 0.5f, 2.0f);
     FVARR(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
-    VARP(vcdensity, 0, 100, 200);
+    VARR(vcdensity, 0, 100, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
-    VARP(vcheight, 0, 80, 100);
-    VARP(vcthickness, 0, 20, 100);
-    FVARR(vcopacity, 0.0f, 4.0f, 8.0f);
+    VARR(vcheight, 0, 80, 100);
+    VARR(vcthickness, 0, 20, 100);
+    FVARR(vcdarkness, 0.0f, 4.0f, 8.0f);
+    VARR(vcshadow, 0, 1, 1);
+    VARR(vcshadowmapsize, 64, 512, 2048);
+    FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
+    VARR(vcshadowsamples, 1, 4, 8);
+    VARR(vcshadowpcf, 0, 1, 2);
+    VARR(vcshadowdebug, 0, 0, 1);
     CVARR(vccolour, 0xFFFFFF);
+
+    static void cleanupshadowmap()
+    {
+        if(vcshadowfbo)
+        {
+            glDeleteFramebuffers_(1, &vcshadowfbo);
+            vcshadowfbo = 0;
+        }
+        if(vcshadowtex)
+        {
+            glDeleteTextures(1, &vcshadowtex);
+            vcshadowtex = 0;
+        }
+        vcshadowsz = 0;
+    }
+
+    static void viewshadowmap()
+    {
+        if(!vcshadowdebug || !vcshadowtex || !vcshadowsz) return;
+
+        int w = max(min(vieww, viewh)/3, 64), h = w;
+        int x = 0, y = 0;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        SETSHADER(hudrect);
+        gle::colorf(1, 1, 1);
+        glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
+        debugquad(x, y, w, h, 0, 0, vcshadowsz, vcshadowsz);
+
+        SETSHADER(hudnotexture);
+        gle::colorf(1.0f, 0.2f, 0.2f);
+        float cx = x + w*0.5f, cy = y + h*0.5f;
+        float t = max(w / 256.0f, 1.0f);
+        debugquad(cx - 0.5f*t, y, t, h, 0, 0, 1, 1);
+        debugquad(x, cy - 0.5f*t, w, t, 0, 0, 1, 1);
+
+        gle::colorf(1, 1, 1);
+        glDisable(GL_BLEND);
+    }
 
     void init()
     {
         if(!volumetricclouds) return;
         useshaderbyname("volumetricclouds");
         useshaderbyname("volumetriccloudsbilateral");
+        useshaderbyname("volumetriccloudshadowmap");
+        useshaderbyname("volumetriccloudshadowapply");
         useshaderbyname("scalelinear");
     }
 
@@ -32,6 +83,9 @@ namespace vclouds
 
         Shader *cloudshader = useshaderbyname("volumetricclouds");
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
+        Shader *shadowmapshader = vcshadow ? useshaderbyname("volumetriccloudshadowmap") : NULL;
+        Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
+        float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
         if(!cloudshader) return;
 
         int targetw = max(int(ceilf(vieww * vcscale)), 1),
@@ -44,6 +98,8 @@ namespace vclouds
             vcfullw = vieww;
             vcfullh = viewh;
         }
+        if((!vcshadow || !shadowmapshader || !shadowapplyshader || shadowstrength <= 1e-4f) && (vcshadowtex || vcshadowfbo))
+            cleanupshadowmap();
 
         if(!vctex)
         {
@@ -72,6 +128,25 @@ namespace vclouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
+        if(vcshadow && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f)
+        {
+            int shadowsz = max(vcshadowmapsize, 1);
+            if(shadowsz != vcshadowsz) cleanupshadowmap();
+            if(!vcshadowtex)
+            {
+                vcshadowsz = shadowsz;
+                glGenTextures(1, &vcshadowtex);
+                createtexture(vcshadowtex, vcshadowsz, vcshadowsz, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+            }
+            if(!vcshadowfbo)
+            {
+                glGenFramebuffers_(1, &vcshadowfbo);
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcshadowfbo);
+                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcshadowtex, 0);
+                if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud shadow map buffer!");
+                glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+            }
+        }
 
         glActiveTexture_(GL_TEXTURE9);
         if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
@@ -95,7 +170,7 @@ namespace vclouds
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcloudalpha, vcalpha);
-        GLOBALPARAMF(vcloudthickness, vcopacity);
+        GLOBALPARAMF(vcloudthickness, vcdarkness);
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
 
@@ -131,6 +206,41 @@ namespace vclouds
             compositetexh = viewh;
         }
 
+        if(vcshadow && vcshadowtex && vcshadowfbo && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f)
+        {
+            float shadowworld = max(float(worldsize) * 2.0f, 1.0f);
+            float worldpertexel = shadowworld / max(float(vcshadowsz), 1.0f);
+            float snappedx = floorf(camera1->o.x / worldpertexel) * worldpertexel;
+            float snappedy = floorf(camera1->o.y / worldpertexel) * worldpertexel;
+            float minx = snappedx - shadowworld * 0.5f;
+            float miny = snappedy - shadowworld * 0.5f;
+            float cloudmidz = (base + top) * 0.5f;
+
+            GLOBALPARAMF(tvshadowmapworld, minx, miny, worldpertexel, float(vcshadowsz));
+            GLOBALPARAMF(tvcloudshadowsamples, float(vcshadowsamples));
+
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcshadowfbo);
+            glViewport(0, 0, vcshadowsz, vcshadowsz);
+            glDisable(GL_BLEND);
+            glClearColor(1, 1, 1, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            shadowmapshader->set();
+            screenquad(vcshadowsz, vcshadowsz);
+
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+            glViewport(0, 0, vieww, viewh);
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
+            GLOBALPARAMF(tvcloudshadowparams, shadowstrength, cloudmidz, 0.08f, 0.20f);
+            GLOBALPARAMF(tvcloudshadowpcf, float(vcshadowpcf));
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+            shadowapplyshader->set();
+            screenquad(vieww, viewh);
+            glDisable(GL_BLEND);
+        }
+
         glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         glViewport(0, 0, vieww, viewh);
 
@@ -142,6 +252,8 @@ namespace vclouds
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         SETSHADER(scalelinear);
         screenquad(compositetexw, compositetexh);
+
+        viewshadowmap();
 
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
@@ -169,6 +281,7 @@ namespace vclouds
             glDeleteTextures(1, &vcbilateraltex);
             vcbilateraltex = 0;
         }
+        cleanupshadowmap();
         vcw = vch = vcfullw = vcfullh = 0;
     }
 }
