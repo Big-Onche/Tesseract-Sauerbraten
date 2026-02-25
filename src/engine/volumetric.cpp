@@ -18,6 +18,8 @@ namespace vclouds
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
     FVARR(vcdarkness, 0.0f, 4.0f, 8.0f);
+    VARP(vcsteps, 4, 16, 128);
+    VARP(vcsunsteps, 2, 4, 32);
     VARR(vcshadow, 0, 1, 1);
     VARP(vcshadowmapsize, 64, 512, 2048);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
@@ -175,6 +177,8 @@ namespace vclouds
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcloudalpha, vcalpha);
         GLOBALPARAMF(vcloudthickness, vcdarkness);
+        GLOBALPARAMF(tvcloudsteps, float(vcsteps));
+        GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
 
