@@ -8,24 +8,28 @@ namespace vclouds
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
 
+    // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
     VARP(vcblur, 0, 1, 1);
     VARP(vcblurscale, 1, 1, 4);
-    FVARR(vcscale, 0.25f, 0.5f, 2.0f);
-    FVARR(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
+    FVARP(vcscale, 0.25f, 0.5f, 2.0f);
+    FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
+    VARP(vcsteps, 4, 16, 128);
+    VARP(vcskysteps, 2, 4, 8);
+    VARP(vcsunsteps, 4, 4, 64);
+    VARP(vcshadow, 0, 1, 1);
+    VARP(vcshadowmapsize, 64, 512, 2048);
+    VARP(vcshadowsamples, 1, 4, 8);
+    VARP(vcshadowpcf, 0, 1, 2);
+    FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
+
+    // map settings
     VARR(vcdensity, 0, 100, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
     FVARR(vcdarkness, 0.0f, 4.0f, 8.0f);
-    VARP(vcsteps, 4, 16, 128);
-    VARP(vcsunsteps, 2, 4, 32);
-    VARR(vcshadow, 0, 1, 1);
-    VARP(vcshadowmapsize, 64, 512, 2048);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
-    VARR(vcshadowsamples, 1, 4, 8);
-    VARR(vcshadowpcf, 0, 1, 2);
-    VARR(vcshadowdebug, 0, 0, 1);
     CVARR(vccolour, 0xFFFFFF);
 
     static void cleanupshadowmap()
@@ -41,32 +45,6 @@ namespace vclouds
             vcshadowtex = 0;
         }
         vcshadowsz = 0;
-    }
-
-    static void viewshadowmap()
-    {
-        if(!vcshadowdebug || !vcshadowtex || !vcshadowsz) return;
-
-        int w = max(min(vieww, viewh)/3, 64), h = w;
-        int x = 0, y = 0;
-
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        SETSHADER(hudrect);
-        gle::colorf(1, 1, 1);
-        glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
-        debugquad(x, y, w, h, 0, 0, vcshadowsz, vcshadowsz);
-
-        SETSHADER(hudnotexture);
-        gle::colorf(1.0f, 0.2f, 0.2f);
-        float cx = x + w*0.5f, cy = y + h*0.5f;
-        float t = max(w / 256.0f, 1.0f);
-        debugquad(cx - 0.5f*t, y, t, h, 0, 0, 1, 1);
-        debugquad(x, cy - 0.5f*t, w, t, 0, 0, 1, 1);
-
-        gle::colorf(1, 1, 1);
-        glDisable(GL_BLEND);
     }
 
     void init()
@@ -177,7 +155,9 @@ namespace vclouds
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcloudalpha, vcalpha);
         GLOBALPARAMF(vcloudthickness, vcdarkness);
+        GLOBALPARAMF(vcloudphaseg, vcphaseg);
         GLOBALPARAMF(tvcloudsteps, float(vcsteps));
+        GLOBALPARAMF(tvcloudskysteps, float(vcskysteps));
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
@@ -260,8 +240,6 @@ namespace vclouds
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         SETSHADER(scalelinear);
         screenquad(compositetexw, compositetexh);
-
-        viewshadowmap();
 
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
