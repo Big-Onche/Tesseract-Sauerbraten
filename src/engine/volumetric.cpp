@@ -26,15 +26,16 @@ namespace vclouds
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
 
     // map settings
-    VARR(vcdensity, 0, 100, 200);
-    FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
+    VARR(vcdensity, 0, 70, 100);
+    VARR(vcalpha, 0, 80, 100);
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
     VARR(vcdome, -100, 0, 100);
     VARR(vcscrollx, -1000, 0, 1000);
     VARR(vcscrolly, -1000, 0, 1000);
     VARR(vcskyinherit, 0, 80, 100);
-    FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
+    VARR(vcshadowinherit, 0, 0, 100);
+    VARR(vcamount, 0, 50, 100);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
 
@@ -73,7 +74,7 @@ namespace vclouds
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
         Shader *shadowmapshader = vcshadow ? useshaderbyname("volumetriccloudshadowmap") : NULL;
         Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
-        float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
+        float shadowstrength = vcshadowstrength * (vcalpha * 0.01f);
         if(!cloudshader) return;
 
         int targetw = max(int(ceilf(vieww * vcscale)), 1),
@@ -179,9 +180,9 @@ namespace vclouds
         GLOBALPARAMF(tvclouddome, domek, camera1->o.x, camera1->o.y, 0.0f);
         GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.18f, 1.0f), 1.0f / max(ws * 0.06f, 1.0f), 0.50f, 0.95f);
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
-        GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
-        GLOBALPARAMF(vcloudalpha, vcalpha);
-        GLOBALPARAMF(vcloudthickness, vcdarkness);
+        GLOBALPARAMF(vclouddensity, float(vcamount) / 50.0f); // clearly need to update the shader VARS!
+        GLOBALPARAMF(vcloudalpha, float(vcalpha) / 100.0f);
+        GLOBALPARAMF(vcloudthickness, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcloudphaseg, vcphaseg);
         GLOBALPARAMF(tvcloudsteps, float(vcsteps));
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
@@ -199,6 +200,7 @@ namespace vclouds
         GLOBALPARAM(vcloudskycubeup, skycube[5]);
         GLOBALPARAMF(vcloudskycubefront, skycubefront.x, skycubefront.y);
         GLOBALPARAMF(vcloudskyinherit, clamp(float(vcskyinherit) / 100.0f, 0.0f, 1.0f));
+        GLOBALPARAMF(vcloudshadowinherit, clamp(float(vcshadowinherit) / 100.0f, 0.0f, 1.0f));
         vec cloudsuncolor = sunlight.tocolor().mul(sunlightscale);
         GLOBALPARAM(vcloudsunlightcolor, cloudsuncolor);
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
