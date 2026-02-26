@@ -29,6 +29,7 @@ namespace vclouds
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
+    VARR(vcdome, -100, 0, 100);
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
@@ -163,7 +164,13 @@ namespace vclouds
             base = max(top - 1.0f, 0.0f);
         }
 
-        GLOBALPARAMF(tvcloudbounds, base, top, max(float(farplane), ws), lastmillis / 1000.0f);
+        float maxclouddist = max(float(farplane), ws);
+        // Dome coefficient is in world-z units per squared world-xy distance.
+        // Positive vcdome bends the layer downward toward the horizon.
+        float domek = -float(vcdome) * (ws / max(maxclouddist * maxclouddist, 1.0f)) / 100.0f;
+
+        GLOBALPARAMF(tvcloudbounds, base, top, maxclouddist, lastmillis / 1000.0f);
+        GLOBALPARAMF(tvclouddome, domek, camera1->o.x, camera1->o.y, 0.0f);
         GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.18f, 1.0f), 1.0f / max(ws * 0.06f, 1.0f), 0.50f, 0.95f);
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
