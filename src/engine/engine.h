@@ -726,6 +726,7 @@ extern void drawskybox(bool clear = false);
 extern bool hasskybox();
 extern bool limitsky();
 extern bool renderexplicitsky(bool outline = false);
+extern void getskyboxtints(vec &up, vec &horizon, vec &ground);
 extern void cleanupsky();
 
 // ui

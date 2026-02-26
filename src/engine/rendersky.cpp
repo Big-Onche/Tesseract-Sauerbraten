@@ -1,6 +1,189 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
+extern bvec skyboxcolour;
+
+namespace skyboxtint
+{
+    static bool valid = false;
+    static int texids[6] = { 0, 0, 0, 0, 0, 0 };
+    static int texw[6] = { 0, 0, 0, 0, 0, 0 };
+    static int texh[6] = { 0, 0, 0, 0, 0, 0 };
+    static bvec tintcolour(0, 0, 0);
+    static vec uptint(1, 1, 1), horizontint(1, 1, 1), groundtint(1, 1, 1);
+
+    static inline vec fetchrgba(const ImageData &img, int x, int y)
+    {
+        x = clamp(x, 0, img.w-1);
+        y = clamp(y, 0, img.h-1);
+        int pitch = img.pitch ? img.pitch : img.w * img.bpp;
+        const uchar *p = img.data ? img.data + y * pitch + x * img.bpp : NULL;
+        if(!p) return vec(1, 1, 1);
+        switch(img.bpp)
+        {
+            case 1:
+            case 2:
+            {
+                float g = p[0] / 255.0f;
+                return vec(g, g, g);
+            }
+            case 3:
+            default:
+                return vec(p[0]/255.0f, p[1]/255.0f, p[2]/255.0f);
+            case 4:
+                return vec(p[0]/255.0f, p[1]/255.0f, p[2]/255.0f);
+        }
+    }
+
+    static vec sampleface(const ImageData &img, float s, float t)
+    {
+        if(!img.data || img.w <= 0 || img.h <= 0 || img.compressed) return vec(1, 1, 1);
+        s = clamp(s, 0.0f, 1.0f);
+        t = clamp(t, 0.0f, 1.0f);
+        float x = s * max(img.w - 1, 0), y = t * max(img.h - 1, 0);
+        int x0 = int(floorf(x)), y0 = int(floorf(y));
+        int x1 = min(x0 + 1, img.w - 1), y1 = min(y0 + 1, img.h - 1);
+        float fx = x - x0, fy = y - y0;
+        vec c00 = fetchrgba(img, x0, y0),
+            c10 = fetchrgba(img, x1, y0),
+            c01 = fetchrgba(img, x0, y1),
+            c11 = fetchrgba(img, x1, y1);
+        vec c0 = vec(c00).mul(1.0f - fx).add(vec(c10).mul(fx));
+        vec c1 = vec(c01).mul(1.0f - fx).add(vec(c11).mul(fx));
+        return c0.mul(1.0f - fy).add(c1.mul(fy));
+    }
+
+    static vec lightingtint(vec c)
+    {
+        c.x = max(c.x, 0.0f);
+        c.y = max(c.y, 0.0f);
+        c.z = max(c.z, 0.0f);
+
+        float peak = max(c.x, max(c.y, c.z));
+        if(peak > 0.72f)
+        {
+            float softpeak = 0.72f + (peak - 0.72f) * 0.30f;
+            c.mul(softpeak / max(peak, 1e-4f));
+        }
+
+        float lum = c.x*0.2126f + c.y*0.7152f + c.z*0.0722f;
+        const float keepsat = 0.88f;
+        c.x = lum + (c.x - lum) * keepsat;
+        c.y = lum + (c.y - lum) * keepsat;
+        c.z = lum + (c.z - lum) * keepsat;
+        return c;
+    }
+
+    static bool updateneeded()
+    {
+        if(!valid) return true;
+        if(tintcolour != skyboxcolour) return true;
+        loopi(6)
+        {
+            Texture *t = sky[i];
+            int id = t && t != notexture ? t->id : 0;
+            int w = t && t != notexture ? t->w : 0;
+            int h = t && t != notexture ? t->h : 0;
+            if(texids[i] != id || texw[i] != w || texh[i] != h) return true;
+        }
+        return false;
+    }
+
+    static void accumulate(vec &sum, float &weight, const ImageData &img, float s, float t, float sw)
+    {
+        if(sw <= 0 || !img.data || img.compressed) return;
+        sum.add(sampleface(img, s, t).mul(sw));
+        weight += sw;
+    }
+
+    static void recompute()
+    {
+        valid = true;
+        tintcolour = skyboxcolour;
+        loopi(6)
+        {
+            Texture *t = sky[i];
+            texids[i] = t && t != notexture ? t->id : 0;
+            texw[i] = t && t != notexture ? t->w : 0;
+            texh[i] = t && t != notexture ? t->h : 0;
+        }
+
+        uptint = horizontint = groundtint = vec(1, 1, 1);
+
+        bool haveupper = sky[5] && sky[5] != notexture;
+        bool havesides = false;
+        loopi(4) if(sky[i] && sky[i] != notexture) { havesides = true; break; }
+        if(!haveupper && !havesides) return;
+
+        ImageData faceimg[6];
+        bool faceloaded[6] = { false, false, false, false, false, false };
+        loopi(6) if(sky[i] && sky[i] != notexture && sky[i]->name && sky[i]->w > 0 && sky[i]->h > 0)
+        {
+            faceloaded[i] = loadimage(sky[i]->name, faceimg[i]) && faceimg[i].data && !faceimg[i].compressed;
+        }
+
+        vec upsum(0, 0, 0), horsum(0, 0, 0), gndsum(0, 0, 0);
+        float upw = 0.0f, horw = 0.0f, gndw = 0.0f;
+
+        if(faceloaded[5])
+        {
+            const ImageData &img = faceimg[5];
+            // Upper sky tint: stable sampling around +Z, avoiding face edges.
+            accumulate(upsum, upw, img, 0.50f, 0.50f, 2.0f);
+            accumulate(upsum, upw, img, 0.34f, 0.50f, 1.0f);
+            accumulate(upsum, upw, img, 0.66f, 0.50f, 1.0f);
+            accumulate(upsum, upw, img, 0.50f, 0.34f, 1.0f);
+            accumulate(upsum, upw, img, 0.50f, 0.66f, 1.0f);
+            accumulate(upsum, upw, img, 0.39f, 0.39f, 0.8f);
+            accumulate(upsum, upw, img, 0.61f, 0.39f, 0.8f);
+            accumulate(upsum, upw, img, 0.39f, 0.61f, 0.8f);
+            accumulate(upsum, upw, img, 0.61f, 0.61f, 0.8f);
+
+            // Ground tint: lower hemisphere average proxy starts with the down face.
+            if(faceloaded[4])
+            {
+                const ImageData &imgd = faceimg[4];
+                accumulate(gndsum, gndw, imgd, 0.50f, 0.50f, 1.5f);
+                accumulate(gndsum, gndw, imgd, 0.30f, 0.50f, 0.8f);
+                accumulate(gndsum, gndw, imgd, 0.70f, 0.50f, 0.8f);
+                accumulate(gndsum, gndw, imgd, 0.50f, 0.30f, 0.8f);
+                accumulate(gndsum, gndw, imgd, 0.50f, 0.70f, 0.8f);
+            }
+        }
+
+        loopi(4) if(faceloaded[i])
+        {
+            const ImageData &img = faceimg[i];
+
+            // "Horizon" tint intentionally samples an upper side-face band
+            // (z ~ 0.55..0.75 in cube face space) to avoid painted land/horizon.
+            const float ts0 = 0.15f, ts1 = 0.22f;
+            accumulate(horsum, horw, img, 0.18f, ts0, 0.65f);
+            accumulate(horsum, horw, img, 0.50f, ts0, 1.00f);
+            accumulate(horsum, horw, img, 0.82f, ts0, 0.65f);
+            accumulate(horsum, horw, img, 0.25f, ts1, 0.55f);
+            accumulate(horsum, horw, img, 0.50f, ts1, 0.75f);
+            accumulate(horsum, horw, img, 0.75f, ts1, 0.55f);
+
+            // Ground tint samples a lower side-face band (used subtly by cloud shading).
+            const float tg0 = 0.78f, tg1 = 0.85f;
+            accumulate(gndsum, gndw, img, 0.20f, tg0, 0.45f);
+            accumulate(gndsum, gndw, img, 0.50f, tg0, 0.60f);
+            accumulate(gndsum, gndw, img, 0.80f, tg0, 0.45f);
+            accumulate(gndsum, gndw, img, 0.50f, tg1, 0.35f);
+        }
+
+        vec skycol = skyboxcolour.tocolor();
+        if(upw > 0) uptint = lightingtint(upsum.mul(1.0f/upw)).mul(skycol);
+        else uptint = skycol;
+        if(horw > 0) horizontint = lightingtint(horsum.mul(1.0f/horw)).mul(skycol);
+        else horizontint = uptint;
+        if(gndw > 0) groundtint = lightingtint(gndsum.mul(1.0f/gndw)).mul(skycol);
+        else groundtint = horizontint;
+
+        loopi(6) if(faceimg[i].data) faceimg[i].cleanup();
+    }
+}
 
 void loadsky(const char *basename, Texture *texs[6])
 {
@@ -28,6 +211,7 @@ void loadsky(const char *basename, Texture *texs[6])
         }
         if(texs[i]==notexture) conoutf(CON_ERROR, "could not load side %s of sky texture %s", side, basename);
     }
+    skyboxtint::valid = false;
 }
 
 Texture *cloudoverlay = NULL;
@@ -366,7 +550,16 @@ static void drawfogdome()
 
 void cleanupsky()
 {
+    skyboxtint::valid = false;
     fogdome::cleanup();
+}
+
+void getskyboxtints(vec &up, vec &horizon, vec &ground)
+{
+    if(skyboxtint::updateneeded()) skyboxtint::recompute();
+    up = skyboxtint::uptint;
+    horizon = skyboxtint::horizontint;
+    ground = skyboxtint::groundtint;
 }
 
 VARR(atmo, 0, 0, 1);

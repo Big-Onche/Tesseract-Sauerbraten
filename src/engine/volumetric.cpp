@@ -33,6 +33,7 @@ namespace vclouds
     VARR(vcdome, -100, 0, 100);
     VARR(vcscrollx, -1000, 0, 1000);
     VARR(vcscrolly, -1000, 0, 1000);
+    VARR(vcskyinherit, 0, 80, 100);
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
@@ -187,6 +188,12 @@ namespace vclouds
         GLOBALPARAMF(tvcloudsunreuse, float(vcstreuse));
         GLOBALPARAMF(tvcloudsunrecalc, vcstrecalc);
         GLOBALPARAMF(vcloudscroll, float(vcscrollx), float(vcscrolly));
+        vec skyup, skyhorizon, skyground;
+        getskyboxtints(skyup, skyhorizon, skyground);
+        GLOBALPARAM(vcloudskyuptint, skyup);
+        GLOBALPARAM(vcloudskyhorizontint, skyhorizon);
+        GLOBALPARAM(vcloudgroundtint, skyground);
+        GLOBALPARAMF(vcloudskyinherit, clamp(float(vcskyinherit) / 100.0f, 0.0f, 1.0f));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
 
