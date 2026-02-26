@@ -13,7 +13,7 @@ namespace vclouds
     VARP(volumetricclouds, 0, 1, 1);
     VARP(vcblur, 0, 1, 1);
     VARP(vcblurscale, 1, 1, 4);
-    FVARP(vcscale, 0.25f, 0.5f, 2.0f);
+    FVARP(vcscale, 0.1f, 0.25f, 2.0f);
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
     VARP(vcsteps, 4, 16, 128);
     VARP(vcskysteps, 2, 4, 8);
