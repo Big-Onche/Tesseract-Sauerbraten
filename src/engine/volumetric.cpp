@@ -16,7 +16,6 @@ namespace vclouds
     FVARP(vcscale, 0.1f, 0.25f, 2.0f);
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
     VARP(vcsteps, 4, 16, 128);
-    VARP(vcskysteps, 2, 4, 8);
     VARP(vcsunsteps, 2, 4, 64);
     VARP(vcstreuse, 1, 4, 16);
     FVARP(vcstrecalc, 0.0f, 8e-4f, 0.1f);
@@ -32,6 +31,8 @@ namespace vclouds
     VARR(vcheight, 0, 80, 100);
     VARR(vcthickness, 0, 20, 100);
     VARR(vcdome, -100, 0, 100);
+    VARR(vcscrollx, -1000, 0, 1000);
+    VARR(vcscrolly, -1000, 0, 1000);
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
@@ -182,10 +183,10 @@ namespace vclouds
         GLOBALPARAMF(vcloudthickness, vcdarkness);
         GLOBALPARAMF(vcloudphaseg, vcphaseg);
         GLOBALPARAMF(tvcloudsteps, float(vcsteps));
-        GLOBALPARAMF(tvcloudskysteps, float(vcskysteps));
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAMF(tvcloudsunreuse, float(vcstreuse));
         GLOBALPARAMF(tvcloudsunrecalc, vcstrecalc);
+        GLOBALPARAMF(vcloudscroll, float(vcscrollx), float(vcscrolly));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
 
