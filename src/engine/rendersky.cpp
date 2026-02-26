@@ -2,6 +2,9 @@
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
 extern bvec skyboxcolour;
+extern int atmo;
+extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
+extern bvec atmosunlight;
 
 namespace skyboxtint
 {
@@ -10,7 +13,12 @@ namespace skyboxtint
     static int texw[6] = { 0, 0, 0, 0, 0, 0 };
     static int texh[6] = { 0, 0, 0, 0, 0, 0 };
     static bvec tintcolour(0, 0, 0);
-    static vec uptint(1, 1, 1), horizontint(1, 1, 1), groundtint(1, 1, 1);
+    static vec cubetint[6] =
+    {
+        vec(1, 1, 1), vec(1, 1, 1), vec(1, 1, 1),
+        vec(1, 1, 1), vec(1, 1, 1), vec(1, 1, 1)
+    };
+    static vec2 cubefront(0, -1);
 
     static inline vec fetchrgba(const ImageData &img, int x, int y)
     {
@@ -74,10 +82,112 @@ namespace skyboxtint
         return c;
     }
 
+    static inline vec lerpvec(const vec &a, const vec &b, float t)
+    {
+        t = clamp(t, 0.0f, 1.0f);
+        return vec(a).mul(1.0f - t).add(vec(b).mul(t));
+    }
+
+    static inline float smoothstepf(float e0, float e1, float x)
+    {
+        float t = e0 != e1 ? clamp((x - e0) / (e1 - e0), 0.0f, 1.0f) : (x >= e1 ? 1.0f : 0.0f);
+        return t*t*(3.0f - 2.0f*t);
+    }
+
+    static void accumfaceavg(vec &sum, float &weight, const ImageData &img, float s, float t, float sw)
+    {
+        if(sw <= 0 || !img.data || img.compressed) return;
+        sum.add(sampleface(img, s, t).mul(sw));
+        weight += sw;
+    }
+
+    static vec averageface(const ImageData &img)
+    {
+        vec sum(0, 0, 0);
+        float weight = 0.0f;
+        static const struct tap { float s, t, w; } taps[] =
+        {
+            { 0.50f, 0.50f, 2.2f },
+            { 0.22f, 0.22f, 0.9f }, { 0.50f, 0.22f, 1.0f }, { 0.78f, 0.22f, 0.9f },
+            { 0.22f, 0.50f, 1.0f },                             { 0.78f, 0.50f, 1.0f },
+            { 0.22f, 0.78f, 0.9f }, { 0.50f, 0.78f, 1.0f }, { 0.78f, 0.78f, 0.9f }
+        };
+        for(int i = 0; i < int(sizeof(taps)/sizeof(taps[0])); ++i)
+            accumfaceavg(sum, weight, img, taps[i].s, taps[i].t, taps[i].w);
+        return weight > 0 ? sum.mul(1.0f / weight) : vec(1, 1, 1);
+    }
+
+    static vec proceduraldircolor(const vec &dir)
+    {
+        vec fog = fogcolour.tocolor();
+        vec suncol = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale)
+                                            : sunlight.tocolor().mul(sunlightscale);
+        if(suncol.x + suncol.y + suncol.z <= 1e-4f) suncol = vec(1, 1, 1);
+
+        float sunup = clamp(sunlightdir.z * 0.5f + 0.5f, 0.0f, 1.0f);
+        float sunset = 1.0f - smoothstepf(0.35f, 0.85f, sunup);
+        float haze = clamp(atmohaze * 0.20f, 0.0f, 1.0f);
+        float density = clamp(atmodensity * 0.25f, 0.0f, 1.0f);
+        float ozone = clamp(atmoozone * 0.25f, 0.0f, 1.0f);
+        float atmostrength = clamp(atmoalpha, 0.0f, 1.0f) * clamp(atmobright, 0.25f, 2.0f);
+        atmostrength = clamp(atmostrength * 0.75f, 0.0f, 1.0f);
+
+        vec2 sunh(sunlightdir);
+        if(sunh.squaredlen() > 1e-6f) sunh.normalize();
+        else sunh = vec2(0, -1);
+
+        float z = clamp(dir.z, -1.0f, 1.0f);
+        float upk = smoothstepf(-0.05f, 0.85f, z);
+        float downk = smoothstepf(-0.05f, 0.95f, -z);
+        float horiz = 1.0f - fabsf(z);
+        horiz = smoothstepf(0.0f, 1.0f, horiz);
+
+        float sunalign = clamp(vec2(dir).dot(sunh), -1.0f, 1.0f);
+        float sunglow = powf(max(sunalign, 0.0f), 4.0f) * (0.15f + 0.85f*horiz) * (0.15f + 0.85f*sunset);
+        float backcool = powf(max(-sunalign, 0.0f), 2.0f) * horiz * (0.10f + 0.20f*haze);
+
+        vec rayleigh(0.46f, 0.62f, 1.00f);
+        vec zenbase = lerpvec(rayleigh, fog, 0.35f + 0.35f*haze);
+        vec horbase = lerpvec(fog, lerpvec(rayleigh, fog, 0.65f), 0.35f);
+        vec gndbase = lerpvec(lerpvec(fog, horbase, 0.35f), vec(0.18f, 0.18f, 0.20f), 0.35f);
+        vec warm = lerpvec(vec(1.00f, 0.58f, 0.38f), suncol, 0.65f);
+        vec cool = lerpvec(rayleigh, fog, 0.60f + 0.15f*ozone);
+
+        vec c = lerpvec(horbase, zenbase, upk);
+        c = lerpvec(c, gndbase, downk * (0.70f + 0.20f*density));
+        c = lerpvec(c, warm, sunglow);
+        c = lerpvec(c, cool, backcool);
+        c = lerpvec(c, vec(c).mul(1.0f - 0.08f*ozone), 0.35f * upk);
+        c = lightingtint(lerpvec(vec(1, 1, 1), c, atmostrength));
+        return c;
+    }
+
+    static void proceduralcubetints(vec out[6], vec2 &front)
+    {
+        front = vec2(sunlightdir);
+        if(front.squaredlen() > 1e-6f) front.normalize();
+        else front = vec2(0, -1);
+        vec2 right(-front.y, front.x);
+
+        vec dirs[6] =
+        {
+            vec(-right.x, -right.y, 0.0f), // lf
+            vec( right.x,  right.y, 0.0f), // rt
+            vec(-front.x, -front.y, 0.0f), // bk
+            vec( front.x,  front.y, 0.0f), // ft
+            vec(0.0f, 0.0f, -1.0f),        // dn
+            vec(0.0f, 0.0f,  1.0f)         // up
+        };
+        loopi(6) out[i] = proceduraldircolor(dirs[i]);
+    }
+
     static bool updateneeded()
     {
         if(!valid) return true;
         if(tintcolour != skyboxcolour) return true;
+        bool havefaces = false;
+        loopi(6) if(sky[i] && sky[i] != notexture) { havefaces = true; break; }
+        if(!havefaces && atmo) return true; // atmospheric fallback can change with sun/atmo params
         loopi(6)
         {
             Texture *t = sky[i];
@@ -87,13 +197,6 @@ namespace skyboxtint
             if(texids[i] != id || texw[i] != w || texh[i] != h) return true;
         }
         return false;
-    }
-
-    static void accumulate(vec &sum, float &weight, const ImageData &img, float s, float t, float sw)
-    {
-        if(sw <= 0 || !img.data || img.compressed) return;
-        sum.add(sampleface(img, s, t).mul(sw));
-        weight += sw;
     }
 
     static void recompute()
@@ -108,78 +211,37 @@ namespace skyboxtint
             texh[i] = t && t != notexture ? t->h : 0;
         }
 
-        uptint = horizontint = groundtint = vec(1, 1, 1);
-
-        bool haveupper = sky[5] && sky[5] != notexture;
-        bool havesides = false;
-        loopi(4) if(sky[i] && sky[i] != notexture) { havesides = true; break; }
-        if(!haveupper && !havesides) return;
+        loopi(6) cubetint[i] = vec(1, 1, 1);
+        cubefront = vec2(0, -1);
 
         ImageData faceimg[6];
         bool faceloaded[6] = { false, false, false, false, false, false };
+        bool anyloaded = false;
         loopi(6) if(sky[i] && sky[i] != notexture && sky[i]->name && sky[i]->w > 0 && sky[i]->h > 0)
         {
             faceloaded[i] = loadimage(sky[i]->name, faceimg[i]) && faceimg[i].data && !faceimg[i].compressed;
-        }
-
-        vec upsum(0, 0, 0), horsum(0, 0, 0), gndsum(0, 0, 0);
-        float upw = 0.0f, horw = 0.0f, gndw = 0.0f;
-
-        if(faceloaded[5])
-        {
-            const ImageData &img = faceimg[5];
-            // Upper sky tint: stable sampling around +Z, avoiding face edges.
-            accumulate(upsum, upw, img, 0.50f, 0.50f, 2.0f);
-            accumulate(upsum, upw, img, 0.34f, 0.50f, 1.0f);
-            accumulate(upsum, upw, img, 0.66f, 0.50f, 1.0f);
-            accumulate(upsum, upw, img, 0.50f, 0.34f, 1.0f);
-            accumulate(upsum, upw, img, 0.50f, 0.66f, 1.0f);
-            accumulate(upsum, upw, img, 0.39f, 0.39f, 0.8f);
-            accumulate(upsum, upw, img, 0.61f, 0.39f, 0.8f);
-            accumulate(upsum, upw, img, 0.39f, 0.61f, 0.8f);
-            accumulate(upsum, upw, img, 0.61f, 0.61f, 0.8f);
-
-            // Ground tint: lower hemisphere average proxy starts with the down face.
-            if(faceloaded[4])
-            {
-                const ImageData &imgd = faceimg[4];
-                accumulate(gndsum, gndw, imgd, 0.50f, 0.50f, 1.5f);
-                accumulate(gndsum, gndw, imgd, 0.30f, 0.50f, 0.8f);
-                accumulate(gndsum, gndw, imgd, 0.70f, 0.50f, 0.8f);
-                accumulate(gndsum, gndw, imgd, 0.50f, 0.30f, 0.8f);
-                accumulate(gndsum, gndw, imgd, 0.50f, 0.70f, 0.8f);
-            }
-        }
-
-        loopi(4) if(faceloaded[i])
-        {
-            const ImageData &img = faceimg[i];
-
-            // "Horizon" tint intentionally samples an upper side-face band
-            // (z ~ 0.55..0.75 in cube face space) to avoid painted land/horizon.
-            const float ts0 = 0.15f, ts1 = 0.22f;
-            accumulate(horsum, horw, img, 0.18f, ts0, 0.65f);
-            accumulate(horsum, horw, img, 0.50f, ts0, 1.00f);
-            accumulate(horsum, horw, img, 0.82f, ts0, 0.65f);
-            accumulate(horsum, horw, img, 0.25f, ts1, 0.55f);
-            accumulate(horsum, horw, img, 0.50f, ts1, 0.75f);
-            accumulate(horsum, horw, img, 0.75f, ts1, 0.55f);
-
-            // Ground tint samples a lower side-face band (used subtly by cloud shading).
-            const float tg0 = 0.78f, tg1 = 0.85f;
-            accumulate(gndsum, gndw, img, 0.20f, tg0, 0.45f);
-            accumulate(gndsum, gndw, img, 0.50f, tg0, 0.60f);
-            accumulate(gndsum, gndw, img, 0.80f, tg0, 0.45f);
-            accumulate(gndsum, gndw, img, 0.50f, tg1, 0.35f);
+            anyloaded = anyloaded || faceloaded[i];
         }
 
         vec skycol = skyboxcolour.tocolor();
-        if(upw > 0) uptint = lightingtint(upsum.mul(1.0f/upw)).mul(skycol);
-        else uptint = skycol;
-        if(horw > 0) horizontint = lightingtint(horsum.mul(1.0f/horw)).mul(skycol);
-        else horizontint = uptint;
-        if(gndw > 0) groundtint = lightingtint(gndsum.mul(1.0f/gndw)).mul(skycol);
-        else groundtint = horizontint;
+        if(anyloaded)
+        {
+            loopi(6)
+            {
+                cubetint[i] = skycol;
+                if(faceloaded[i]) cubetint[i] = lightingtint(averageface(faceimg[i])).mul(skycol);
+            }
+            cubefront = vec2(0, -1);
+        }
+        else if(atmo && atmoalpha > 0.0f)
+        {
+            proceduralcubetints(cubetint, cubefront);
+        }
+        else
+        {
+            loopi(6) cubetint[i] = skycol;
+            cubefront = vec2(0, -1);
+        }
 
         loopi(6) if(faceimg[i].data) faceimg[i].cleanup();
     }
@@ -554,12 +616,11 @@ void cleanupsky()
     fogdome::cleanup();
 }
 
-void getskyboxtints(vec &up, vec &horizon, vec &ground)
+void getskycubetints(vec colors[6], vec2 &front)
 {
     if(skyboxtint::updateneeded()) skyboxtint::recompute();
-    up = skyboxtint::uptint;
-    horizon = skyboxtint::horizontint;
-    ground = skyboxtint::groundtint;
+    loopi(6) colors[i] = skyboxtint::cubetint[i];
+    front = skyboxtint::cubefront;
 }
 
 VARR(atmo, 0, 0, 1);
