@@ -34,7 +34,7 @@ namespace vclouds
     VARR(vcscrollx, -1000, 0, 1000);
     VARR(vcscrolly, -1000, 0, 1000);
     VARR(vcskyinherit, 0, 80, 100);
-    VARR(vcshadowinherit, 0, 0, 100);
+    VARR(vcshadowinherit, 0, 30, 100);
     VARR(vcamount, 0, 50, 100);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
