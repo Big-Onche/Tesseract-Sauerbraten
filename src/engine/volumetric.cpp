@@ -199,6 +199,8 @@ namespace vclouds
         GLOBALPARAM(vcloudskycubeup, skycube[5]);
         GLOBALPARAMF(vcloudskycubefront, skycubefront.x, skycubefront.y);
         GLOBALPARAMF(vcloudskyinherit, clamp(float(vcskyinherit) / 100.0f, 0.0f, 1.0f));
+        vec cloudsuncolor = sunlight.tocolor().mul(sunlightscale);
+        GLOBALPARAM(vcloudsunlightcolor, cloudsuncolor);
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
 
