@@ -55,6 +55,7 @@ namespace vclouds
     {
         if(!volumetricclouds) return;
         useshaderbyname("volumetricclouds");
+        useshaderbyname("volumetriccloudsupscale");
         useshaderbyname("volumetriccloudsbilateral");
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
@@ -66,6 +67,7 @@ namespace vclouds
         if(!volumetricclouds) return;
 
         Shader *cloudshader = useshaderbyname("volumetricclouds");
+        Shader *upscaleshader = useshaderbyname("volumetriccloudsupscale");
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
         Shader *shadowmapshader = vcshadow ? useshaderbyname("volumetriccloudshadowmap") : NULL;
         Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
@@ -230,6 +232,28 @@ namespace vclouds
             GLOBALPARAMF(tvcloudscale, 1.0f, 1.0f, 1.0f, 1.0f);
             GLOBALPARAMF(tvcloudblurdir, 0.0f, 1.0f);
             bilateralshader->set();
+            screenquad(vieww, viewh);
+
+            compositetex = vcbilateraltex;
+            compositetexw = vieww;
+            compositetexh = viewh;
+        }
+        else if((vcw < vieww || vch < viewh) && upscaleshader)
+        {
+            // Depth-aware upsample to avoid low-res cloud alpha bleeding over
+            // foreground geometry silhouettes when vcscale < 1.
+            GLOBALPARAMF(tvbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
+
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
+            glViewport(0, 0, vieww, viewh);
+            glDisable(GL_BLEND);
+            glClearColor(0, 0, 0, 0);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, vctex);
+            GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
+            upscaleshader->set();
             screenquad(vieww, viewh);
 
             compositetex = vcbilateraltex;
