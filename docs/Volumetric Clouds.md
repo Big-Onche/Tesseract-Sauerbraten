@@ -5,6 +5,7 @@
 The clouds are rendered as a **screen-space volumetric effect**:
 
 - A fullscreen shader raymarches through a configurable cloud layer in world space.
+- The cloud layer can be flat or curved into a dome to fill horizons if needed.
 - Cloud density is generated procedurally with layered noise (fBM-style).
 - Lighting uses Beer-Lambert style transmittance plus a Henyey-Greenstein phase approximation.
 - The result is rendered to a low-resolution buffer, then upscaled/composited over the scene.
@@ -14,12 +15,15 @@ The clouds are rendered as a **screen-space volumetric effect**:
 1. Build a cloud layer volume from:
 - layer center height (percent of map/world height)
 - layer thickness (percent of map/world height)
+- optional dome curvature (`vcdome`) for horizon coverage
 
 2. Reconstruct world position from scene depth for each pixel.
 
 3. Raymarch through the cloud layer:
+- intersect the view ray with the cloud layer (planar slab for `vcdome 0`, analytic quadratic interval for domed layers)
 - sample procedural density
 - apply vertical shaping (soft bottom/top falloff)
+- scroll noise sampling over time (configurable XY drift via `vcscrollx` / `vcscrolly`, plus a small Z drift)
 - use per-pixel temporal jitter (quantized time seed) to reduce banding / support temporal averaging
 - accumulate color + alpha along the view ray
 
@@ -35,8 +39,11 @@ The clouds are rendered as a **screen-space volumetric effect**:
 - Clouds are rendered at reduced resolution if needed (`vcscale`) for speed.
 - Optional bilateral blur/upscale smooths noise while preserving depth edges.
 - Current blur path is a separable 2-pass bilateral (horizontal + vertical, 9 taps each pass).
+- A depth-aware upscale pass is used to avoid geometry/cloud edge aliasing.
 - Blur radius is alpha-adaptive (more blur in lower-alpha / noisier cloud regions).
-- Cloud quality and cost are controlled by density, scale, blur, and shadow settings.
+- Cloud sunlight self-shadowing work is reduced by:
+- sun transmittance is cached and reused for multiple viewmarch steps (`vcstreuse`)
+- optional density threshold skips unnecessary sun-transmittance refreshes (`vcstrecalc`)
 
 ## Cloud Shadows (Ground / Scene Shadowing)
 
@@ -49,7 +56,7 @@ Cloud shadows use a **2D world-space shadow map** (camera-centered):
 This shadow map is then applied in a fullscreen pass:
 
 - Reconstruct world position from depth
-- Project the point toward the cloud plane along sun direction
+- Project the point toward the cloud layer (flat or domed) along sun direction
 - Sample the cloud shadow map
 - Multiply scene lighting by the sampled factor
 
