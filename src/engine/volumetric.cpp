@@ -179,7 +179,7 @@ namespace vclouds
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
     VARP(vcsteps, 4, 32, 128);
     VARP(vcsunsteps, 2, 4, 64);
-    VARP(vcstreuse, 1, 4, 16);
+    VARP(vcstreuse, 0, 4, 16);
     FVARP(vcstrecalc, 0.0f, 8e-4f, 0.1f);
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowmapsize, 64, 512, 2048);
