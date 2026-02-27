@@ -28,10 +28,12 @@ namespace vclouds
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     VARP(vcgodrays, 0, 1, 1);
     VARP(vcgodraysteps, 2, 12, 32);
-    FVARP(vcgodraystrength, 0.0f, 1.0f, 4.0f);
-    FVARP(vcgodraydensity, 0.0f, 0.35f, 4.0f);
+    FVARP(vcgodraystrength, 0.0f, 4.0f, 8.0f);
+    FVARP(vcgodraydensity, 0.0f, 1.5f, 8.0f);
     FVARP(vcgodraydist, 0.1f, 1.25f, 8.0f);
     FVARP(vcgodraysscale, 0.f, 0.25f, 2.f);
+    FVARP(vcgodrayhorizonboost, 0.0f, 0.0f, 1.0f);
+    FVARP(vcgodrayclamp, 0.0f, 0.5f, 8.0f);
 
     // map settings
     VARR(vcdensity, 0, 70, 100);
@@ -100,7 +102,10 @@ namespace vclouds
         Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
         Shader *godraysshader = (vcshadow && vcgodrays) ? useshaderbyname("volumetriccloudgodrays") : NULL;
         float shadowstrength = vcshadowstrength * (vcalpha * 0.01f);
-        float godraystrength = vcgodraystrength * (vcalpha * 0.01f);
+        float cloudamountk = clamp(float(vcamount) / 100.0f, 0.0f, 1.0f);
+        // Keep a subtle floor at clear skies, then ramp toward full shafts as overcast increases.
+        float godrayamountk = 0.20f + 0.80f * cloudamountk;
+        float godraystrength = vcgodraystrength * (vcalpha * 0.01f) * godrayamountk;
         bool doshadowapply = shadowapplyshader && shadowstrength > 1e-4f;
         bool dogodrays = godraysshader && godraystrength > 1e-4f;
         bool needshadowmap = shadowmapshader && (doshadowapply || dogodrays);
@@ -348,10 +353,13 @@ namespace vclouds
             {
                 float godraymaxdist = min(max(vcgodraydist, 0.1f) * ws, maxclouddist);
                 float godrayext = max(vcgodraydensity, 0.0f) / max(ws, 1.0f);
+                float godrayhboost = max(vcgodrayhorizonboost, 0.0f);
+                float godrayclamp = max(vcgodrayclamp, 0.0f);
                 float godrayscale = vcgodraysscale > 1e-4f ? vcgodraysscale : 1.0f;
                 int godrayw = max(int(ceilf(vieww * godrayscale)), 1);
                 int godrayh = max(int(ceilf(viewh * godrayscale)), 1);
                 bool rescaledgodrays = godrayw != vieww || godrayh != viewh;
+                GLOBALPARAMF(vcgodrayparams2, godrayhboost, godrayclamp, 0.0f, 0.0f);
 
                 if(rescaledgodrays)
                 {
