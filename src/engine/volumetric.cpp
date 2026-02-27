@@ -185,6 +185,7 @@ namespace vclouds
     VARP(vcshadowsamples, 1, 4, 8);
     VARP(vcshadowpcf, 0, 1, 2);
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
+    FVARP(vcscattereps, 1e-7f, 1e-4f, 1e-2f);
 
     // map settings
     VARR(vcdensity, 0, 70, 100);
@@ -351,6 +352,7 @@ namespace vclouds
         GLOBALPARAMF(vcalpha, float(vcalpha) / 100.0f);
         GLOBALPARAMF(vcthickness, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcphaseg, vcphaseg);
+        GLOBALPARAMF(vcscattereps, vcscattereps);
         GLOBALPARAMF(vcsteps, float(vcsteps));
         GLOBALPARAMF(vcsunsteps, float(vcsunsteps));
         GLOBALPARAMF(vcsunreuse, float(vcstreuse));
