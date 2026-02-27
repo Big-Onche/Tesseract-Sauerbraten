@@ -187,6 +187,10 @@ namespace vclouds
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     FVARP(vcphaseg2, -0.95f, -0.30f, 0.95f);
     FVARP(vcphasew, 0.0f, 0.22f, 1.0f);
+    VARP(vcmsoctaves, 1, 2, 6);
+    FVARP(vcmsscatter, 0.0f, 0.65f, 1.0f);
+    FVARP(vcmsextinction, 0.0f, 0.82f, 1.0f);
+    FVARP(vcmsphase, 0.25f, 1.12f, 4.0f);
     FVARP(vcscattereps, 1e-7f, 1e-4f, 1e-2f);
 
     // map settings
@@ -356,6 +360,10 @@ namespace vclouds
         GLOBALPARAMF(vcphaseg, vcphaseg);
         GLOBALPARAMF(vcphaseg2, vcphaseg2);
         GLOBALPARAMF(vcphasew, vcphasew);
+        float msscatter = clamp(vcmsscatter, 0.0f, 1.0f);
+        // Keep a <= b for the multi-scatter approximation to stay energy stable.
+        float msextinction = max(clamp(vcmsextinction, 0.0f, 1.0f), msscatter);
+        GLOBALPARAMF(vcmultiscat, float(vcmsoctaves), msscatter, msextinction, vcmsphase);
         GLOBALPARAMF(vcscattereps, vcscattereps);
         GLOBALPARAMF(vcsteps, float(vcsteps));
         GLOBALPARAMF(vcsunsteps, float(vcsunsteps));
