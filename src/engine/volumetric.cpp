@@ -1,5 +1,9 @@
 #include "engine.h"
 
+extern GLuint shadowatlastex;
+extern GLenum shadowatlastarget;
+extern int csmshadowmap, csmsplits;
+
 namespace vclouds
 {
     GLuint vctex = 0, vcfbo = 0;
@@ -27,10 +31,11 @@ namespace vclouds
     VARP(vcshadowpcf, 0, 1, 2);
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     VARP(vcgodrays, 0, 1, 1);
-    VARP(vcgodraysteps, 2, 12, 32);
-    FVARP(vcgodraysscale, 0.f, 0.25f, 2.f);
+    VARP(vcgodraysteps, 2, 32, 128);
+    FVARP(vcgodrayscale, 0.f, 0.25f, 2.f);
     FVARP(vcgodrayhorizonboost, 0.0f, 0.0f, 1.0f);
     FVARP(vcgodrayclamp, 0.0f, 0.5f, 8.0f);
+    FVAR(vcgodraygeomshadow, 0.0f, 1.0f, 1.0f);
 
     // map settings
     VARR(vcdensity, 0, 70, 100);
@@ -355,11 +360,23 @@ namespace vclouds
                 float godrayext = max(vcgodraydensity, 0.0f) / max(ws, 1.0f);
                 float godrayhboost = max(vcgodrayhorizonboost, 0.0f);
                 float godrayclamp = max(vcgodrayclamp, 0.0f);
-                float godrayscale = vcgodraysscale > 1e-4f ? vcgodraysscale : 1.0f;
+                int godraycsmsplits = (!sunlight.iszero() && csmshadowmap && csmsplits > 0 && shadowatlastex && shadowatlastarget == GL_TEXTURE_RECTANGLE) ? csmsplits : 0;
+                float godraygeom = godraycsmsplits > 0 ? clamp(vcgodraygeomshadow, 0.0f, 1.0f) : 0.0f;
+                float godrayscale = vcgodrayscale > 1e-4f ? vcgodrayscale : 1.0f;
                 int godrayw = max(int(ceilf(vieww * godrayscale)), 1);
                 int godrayh = max(int(ceilf(viewh * godrayscale)), 1);
                 bool rescaledgodrays = godrayw != vieww || godrayh != viewh;
                 GLOBALPARAMF(vcgodrayparams2, godrayhboost, godrayclamp, 0.0f, 0.0f);
+                GLOBALPARAMI(vccsmsplits, godraycsmsplits);
+                GLOBALPARAMF(vcgeomshadow, godraygeom);
+                if(godraycsmsplits > 0)
+                {
+                    glActiveTexture_(GL_TEXTURE1);
+                    glBindTexture(shadowatlastarget, shadowatlastex);
+                    glTexParameteri(shadowatlastarget, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+                    glTexParameteri(shadowatlastarget, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+                    glActiveTexture_(GL_TEXTURE0);
+                }
 
                 if(rescaledgodrays)
                 {
