@@ -205,6 +205,7 @@ namespace vclouds
     VARR(vcshadowinherit, 0, 30, 100);
     VARR(vcamount, 0, 50, 100);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
+    FVARR(vcfogdistmult, 1.0f, 1.0f, 10.0f);
     CVARR(vccolour, 0xFFFFFF);
 
     static void cleanupshadowmap()
@@ -345,7 +346,7 @@ namespace vclouds
             base = max(top - 1.0f, 0.0f);
         }
 
-        float maxclouddist = max(float(farplane), ws);
+        float maxclouddist = max(float(farplane), ws)*3;
         // Dome coefficient is in world-z units per squared world-xy distance.
         // Positive vcdome bends the layer downward toward the horizon.
         float domek = -float(vcdome) * (ws / max(maxclouddist * maxclouddist, 1.0f)) / 100.0f;
@@ -365,6 +366,7 @@ namespace vclouds
         float msextinction = max(clamp(vcmsextinction, 0.0f, 1.0f), msscatter);
         GLOBALPARAMF(vcmultiscat, float(vcmsoctaves), msscatter, msextinction, vcmsphase);
         GLOBALPARAMF(vcscattereps, vcscattereps);
+        GLOBALPARAMF(vcfogdistmult, vcfogdistmult);
         GLOBALPARAMF(vcsteps, float(vcsteps));
         GLOBALPARAMF(vcsunsteps, float(vcsunsteps));
         GLOBALPARAMF(vcsunreuse, float(vcstreuse));
