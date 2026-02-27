@@ -101,17 +101,8 @@ namespace vclouds
         Shader *godraysshader = (vcshadow && vcgodrays) ? useshaderbyname("volumetriccloudgodrays") : NULL;
         float shadowstrength = vcshadowstrength * (vcalpha * 0.01f);
         float godraystrength = vcgodraystrength * (vcalpha * 0.01f);
-        vec sdirnorm(sunlightdir);
-        float sdirlen = sdirnorm.magnitude();
-        if(sdirlen > 1e-4f) sdirnorm.div(sdirlen);
-        else sdirnorm = vec(0, 0, 1);
-        float sunbelow = clamp(-sdirnorm.z, 0.0f, 1.0f);
-        // Approximate (1 - smoothstep(0.18, 0.95, sunbelow)) in C++ for a cheap pass-level skip.
-        float twilight = clamp((0.95f - sunbelow) / (0.95f - 0.18f), 0.0f, 1.0f);
-        twilight = twilight * twilight * (3.0f - 2.0f * twilight);
-        float godraypassstrength = godraystrength * twilight;
         bool doshadowapply = shadowapplyshader && shadowstrength > 1e-4f;
-        bool dogodrays = godraysshader && godraypassstrength > 1e-4f;
+        bool dogodrays = godraysshader && godraystrength > 1e-4f;
         bool needshadowmap = shadowmapshader && (doshadowapply || dogodrays);
         if(!cloudshader) return;
 
@@ -389,7 +380,7 @@ namespace vclouds
                     glActiveTexture_(GL_TEXTURE0);
                     glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
                     GLOBALPARAMF(vcscale, float(vieww)/vcgodrayw, float(viewh)/vcgodrayh, float(vcgodrayw)/vieww, float(vcgodrayh)/viewh);
-                    GLOBALPARAMF(vcgodrayparams, godraypassstrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
                     godraysshader->set();
                     screenquad(vcgodrayw, vcgodrayh);
 
@@ -421,7 +412,7 @@ namespace vclouds
                     glActiveTexture_(GL_TEXTURE0);
                     glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
                     GLOBALPARAMF(vcscale, 1.0f, 1.0f, 1.0f, 1.0f);
-                    GLOBALPARAMF(vcgodrayparams, godraypassstrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
 
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_ONE, GL_ONE);
