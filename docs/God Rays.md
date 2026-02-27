@@ -39,6 +39,8 @@ Per pixel, the pass raymarches from camera to scene hit/max distance and accumul
 - `vcgodraydist`: max trace distance (scaled by world size).
 - `vcgodrayhorizonboost`: extra low-sun visibility boost.
 - `vcgodrayclamp`: soft highlight rolloff.
+- `vcgodrayskyclamp`: stricter soft clamp used on sky/background pixels.
+- `vcgodrayskymax`: hard luminance cap for sky/background pixels (`0` disables hard cap).
 - `vcgodraygeomshadow`: geometry shadow influence from CSM (`0..1`).
 - `vcamount`: scales god-ray strength from subtle to full (`godray *= 0.20 + 0.80 * clamp(vcamount / 100, 0, 1)`).
 

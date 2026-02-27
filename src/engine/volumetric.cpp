@@ -10,10 +10,10 @@ namespace vclouds
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
     GLuint vcbilateraltemptex = 0, vcbilateraltempfbo = 0;
     GLuint vcshadowtex = 0, vcshadowfbo = 0;
-    GLuint vcgodraytex = 0, vcgodrayfbo = 0;
+    GLuint godraytex = 0, godrayfbo = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
-    int vcgodrayw = 0, vcgodrayh = 0;
+    int godrayw = 0, godrayh = 0;
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
@@ -30,12 +30,14 @@ namespace vclouds
     VARP(vcshadowsamples, 1, 4, 8);
     VARP(vcshadowpcf, 0, 1, 2);
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
-    VARP(vcgodrays, 0, 1, 1);
-    VARP(vcgodraysteps, 2, 32, 128);
-    FVARP(vcgodrayscale, 0.f, 0.25f, 2.f);
-    FVARP(vcgodrayhorizonboost, 0.0f, 0.0f, 1.0f);
-    FVARP(vcgodrayclamp, 0.0f, 0.5f, 8.0f);
-    FVAR(vcgodraygeomshadow, 0.0f, 1.0f, 1.0f);
+    VARP(godrays, 0, 1, 1);
+    VARP(godraysteps, 2, 32, 128);
+    FVARP(godrayscale, 0.f, 0.25f, 2.f);
+    FVARP(godrayhorizonboost, 0.0f, 0.0f, 1.0f);
+    FVARP(godrayclamp, 0.0f, 0.5f, 8.0f);
+    FVARP(godrayskyclamp, 0.0f, 0.3f, 1.0f);
+    FVARP(godrayskymax, 0.0f, 0.32f, 1.0f);
+    FVARP(godraygeomshadow, 0.0f, 1.0f, 1.0f);
 
     // map settings
     VARR(vcdensity, 0, 70, 100);
@@ -50,9 +52,9 @@ namespace vclouds
     VARR(vcamount, 0, 50, 100);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
-    FVARR(vcgodraystrength, 0.0f, 4.0f, 8.0f);
-    FVARR(vcgodraydensity, 0.0f, 1.5f, 8.0f);
-    FVARR(vcgodraydist, 0.1f, 1.25f, 8.0f);
+    FVARR(godraystrength, 0.0f, 4.0f, 8.0f);
+    FVARR(godraydensity, 0.0f, 4.0f, 8.0f);
+    FVARR(godraydist, 0.1f, 1.25f, 8.0f);
 
     static void cleanupshadowmap()
     {
@@ -71,17 +73,17 @@ namespace vclouds
 
     static void cleanupgodraybuffer()
     {
-        if(vcgodrayfbo)
+        if(godrayfbo)
         {
-            glDeleteFramebuffers_(1, &vcgodrayfbo);
-            vcgodrayfbo = 0;
+            glDeleteFramebuffers_(1, &godrayfbo);
+            godrayfbo = 0;
         }
-        if(vcgodraytex)
+        if(godraytex)
         {
-            glDeleteTextures(1, &vcgodraytex);
-            vcgodraytex = 0;
+            glDeleteTextures(1, &godraytex);
+            godraytex = 0;
         }
-        vcgodrayw = vcgodrayh = 0;
+        godrayw = godrayh = 0;
     }
 
     void init()
@@ -92,7 +94,7 @@ namespace vclouds
         useshaderbyname("volumetriccloudsbilateral");
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
-        useshaderbyname("volumetriccloudgodrays");
+        useshaderbyname("godrays");
         useshaderbyname("scalelinear");
     }
 
@@ -105,14 +107,14 @@ namespace vclouds
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
         Shader *shadowmapshader = vcshadow ? useshaderbyname("volumetriccloudshadowmap") : NULL;
         Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
-        Shader *godraysshader = (vcshadow && vcgodrays) ? useshaderbyname("volumetriccloudgodrays") : NULL;
+        Shader *godraysshader = (vcshadow && godrays) ? useshaderbyname("godrays") : NULL;
         float shadowstrength = vcshadowstrength * (vcalpha * 0.01f);
         float cloudamountk = clamp(float(vcamount) / 100.0f, 0.0f, 1.0f);
         // Keep a subtle floor at clear skies, then ramp toward full shafts as overcast increases.
         float godrayamountk = 0.20f + 0.80f * cloudamountk;
-        float godraystrength = vcgodraystrength * (vcalpha * 0.01f) * godrayamountk;
+        float godraystrengthscaled = godraystrength * (vcalpha * 0.01f) * godrayamountk;
         bool doshadowapply = shadowapplyshader && shadowstrength > 1e-4f;
-        bool dogodrays = godraysshader && godraystrength > 1e-4f;
+        bool dogodrays = godraysshader && godraystrengthscaled > 1e-4f;
         bool needshadowmap = shadowmapshader && (doshadowapply || dogodrays);
         if(!cloudshader) return;
 
@@ -356,17 +358,19 @@ namespace vclouds
 
             if(dogodrays)
             {
-                float godraymaxdist = min(max(vcgodraydist, 0.1f) * ws, maxclouddist);
-                float godrayext = max(vcgodraydensity, 0.0f) / max(ws, 1.0f);
-                float godrayhboost = max(vcgodrayhorizonboost, 0.0f);
-                float godrayclamp = max(vcgodrayclamp, 0.0f);
+                float godraymaxdist = min(max(godraydist, 0.1f) * ws, maxclouddist);
+                float godrayext = max(godraydensity, 0.0f) / max(ws, 1.0f);
+                float godrayhboost = max(godrayhorizonboost, 0.0f);
+                float godrayclampcfg = max(godrayclamp, 0.0f);
+                float godrayskyclampcfg = max(godrayskyclamp, 0.0f);
+                float godrayskymaxcfg = max(godrayskymax, 0.0f);
                 int godraycsmsplits = (!sunlight.iszero() && csmshadowmap && csmsplits > 0 && shadowatlastex && shadowatlastarget == GL_TEXTURE_RECTANGLE) ? csmsplits : 0;
-                float godraygeom = godraycsmsplits > 0 ? clamp(vcgodraygeomshadow, 0.0f, 1.0f) : 0.0f;
-                float godrayscale = vcgodrayscale > 1e-4f ? vcgodrayscale : 1.0f;
-                int godrayw = max(int(ceilf(vieww * godrayscale)), 1);
-                int godrayh = max(int(ceilf(viewh * godrayscale)), 1);
-                bool rescaledgodrays = godrayw != vieww || godrayh != viewh;
-                GLOBALPARAMF(vcgodrayparams2, godrayhboost, godrayclamp, 0.0f, 0.0f);
+                float godraygeom = godraycsmsplits > 0 ? clamp(godraygeomshadow, 0.0f, 1.0f) : 0.0f;
+                float godrayscalefactor = godrayscale > 1e-4f ? godrayscale : 1.0f;
+                int targetgodrayw = max(int(ceilf(vieww * godrayscalefactor)), 1);
+                int targetgodrayh = max(int(ceilf(viewh * godrayscalefactor)), 1);
+                bool rescaledgodrays = targetgodrayw != vieww || targetgodrayh != viewh;
+                GLOBALPARAMF(godrayparams2, godrayhboost, godrayclampcfg, godrayskyclampcfg, godrayskymaxcfg);
                 GLOBALPARAMI(vccsmsplits, godraycsmsplits);
                 GLOBALPARAMF(vcgeomshadow, godraygeom);
                 if(godraycsmsplits > 0)
@@ -380,40 +384,40 @@ namespace vclouds
 
                 if(rescaledgodrays)
                 {
-                    if(godrayw != vcgodrayw || godrayh != vcgodrayh) cleanupgodraybuffer();
-                    if(!vcgodraytex)
+                    if(targetgodrayw != godrayw || targetgodrayh != godrayh) cleanupgodraybuffer();
+                    if(!godraytex)
                     {
-                        vcgodrayw = godrayw;
-                        vcgodrayh = godrayh;
-                        glGenTextures(1, &vcgodraytex);
-                        createtexture(vcgodraytex, vcgodrayw, vcgodrayh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+                        godrayw = targetgodrayw;
+                        godrayh = targetgodrayh;
+                        glGenTextures(1, &godraytex);
+                        createtexture(godraytex, godrayw, godrayh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
                     }
-                    if(!vcgodrayfbo)
+                    if(!godrayfbo)
                     {
-                        glGenFramebuffers_(1, &vcgodrayfbo);
-                        glBindFramebuffer_(GL_FRAMEBUFFER, vcgodrayfbo);
-                        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcgodraytex, 0);
+                        glGenFramebuffers_(1, &godrayfbo);
+                        glBindFramebuffer_(GL_FRAMEBUFFER, godrayfbo);
+                        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, godraytex, 0);
                         if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud godrays buffer!");
                     }
 
-                    glBindFramebuffer_(GL_FRAMEBUFFER, vcgodrayfbo);
-                    glViewport(0, 0, vcgodrayw, vcgodrayh);
+                    glBindFramebuffer_(GL_FRAMEBUFFER, godrayfbo);
+                    glViewport(0, 0, godrayw, godrayh);
                     glDisable(GL_BLEND);
                     glClearColor(0, 0, 0, 0);
                     glClear(GL_COLOR_BUFFER_BIT);
 
                     glActiveTexture_(GL_TEXTURE0);
                     glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
-                    GLOBALPARAMF(vcscale, float(vieww)/vcgodrayw, float(viewh)/vcgodrayh, float(vcgodrayw)/vieww, float(vcgodrayh)/viewh);
-                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                    GLOBALPARAMF(vcscale, float(vieww)/godrayw, float(viewh)/godrayh, float(godrayw)/vieww, float(godrayh)/viewh);
+                    GLOBALPARAMF(godrayparams, godraystrengthscaled, godraymaxdist, godrayext, float(godraysteps));
                     godraysshader->set();
-                    screenquad(vcgodrayw, vcgodrayh);
+                    screenquad(godrayw, godrayh);
 
                     glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
                     glViewport(0, 0, vieww, viewh);
                     glActiveTexture_(GL_TEXTURE0);
-                    glBindTexture(GL_TEXTURE_RECTANGLE, vcgodraytex);
-                    GLOBALPARAMF(vcscale, float(vieww)/vcgodrayw, float(viewh)/vcgodrayh, float(vcgodrayw)/vieww, float(vcgodrayh)/viewh);
+                    glBindTexture(GL_TEXTURE_RECTANGLE, godraytex);
+                    GLOBALPARAMF(vcscale, float(vieww)/godrayw, float(viewh)/godrayh, float(godrayw)/vieww, float(godrayh)/viewh);
 
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_ONE, GL_ONE);
@@ -426,7 +430,7 @@ namespace vclouds
                     else
                     {
                         SETSHADER(scalelinear);
-                        screenquad(vcgodrayw, vcgodrayh);
+                        screenquad(godrayw, godrayh);
                     }
                     glDisable(GL_BLEND);
                 }
@@ -437,7 +441,7 @@ namespace vclouds
                     glActiveTexture_(GL_TEXTURE0);
                     glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
                     GLOBALPARAMF(vcscale, 1.0f, 1.0f, 1.0f, 1.0f);
-                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                    GLOBALPARAMF(godrayparams, godraystrengthscaled, godraymaxdist, godrayext, float(godraysteps));
 
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_ONE, GL_ONE);
