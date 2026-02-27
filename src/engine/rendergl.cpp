@@ -2528,14 +2528,17 @@ void gl_drawview()
         setfog(fogmat, fogbelow, clamp(fogbelow, 0.0f, 1.0f), abovemat);
     }
 
+    if(!drawtex)
+    {
+        vclouds::render();
+        GLERROR;
+    }
+
     rendertransparent();
     GLERROR;
 
     if(!drawtex)
     {
-        vclouds::render();
-        GLERROR;
-
         renderparticles();
         GLERROR;
     }
