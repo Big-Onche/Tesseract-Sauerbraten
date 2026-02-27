@@ -28,9 +28,6 @@ namespace vclouds
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     VARP(vcgodrays, 0, 1, 1);
     VARP(vcgodraysteps, 2, 12, 32);
-    FVARP(vcgodraystrength, 0.0f, 4.0f, 8.0f);
-    FVARP(vcgodraydensity, 0.0f, 1.5f, 8.0f);
-    FVARP(vcgodraydist, 0.1f, 1.25f, 8.0f);
     FVARP(vcgodraysscale, 0.f, 0.25f, 2.f);
     FVARP(vcgodrayhorizonboost, 0.0f, 0.0f, 1.0f);
     FVARP(vcgodrayclamp, 0.0f, 0.5f, 8.0f);
@@ -48,6 +45,9 @@ namespace vclouds
     VARR(vcamount, 0, 50, 100);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
+    FVARR(vcgodraystrength, 0.0f, 4.0f, 8.0f);
+    FVARR(vcgodraydensity, 0.0f, 1.5f, 8.0f);
+    FVARR(vcgodraydist, 0.1f, 1.25f, 8.0f);
 
     static void cleanupshadowmap()
     {
