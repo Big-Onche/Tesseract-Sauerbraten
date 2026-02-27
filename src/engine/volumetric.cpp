@@ -6,8 +6,10 @@ namespace vclouds
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
     GLuint vcbilateraltemptex = 0, vcbilateraltempfbo = 0;
     GLuint vcshadowtex = 0, vcshadowfbo = 0;
+    GLuint vcgodraytex = 0, vcgodrayfbo = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
+    int vcgodrayw = 0, vcgodrayh = 0;
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
@@ -29,6 +31,7 @@ namespace vclouds
     FVARP(vcgodraystrength, 0.0f, 1.0f, 4.0f);
     FVARP(vcgodraydensity, 0.0f, 0.35f, 4.0f);
     FVARP(vcgodraydist, 0.1f, 1.25f, 8.0f);
+    FVARP(vcgodraysscale, 0.f, 0.25f, 2.f);
 
     // map settings
     VARR(vcdensity, 0, 70, 100);
@@ -57,6 +60,21 @@ namespace vclouds
             vcshadowtex = 0;
         }
         vcshadowsz = 0;
+    }
+
+    static void cleanupgodraybuffer()
+    {
+        if(vcgodrayfbo)
+        {
+            glDeleteFramebuffers_(1, &vcgodrayfbo);
+            vcgodrayfbo = 0;
+        }
+        if(vcgodraytex)
+        {
+            glDeleteTextures(1, &vcgodraytex);
+            vcgodraytex = 0;
+        }
+        vcgodrayw = vcgodrayh = 0;
     }
 
     void init()
@@ -330,15 +348,78 @@ namespace vclouds
             {
                 float godraymaxdist = min(max(vcgodraydist, 0.1f) * ws, maxclouddist);
                 float godrayext = max(vcgodraydensity, 0.0f) / max(ws, 1.0f);
-                glActiveTexture_(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
-                GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                float godrayscale = vcgodraysscale > 1e-4f ? vcgodraysscale : 1.0f;
+                int godrayw = max(int(ceilf(vieww * godrayscale)), 1);
+                int godrayh = max(int(ceilf(viewh * godrayscale)), 1);
+                bool rescaledgodrays = godrayw != vieww || godrayh != viewh;
 
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_ONE, GL_ONE);
-                godraysshader->set();
-                screenquad(vieww, viewh);
-                glDisable(GL_BLEND);
+                if(rescaledgodrays)
+                {
+                    if(godrayw != vcgodrayw || godrayh != vcgodrayh) cleanupgodraybuffer();
+                    if(!vcgodraytex)
+                    {
+                        vcgodrayw = godrayw;
+                        vcgodrayh = godrayh;
+                        glGenTextures(1, &vcgodraytex);
+                        createtexture(vcgodraytex, vcgodrayw, vcgodrayh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+                    }
+                    if(!vcgodrayfbo)
+                    {
+                        glGenFramebuffers_(1, &vcgodrayfbo);
+                        glBindFramebuffer_(GL_FRAMEBUFFER, vcgodrayfbo);
+                        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcgodraytex, 0);
+                        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud godrays buffer!");
+                    }
+
+                    glBindFramebuffer_(GL_FRAMEBUFFER, vcgodrayfbo);
+                    glViewport(0, 0, vcgodrayw, vcgodrayh);
+                    glDisable(GL_BLEND);
+                    glClearColor(0, 0, 0, 0);
+                    glClear(GL_COLOR_BUFFER_BIT);
+
+                    glActiveTexture_(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
+                    GLOBALPARAMF(vcscale, float(vieww)/vcgodrayw, float(viewh)/vcgodrayh, float(vcgodrayw)/vieww, float(vcgodrayh)/viewh);
+                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
+                    godraysshader->set();
+                    screenquad(vcgodrayw, vcgodrayh);
+
+                    glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+                    glViewport(0, 0, vieww, viewh);
+                    glActiveTexture_(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_RECTANGLE, vcgodraytex);
+                    GLOBALPARAMF(vcscale, float(vieww)/vcgodrayw, float(viewh)/vcgodrayh, float(vcgodrayw)/vieww, float(vcgodrayh)/viewh);
+
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_ONE, GL_ONE);
+                    if(upscaleshader)
+                    {
+                        GLOBALPARAMF(vcbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
+                        upscaleshader->set();
+                        screenquad(vieww, viewh);
+                    }
+                    else
+                    {
+                        SETSHADER(scalelinear);
+                        screenquad(vcgodrayw, vcgodrayh);
+                    }
+                    glDisable(GL_BLEND);
+                }
+                else
+                {
+                    glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+                    glViewport(0, 0, vieww, viewh);
+                    glActiveTexture_(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
+                    GLOBALPARAMF(vcscale, 1.0f, 1.0f, 1.0f, 1.0f);
+                    GLOBALPARAMF(vcgodrayparams, godraystrength, godraymaxdist, godrayext, float(vcgodraysteps));
+
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_ONE, GL_ONE);
+                    godraysshader->set();
+                    screenquad(vieww, viewh);
+                    glDisable(GL_BLEND);
+                }
             }
         }
 
@@ -390,6 +471,7 @@ namespace vclouds
             glDeleteTextures(1, &vcbilateraltemptex);
             vcbilateraltemptex = 0;
         }
+        cleanupgodraybuffer();
         cleanupshadowmap();
         vcw = vch = vcfullw = vcfullh = 0;
     }
