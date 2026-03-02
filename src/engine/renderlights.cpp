@@ -17,11 +17,15 @@ GLuint aofbo[4] = { 0, 0, 0, 0 }, aotex[4] = { 0, 0, 0, 0 }, aonoisetex = 0;
 int skyvisw = -1, skyvish = -1, skyvisd = -1;
 GLuint skyvistex = 0;
 vector<uchar> skyvispixels;
+static int skyvisworldsize = -1;
+static bool skyvisdirty = false;
+static ivec skyvisdirtymin(0, 0, 0), skyvisdirtymax(0, 0, 0);
 matrix4 eyematrix, worldmatrix, linearworldmatrix, screenmatrix;
 
 extern int amd_pf_bug;
 
 static void setupskyvisibility();
+static void updateskyvisibility();
 static void cleanupskyvisibility();
 
 FVARR(skycubelight, 0, 1.75f, 4.0f);
@@ -42,10 +46,47 @@ static inline int calcskyvisibilityres()
     return clamp(max(mapsize >> skycubeocclreduce, 4), 4, 64);
 }
 
+void invalidateskyvisibility()
+{
+    if(worldsize <= 0) return;
+    skyvisdirty = true;
+    skyvisdirtymin = ivec(0, 0, 0);
+    skyvisdirtymax = ivec(worldsize, worldsize, worldsize);
+}
+
+void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax)
+{
+    if(worldsize <= 0) return;
+    ivec dirtymin = bbmin, dirtymax = bbmax;
+    dirtymin.max(0);
+    dirtymax.min(worldsize);
+    if(dirtymin.x >= dirtymax.x || dirtymin.y >= dirtymax.y || dirtymin.z >= dirtymax.z) return;
+    if(!skyvisdirty)
+    {
+        skyvisdirty = true;
+        skyvisdirtymin = dirtymin;
+        skyvisdirtymax = dirtymax;
+    }
+    else
+    {
+        skyvisdirtymin.min(dirtymin);
+        skyvisdirtymax.max(dirtymax);
+    }
+}
+
+static inline uchar computeskyvisibilitysample(int x, int y, int z, float cell, float startoffset, float maxdist, float soft, const vec &up)
+{
+    vec start((x + 0.5f)*cell, (y + 0.5f)*cell, (z + 0.5f)*cell);
+    start.madd(up, startoffset);
+    float updist = raycube(start, up, maxdist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+    float skyvis = soft <= 1e-3f ? (updist >= maxdist ? 1.0f : 0.0f) : clamp((updist - (maxdist - soft)) / soft, 0.0f, 1.0f);
+    return uchar(clamp(int(skyvis*255.0f + 0.5f), 0, 255));
+}
+
 static void setupskyvisibility()
 {
     int res = calcskyvisibilityres();
-    if(res == skyvisw && res == skyvish && res == skyvisd && skyvistex) return;
+    if(res == skyvisw && res == skyvish && res == skyvisd && skyvistex && skyvisworldsize == worldsize) return;
 
     skyvisw = skyvish = skyvisd = res;
     int total = skyvisw*skyvish*skyvisd;
@@ -74,11 +115,7 @@ static void setupskyvisibility()
                 float wy = (y + 0.5f) * cell;
                 loop(x, skyvisw)
                 {
-                    vec start((x + 0.5f) * cell, wy, wz);
-                    start.madd(up, startoffset);
-                    float updist = raycube(start, up, maxdist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
-                    float skyvis = soft <= 1e-3f ? (updist >= maxdist ? 1.0f : 0.0f) : clamp((updist - (maxdist - soft)) / soft, 0.0f, 1.0f);
-                    skyvispixels[(z*skyvish + y)*skyvisw + x] = uchar(clamp(int(skyvis*255.0f + 0.5f), 0, 255));
+                    skyvispixels[(z*skyvish + y)*skyvisw + x] = computeskyvisibilitysample(x, y, z, cell, startoffset, maxdist, soft, up);
                 }
             }
         }
@@ -86,12 +123,64 @@ static void setupskyvisibility()
 
     if(!skyvistex) glGenTextures(1, &skyvistex);
     create3dtexture(skyvistex, skyvisw, skyvish, skyvisd, skyvispixels.getbuf(), 7, 1, hasTRG ? GL_R8 : GL_LUMINANCE8);
+    skyvisworldsize = worldsize;
+    skyvisdirty = false;
+}
+
+static void updateskyvisibility()
+{
+    if(!skyvisdirty) return;
+    skyvisdirty = false;
+    if(!skyvistex || skyvisw <= 0 || skyvish <= 0 || skyvisd <= 0 || worldsize <= 0 || skyvispixels.empty()) return;
+    if(!skycubeocclusion) return;
+
+    float mapsize = float(max(worldsize, 1));
+    float xscale = skyvisw / mapsize, yscale = skyvish / mapsize, zscale = skyvisd / mapsize;
+    int x1 = clamp(int(floor(skyvisdirtymin.x*xscale)) - 1, 0, skyvisw - 1),
+        y1 = clamp(int(floor(skyvisdirtymin.y*yscale)) - 1, 0, skyvish - 1),
+        z1 = 0;
+    int x2 = clamp(int(ceil(skyvisdirtymax.x*xscale)) + 1, 1, skyvisw),
+        y2 = clamp(int(ceil(skyvisdirtymax.y*yscale)) + 1, 1, skyvish),
+        z2 = clamp(int(ceil(skyvisdirtymax.z*zscale)) + 1, 1, skyvisd);
+    if(x1 >= x2 || y1 >= y2 || z1 >= z2) return;
+
+    float maxdist = max(skycubeocclmaxdist, 1.0f);
+    float startoffset = max(skycubeoccloffset, 0.0f);
+    float soft = max(skycubeocclsoft, 0.0f);
+    float cell = mapsize / float(skyvisw);
+    vec up(0, 0, 1);
+
+    int w = x2 - x1, h = y2 - y1, d = z2 - z1, total = w*h*d;
+    vector<uchar> subpixels;
+    subpixels.setsize(0);
+    subpixels.reserve(total);
+    subpixels.advance(total);
+    int i = 0;
+    for(int z = z1; z < z2; z++) for(int y = y1; y < y2; y++) for(int x = x1; x < x2; x++)
+    {
+        uchar skyvis = computeskyvisibilitysample(x, y, z, cell, startoffset, maxdist, soft, up);
+        skyvispixels[(z*skyvish + y)*skyvisw + x] = skyvis;
+        subpixels[i++] = skyvis;
+    }
+
+    if(glTexSubImage3D_)
+    {
+        GLint unpack = 4;
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
+        if(unpack != 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glBindTexture(GL_TEXTURE_3D, skyvistex);
+        glTexSubImage3D_(GL_TEXTURE_3D, 0, x1, y1, z1, w, h, d, hasTRG ? GL_RED : GL_LUMINANCE, GL_UNSIGNED_BYTE, subpixels.getbuf());
+        if(unpack != 1) glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
+    }
+    else create3dtexture(skyvistex, skyvisw, skyvish, skyvisd, skyvispixels.getbuf(), 7, 1, hasTRG ? GL_R8 : GL_LUMINANCE8);
 }
 
 static void cleanupskyvisibility()
 {
     if(skyvistex) { glDeleteTextures(1, &skyvistex); skyvistex = 0; }
     skyvisw = skyvish = skyvisd = -1;
+    skyvisworldsize = -1;
+    skyvisdirty = false;
     skyvispixels.setsize(0);
 }
 
@@ -5421,7 +5510,8 @@ void setuplights()
     GLERROR;
     setupgbuffer();
     int skyvisres = calcskyvisibilityres();
-    if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres) setupskyvisibility();
+    if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres || skyvisworldsize != worldsize) setupskyvisibility();
+    else updateskyvisibility();
     if(bloomw < 0 || bloomh < 0) setupbloom(gw, gh);
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
     if(volumetriclights && volumetric && (volw < 0 || volh < 0)) setupvolumetric(gw, gh);

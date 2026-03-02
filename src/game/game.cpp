@@ -239,7 +239,6 @@ namespace game
     {
         if(!maptime) { maptime = lastmillis; maprealtime = totalmillis; return; }
         if(!curtime) { gets2c(); if(player1->clientnum>=0) c2sinfo(); return; }
-
         physicsframe();
         ai::navigate();
         if(player1->state != CS_DEAD && !intermission)

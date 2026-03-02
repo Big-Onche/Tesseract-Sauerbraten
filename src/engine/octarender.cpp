@@ -1746,6 +1746,7 @@ void allchanged(bool load)
     setupmaterials();
     clearshadowcache();
     updatevabbs(true);
+    invalidateskyvisibility();
     if(load)
     {
         genshadowmeshes();

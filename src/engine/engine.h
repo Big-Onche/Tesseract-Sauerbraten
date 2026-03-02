@@ -286,6 +286,8 @@ extern matrix4 shadowmatrix;
 extern void loaddeferredlightshaders();
 extern void cleardeferredlightshaders();
 extern void clearshadowcache();
+extern void invalidateskyvisibility();
+extern void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax);
 
 extern void rendervolumetric();
 extern void cleanupvolumetric();
