@@ -127,10 +127,11 @@ namespace skyboxtint
         float sunup = clamp(sunlightdir.z * 0.5f + 0.5f, 0.0f, 1.0f);
         float sunset = 1.0f - smoothstepf(0.35f, 0.85f, sunup);
         float haze = clamp(atmohaze * 0.20f, 0.0f, 1.0f);
-        float density = clamp(atmodensity * 0.25f, 0.0f, 1.0f);
-        float ozone = clamp(atmoozone * 0.25f, 0.0f, 1.0f);
-        float atmostrength = clamp(atmoalpha, 0.0f, 1.0f) * clamp(atmobright, 0.25f, 2.0f);
-        atmostrength = clamp(atmostrength * 0.75f, 0.0f, 1.0f);
+        float density = clamp(1.0f - exp2f(-0.35f*max(atmodensity, 0.0f)), 0.0f, 1.0f);
+        float ozone = clamp(atmoozone, 0.0f, 1.0f);
+        float atmosmix = clamp(0.35f + 0.65f*atmoalpha, 0.0f, 1.0f);
+        float brightscale = clamp(atmobright, 0.0f, 8.0f);
+        float customsun = !atmosunlight.iszero() ? 1.0f : 0.0f;
 
         vec2 sunh(sunlightdir);
         if(sunh.squaredlen() > 1e-6f) sunh.normalize();
@@ -154,12 +155,53 @@ namespace skyboxtint
         vec cool = lerpvec(rayleigh, fog, 0.60f + 0.15f*ozone);
 
         vec c = lerpvec(horbase, zenbase, upk);
-        c = lerpvec(c, gndbase, downk * (0.70f + 0.20f*density));
+        c = lerpvec(c, gndbase, downk * (0.55f + 0.45f*density));
         c = lerpvec(c, warm, sunglow);
         c = lerpvec(c, cool, backcool);
-        c = lerpvec(c, vec(c).mul(1.0f - 0.08f*ozone), 0.35f * upk);
-        c = lightingtint(lerpvec(vec(1, 1, 1), c, atmostrength));
+        c = lerpvec(c, vec(c).mul(1.0f - 0.14f*ozone), 0.40f * upk);
+
+        // Density should noticeably alter the final ambient tint.
+        c = lerpvec(c, fog, 0.25f*density*(0.30f + 0.70f*horiz));
+        c.mul(1.0f - 0.30f*density*(0.25f + 0.75f*(1.0f - upk)));
+
+        // Keep atmospheric tint influence visible even when the sky is partially transparent.
+        c = lerpvec(vec(1, 1, 1), c, atmosmix);
+
+        // Ozone pushes toward cooler/blue skylight for ambient response.
+        vec ozonepush = lerpvec(vec(1, 1, 1), vec(0.88f, 0.96f, 1.18f), 0.75f*ozone);
+        c.mul(ozonepush);
+
+        // Let custom atmosunlight tint influence all faces, not only forward-scattering zones.
+        vec sunhint = lightingtint(vec(suncol).mul(0.80f).add(vec(0.20f, 0.20f, 0.20f)));
+        c = lerpvec(c, vec(c).mul(sunhint), customsun ? 0.70f : (0.20f + 0.25f*sunset));
+
+        c = lightingtint(c);
+        c.mul(0.35f + 0.65f*brightscale);
+        c.max(0.0f);
         return c;
+    }
+
+    static vec sampleproceduralface(const vec &normal, const vec &tangent, const vec &bitangent)
+    {
+        static const struct tap { float u, v, w; } taps[] =
+        {
+            { 0.50f, 0.50f, 2.2f },
+            { 0.22f, 0.22f, 0.9f }, { 0.50f, 0.22f, 1.0f }, { 0.78f, 0.22f, 0.9f },
+            { 0.22f, 0.50f, 1.0f },                             { 0.78f, 0.50f, 1.0f },
+            { 0.22f, 0.78f, 0.9f }, { 0.50f, 0.78f, 1.0f }, { 0.78f, 0.78f, 0.9f }
+        };
+        vec sum(0, 0, 0);
+        float weight = 0.0f;
+        loopi(int(sizeof(taps)/sizeof(taps[0])))
+        {
+            float u = (taps[i].u - 0.5f)*1.35f, v = (taps[i].v - 0.5f)*1.35f;
+            vec dir = vec(normal).add(vec(tangent).mul(u)).add(vec(bitangent).mul(v));
+            if(dir.squaredlen() > 1e-6f) dir.normalize();
+            else dir = normal;
+            sum.add(proceduraldircolor(dir).mul(taps[i].w));
+            weight += taps[i].w;
+        }
+        return weight > 0.0f ? sum.mul(1.0f/weight) : proceduraldircolor(normal);
     }
 
     static void proceduralcubetints(vec out[6], vec2 &front)
@@ -168,17 +210,16 @@ namespace skyboxtint
         if(front.squaredlen() > 1e-6f) front.normalize();
         else front = vec2(0, -1);
         vec2 right(-front.y, front.x);
+        vec frontv(front.x, front.y, 0.0f),
+            rightv(right.x, right.y, 0.0f),
+            upv(0.0f, 0.0f, 1.0f);
 
-        vec dirs[6] =
-        {
-            vec(-right.x, -right.y, 0.0f), // lf
-            vec( right.x,  right.y, 0.0f), // rt
-            vec(-front.x, -front.y, 0.0f), // bk
-            vec( front.x,  front.y, 0.0f), // ft
-            vec(0.0f, 0.0f, -1.0f),        // dn
-            vec(0.0f, 0.0f,  1.0f)         // up
-        };
-        loopi(6) out[i] = proceduraldircolor(dirs[i]);
+        out[0] = sampleproceduralface(vec(-rightv.x, -rightv.y, 0.0f), frontv, upv); // lf
+        out[1] = sampleproceduralface(vec( rightv.x,  rightv.y, 0.0f), vec(frontv).neg(), upv); // rt
+        out[2] = sampleproceduralface(vec(-frontv.x, -frontv.y, 0.0f), vec(rightv).neg(), upv); // bk
+        out[3] = sampleproceduralface(vec( frontv.x,  frontv.y, 0.0f), rightv, upv); // ft
+        out[4] = sampleproceduralface(vec(0.0f, 0.0f, -1.0f), rightv, vec(frontv).neg()); // dn
+        out[5] = sampleproceduralface(vec(0.0f, 0.0f,  1.0f), rightv, frontv); // up
     }
 
     static bool updateneeded()
@@ -233,7 +274,7 @@ namespace skyboxtint
             }
             cubefront = vec2(0, -1);
         }
-        else if(atmo && atmoalpha > 0.0f)
+        else if(atmo)
         {
             proceduralcubetints(cubetint, cubefront);
         }
@@ -278,6 +319,17 @@ void loadsky(const char *basename, Texture *texs[6])
 
 Texture *cloudoverlay = NULL;
 
+static bool haveskyfaces()
+{
+    loopi(6) if(sky[i] && sky[i] != notexture) return true;
+    return false;
+}
+
+static void clearskyfaces(Texture *texs[6])
+{
+    loopi(6) texs[i] = NULL;
+}
+
 Texture *loadskyoverlay(const char *basename)
 {
     const char *ext = strrchr(basename, '.');
@@ -298,7 +350,8 @@ Texture *loadskyoverlay(const char *basename)
     return t;
 }
 
-SVARFR(skybox, "", { if(skybox[0]) loadsky(skybox, sky); });
+static void updateskybox();
+SVARFR(skybox, "", updateskybox());
 CVARR(skyboxcolour, 0xFFFFFF);
 FVARR(skyboxoverbright, 1, 2, 16);
 FVARR(skyboxoverbrightmin, 0, 1, 16);
@@ -324,6 +377,17 @@ FVARR(cloudfade, 0, 0.2f, 1);
 FVARR(cloudalpha, 0, 1, 1);
 VARR(cloudsubdiv, 4, 16, 64);
 CVARR(cloudcolour, 0xFFFFFF);
+
+static void updateskybox()
+{
+    if(!skybox[0] || !strcmp(skybox, "0"))
+    {
+        clearskyfaces(sky);
+        skyboxtint::valid = false;
+        return;
+    }
+    loadsky(skybox, sky);
+}
 
 void drawenvboxface(float s0, float t0, int x0, int y0, int z0,
                     float s1, float t1, int x1, int y1, int z1,
@@ -621,7 +685,7 @@ void getskycubetints(vec colors[6], vec2 &front)
     if(skyboxtint::updateneeded()) skyboxtint::recompute();
     loopi(6) colors[i] = skyboxtint::cubetint[i];
     front = skyboxtint::cubefront;
-    if(skybox[0])
+    if(haveskyfaces() || atmo)
     {
         float a = (spinsky*lastmillis/1000.0f + yawsky) * -RAD;
         float ca = cosf(a), sa = sinf(a);
@@ -728,6 +792,7 @@ bool limitsky()
 
 void drawskybox(bool clear)
 {
+    bool havefaces = haveskyfaces();
     bool limited = false;
     if(limitsky()) for(vtxarray *va = visibleva; va; va = va->next)
     {
@@ -751,14 +816,14 @@ void drawskybox(bool clear)
 
     if(clampsky) glDepthRange(1, 1);
 
-    if(clear || (!skybox[0] && (!atmo || atmoalpha < 1)))
+    if(clear || (!havefaces && (!atmo || atmoalpha < 1)))
     {
         vec skyboxcolor = skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
         glClear(GL_COLOR_BUFFER_BIT);
     }
 
-    if(skybox[0])
+    if(havefaces)
     {
         if(ldrscale < 1 && (skyboxoverbrightmin != 1 || (skyboxoverbright > 1 && skyboxoverbrightthreshold < 1)))
         {
@@ -778,7 +843,7 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
-    if(atmo && (!skybox[0] || atmoalpha < 1))
+    if(atmo && (!havefaces || atmoalpha < 1))
     {
         if(atmoalpha < 1)
         {
@@ -858,6 +923,6 @@ void drawskybox(bool clear)
 
 bool hasskybox()
 {
-    return skybox[0] || atmo || fogdomemax || cloudbox[0] || cloudlayer[0];
+    return haveskyfaces() || atmo || fogdomemax || cloudbox[0] || cloudlayer[0];
 }
 
