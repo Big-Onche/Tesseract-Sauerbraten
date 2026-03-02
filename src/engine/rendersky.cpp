@@ -621,6 +621,12 @@ void getskycubetints(vec colors[6], vec2 &front)
     if(skyboxtint::updateneeded()) skyboxtint::recompute();
     loopi(6) colors[i] = skyboxtint::cubetint[i];
     front = skyboxtint::cubefront;
+    if(skybox[0])
+    {
+        float a = (spinsky*lastmillis/1000.0f + yawsky) * -RAD;
+        float ca = cosf(a), sa = sinf(a);
+        front = vec2(front.x*ca - front.y*sa, front.x*sa + front.y*ca);
+    }
 }
 
 VARR(atmo, 0, 0, 1);

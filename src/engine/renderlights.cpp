@@ -14,9 +14,86 @@ GLuint msfbo = 0, msdepthtex = 0, mscolortex = 0, msnormaltex = 0, msglowtex = 0
 vector<vec2> msaapositions;
 int aow = -1, aoh = -1;
 GLuint aofbo[4] = { 0, 0, 0, 0 }, aotex[4] = { 0, 0, 0, 0 }, aonoisetex = 0;
+int skyvisw = -1, skyvish = -1, skyvisd = -1;
+GLuint skyvistex = 0;
+vector<uchar> skyvispixels;
 matrix4 eyematrix, worldmatrix, linearworldmatrix, screenmatrix;
 
 extern int amd_pf_bug;
+
+static void setupskyvisibility();
+static void cleanupskyvisibility();
+
+FVARR(skycubelight, 0, 1.75f, 4.0f);
+FVARR(skycubelightmin, 0, 0.05f, 1.0f);
+VARFP(skycubeocclusion, 0, 1, 1, cleanupskyvisibility());
+VARFP(skycubeocclreduce, 0, 4, 6, cleanupskyvisibility());
+FVARFP(skycubeoccloffset, 0, 2.0f, 64.0f, cleanupskyvisibility());
+FVARFP(skycubeocclmaxdist, 1, 65536.0f, 1e7f, cleanupskyvisibility());
+FVARFP(skycubeocclsoft, 0, 256.0f, 1e6f, cleanupskyvisibility());
+VARP(skycubeocclrate, 1, 1, 8);
+VARP(skycubeocclbatch, 1, 8, 1024);
+FVARP(skycubeocclblend, 0, 0.35f, 1.0f);
+ICOMMAND(rebuildskylightmap, "", (), { cleanupskyvisibility(); setupskyvisibility(); });
+
+static inline int calcskyvisibilityres()
+{
+    int mapsize = max(worldsize, 1);
+    return clamp(max(mapsize >> skycubeocclreduce, 4), 4, 64);
+}
+
+static void setupskyvisibility()
+{
+    int res = calcskyvisibilityres();
+    if(res == skyvisw && res == skyvish && res == skyvisd && skyvistex) return;
+
+    skyvisw = skyvish = skyvisd = res;
+    int total = skyvisw*skyvish*skyvisd;
+    skyvispixels.setsize(0);
+    skyvispixels.reserve(total);
+    skyvispixels.advance(total);
+
+    if(!skycubeocclusion)
+    {
+        memset(skyvispixels.getbuf(), 255, total);
+    }
+    else
+    {
+        float maxdist = max(skycubeocclmaxdist, 1.0f);
+        float startoffset = max(skycubeoccloffset, 0.0f);
+        float soft = max(skycubeocclsoft, 0.0f);
+        vec up(0, 0, 1);
+        float mapsize = float(max(worldsize, 1));
+        float cell = mapsize / float(res);
+
+        loop(z, skyvisd)
+        {
+            float wz = (z + 0.5f) * cell;
+            loop(y, skyvish)
+            {
+                float wy = (y + 0.5f) * cell;
+                loop(x, skyvisw)
+                {
+                    vec start((x + 0.5f) * cell, wy, wz);
+                    start.madd(up, startoffset);
+                    float updist = raycube(start, up, maxdist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+                    float skyvis = soft <= 1e-3f ? (updist >= maxdist ? 1.0f : 0.0f) : clamp((updist - (maxdist - soft)) / soft, 0.0f, 1.0f);
+                    skyvispixels[(z*skyvish + y)*skyvisw + x] = uchar(clamp(int(skyvis*255.0f + 0.5f), 0, 255));
+                }
+            }
+        }
+    }
+
+    if(!skyvistex) glGenTextures(1, &skyvistex);
+    create3dtexture(skyvistex, skyvisw, skyvish, skyvisd, skyvispixels.getbuf(), 7, 1, hasTRG ? GL_R8 : GL_LUMINANCE8);
+}
+
+static void cleanupskyvisibility()
+{
+    if(skyvistex) { glDeleteTextures(1, &skyvistex); skyvistex = 0; }
+    skyvisw = skyvish = skyvisd = -1;
+    skyvispixels.setsize(0);
+}
 
 int gethdrformat(int prec, int fallback = GL_RGB)
 {
@@ -92,6 +169,9 @@ void cleanupbloom()
 }
 
 extern int ao, aotaps, aoreduce, aoreducedepth, aonoise, aobilateral, aobilateralupscale, aopackdepth, aodepthformat, aoprec, aoderivnormal;
+extern float skycubelight;
+extern int skycubeocclusion, skycubeocclreduce, skycubeocclblur, skycubeocclblurpasses;
+extern float skycubeoccloffset, skycubeocclmaxdist, skycubeocclsoft;
 
 static Shader *bilateralshader[2] = { NULL, NULL };
 
@@ -142,6 +222,9 @@ void setbilateralshader(int radius, int pass, float depth)
 }
 
 static Shader *ambientobscuranceshader = NULL;
+
+static void setupskyvisibility();
+static void cleanupskyvisibility();
 
 Shader *loadambientobscuranceshader()
 {
@@ -2943,12 +3026,52 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
         glActiveTexture_(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_RECTANGLE, smfilter ? shadowfiltertex : shadowcolortex);
     }
+    glActiveTexture_(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_3D, skyvistex);
     glActiveTexture_(GL_TEXTURE0);
 }
 
 static inline void setlightglobals(bool transparent = false)
 {
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
+    if(skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
+    {
+        float invworld = 1.0f / float(worldsize);
+        GLOBALPARAMF(
+            skyocclscale,
+            invworld*(1.0f - 1.0f/skyvisw),
+            invworld*(1.0f - 1.0f/skyvish),
+            invworld*(1.0f - 1.0f/skyvisd)
+        );
+        GLOBALPARAMF(
+            skyoccloffset,
+            0.5f/skyvisw,
+            0.5f/skyvish,
+            0.5f/skyvisd
+        );
+    }
+    else
+    {
+        GLOBALPARAMF(skyocclscale, 0.0f, 0.0f, 0.0f);
+        GLOBALPARAMF(skyoccloffset, 0.0f, 0.0f, 0.0f);
+    }
+
+    vec skycube[6];
+    vec2 skyfront;
+    getskycubetints(skycube, skyfront);
+    GLOBALPARAM(skylf, skycube[0]);
+    GLOBALPARAM(skyrt, skycube[1]);
+    GLOBALPARAM(skybk, skycube[2]);
+    GLOBALPARAM(skyft, skycube[3]);
+    GLOBALPARAM(skydn, skycube[4]);
+    GLOBALPARAM(skyup, skycube[5]);
+    GLOBALPARAMF(skyfront, skyfront.x, skyfront.y);
+    GLOBALPARAMF(
+        skyambientparams,
+        (drawtex || (editmode && fullbright)) ? 0.0f : clamp(skycubelight, 0.0f, 4.0f),
+        clamp(skycubelightmin, 0.0f, 1.0f)
+    );
+
     if(ao)
     {
         if(transparent || drawtex || (editmode && fullbright))
@@ -5297,6 +5420,8 @@ void setuplights()
 {
     GLERROR;
     setupgbuffer();
+    int skyvisres = calcskyvisibilityres();
+    if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres) setupskyvisibility();
     if(bloomw < 0 || bloomh < 0) setupbloom(gw, gh);
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
     if(volumetriclights && volumetric && (volw < 0 || volh < 0)) setupvolumetric(gw, gh);
@@ -5326,6 +5451,7 @@ bool debuglights()
 void cleanuplights()
 {
     cleanupgbuffer();
+    cleanupskyvisibility();
     cleanupbloom();
     cleanupao();
     cleanupvolumetric();
