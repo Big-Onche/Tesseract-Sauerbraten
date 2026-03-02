@@ -14,9 +14,9 @@ namespace godrays
     VARP(godraysteps, 2, 32, 128);
     FVARP(godrayscale, 0.f, 0.25f, 2.f);
     FVARP(godrayhorizonboost, 0.0f, 0.0f, 1.0f);
-    FVARP(godrayclamp, 0.0f, 0.5f, 8.0f);
-    FVARP(godrayskyclamp, 0.0f, 0.3f, 1.0f);
-    FVARP(godrayskymax, 0.0f, 0.32f, 1.0f);
+    FVARP(godrayclamp, 0.0f, 0.3f, 1.0f);
+    FVARP(godrayskyclamp, 0.0f, 0.15f, 1.0f);
+    FVARP(godrayskymax, 0.0f, 0.25f, 1.0f);
     FVARP(godraygeomshadow, 0.0f, 1.0f, 1.0f);
 
     // map settings
@@ -94,7 +94,8 @@ namespace godrays
                 w = targetw;
                 h = targeth;
                 glGenTextures(1, &tex);
-                createtexture(tex, w, h, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+                GLenum godrayformat = hasTF ? GL_RGBA16F : GL_RGBA8;
+                createtexture(tex, w, h, NULL, 3, 1, godrayformat, GL_TEXTURE_RECTANGLE);
             }
             if(!fbo)
             {
