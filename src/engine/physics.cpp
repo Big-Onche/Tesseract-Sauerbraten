@@ -874,7 +874,7 @@ static inline bool clampcollide(const clipplanes &p, const E &entvol, const plan
 template<class E>
 static bool fuzzycollideplanes(physent *d, const vec &dir, float cutoff, const cube &c, const ivec &co, int size) // collide with deformed cube geometry
 {
-    const clipplanes &p = getclipplanes(c, co, size);
+    clipplanes &p = getclipbounds(c, co, size, d);
 
     if(fabs(d->o.x - p.o.x) > p.r.x + d->radius || fabs(d->o.y - p.o.y) > p.r.y + d->radius ||
        d->o.z + d->aboveeye < p.o.z - p.r.z || d->o.z - d->eyeheight > p.o.z + p.r.z)
@@ -882,7 +882,7 @@ static bool fuzzycollideplanes(physent *d, const vec &dir, float cutoff, const c
 
     collidewall = vec(0, 0, 0);
     float bestdist = -1e10f;
-    int visible = p.visible;
+    int visible = forceclipplanes(c, co, size, p);
     CHECKSIDE(O_LEFT, p.o.x - p.r.x - (d->o.x + d->radius), -dir.x, -d->radius, vec(-1, 0, 0));
     CHECKSIDE(O_RIGHT, d->o.x - d->radius - (p.o.x + p.r.x), dir.x, -d->radius, vec(1, 0, 0));
     CHECKSIDE(O_BACK, p.o.y - p.r.y - (d->o.y + d->radius), -dir.y, -d->radius, vec(0, -1, 0));
@@ -955,7 +955,7 @@ static bool cubecollidesolid(physent *d, const vec &dir, float cutoff, const cub
 template<class E>
 static bool cubecollideplanes(physent *d, const vec &dir, float cutoff, const cube &c, const ivec &co, int size) // collide with deformed cube geometry
 {
-    const clipplanes &p = getclipplanes(c, co, size);
+    clipplanes &p = getclipbounds(c, co, size, d);
 
     if(fabs(d->o.x - p.o.x) > p.r.x + d->radius || fabs(d->o.y - p.o.y) > p.r.y + d->radius ||
        d->o.z + d->aboveeye < p.o.z - p.r.z || d->o.z - d->eyeheight > p.o.z + p.r.z)
@@ -967,7 +967,7 @@ static bool cubecollideplanes(physent *d, const vec &dir, float cutoff, const cu
 
     collidewall = vec(0, 0, 0);
     float bestdist = -1e10f;
-    int visible = p.visible;
+    int visible = forceclipplanes(c, co, size, p);
     CHECKSIDE(O_LEFT, p.o.x - p.r.x - entvol.right(), -dir.x, -d->radius, vec(-1, 0, 0));
     CHECKSIDE(O_RIGHT, entvol.left() - (p.o.x + p.r.x), dir.x, -d->radius, vec(1, 0, 0));
     CHECKSIDE(O_BACK, p.o.y - p.r.y - entvol.front(), -dir.y, -d->radius, vec(0, -1, 0));
