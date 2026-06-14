@@ -460,6 +460,7 @@ namespace game
                 particle_splash(PART_SPARK, 10, 500, v, 0x4444FF, 1.0f, 1500, 200);
                 particle_splash(PART_SMOKE, 4, 1500, v, 0x444444, 30.0f, 100, -100);
             }
+            particle_splash(PART_HAZE_NOISE, 1, 300, v, 75, 100.0f, 1, 0);
         }
         else adddynlight(v, 1.15f*guns[gun].exprad, vec(2, 1.5f, 1), 700, 100);
 
@@ -637,7 +638,12 @@ namespace game
             case GUN_SG:
             {
                 if(!local) createrays(gun, from, to);
-                if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, 200, PART_MUZZLE_FLASH3, 0xFFFFFF, 2.75f, d);
+                if(muzzleflash && d->muzzle.x >= 0)
+                {
+                    particle_flare(d->muzzle, d->muzzle, 200, PART_MUZZLE_FLASH3, 0xFFFFFF, 2.75f, d);
+                    particle_flare(d->muzzle, d->muzzle, 300, PART_HAZE_MUZZLE_FLASH, 0xFFFFFF, 3.75f, d);
+                }
+
                 loopi(guns[gun].rays)
                 {
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
@@ -661,7 +667,11 @@ namespace game
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
                 if(improvedparticles) particle_splash(PART_SMOKE, 3, 750, to, 0x554433, 5.0f, 40, -100);
                 particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, 0xFFC864, 0.28f);
-                if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, isCg ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, isCg ? 2.25f : 1.25f, d);
+                if(muzzleflash && d->muzzle.x >= 0)
+                {
+                    particle_flare(d->muzzle, d->muzzle, isCg ? 100 : 200, PART_MUZZLE_FLASH1, 0xFFFFFF, isCg ? 2.25f : 1.25f, d);
+                    particle_flare(d->muzzle, d->muzzle, isCg ? 200 : 300, PART_HAZE_MUZZLE_FLASH, 0xFFFFFF, isCg ? 3.25f : 2.25f, d);
+                }
                 if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 2.0f);
                 if(muzzlelight)
                 {
@@ -673,7 +683,12 @@ namespace game
             }
 
             case GUN_RL:
-                if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, 250, PART_MUZZLE_FLASH2, 0xFFFFFF, 3.0f, d);
+                if(muzzleflash && d->muzzle.x >= 0)
+                {
+                    particle_flare(d->muzzle, d->muzzle, 250, PART_MUZZLE_FLASH2, 0xFFFFFF, 3.0f, d);
+                    particle_flare(d->muzzle, d->muzzle, 350, PART_HAZE_MUZZLE_FLASH, 0xFFFFFF, 4.0f, d);
+                }
+
             case GUN_FIREBALL:
             case GUN_ICEBALL:
             case GUN_SLIMEBALL:
@@ -687,7 +702,11 @@ namespace game
                 float dist = from.dist(to);
                 vec up = to;
                 up.z += dist/8;
-                if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, 200, PART_MUZZLE_FLASH2, 0xFFFFFF, 1.5f, d);
+                if(muzzleflash && d->muzzle.x >= 0)
+                {
+                    particle_flare(d->muzzle, d->muzzle, 200, PART_MUZZLE_FLASH2, 0xFFFFFF, 1.5f, d);
+                    particle_flare(d->muzzle, d->muzzle, 300, PART_HAZE_MUZZLE_FLASH, 0xFFFFFF, 2.5f, d);
+                }
                 if(muzzlelight)
                 {
                     if(improveddynlights) adddynlight(hudgunorigin(gun, d->o, to, d), 40, vec(1.25f, 0.65f, 0.3f), 75, 50, DL_FLASH|DL_SHRINK, 25, vec(0, 0, 0), d);
@@ -701,7 +720,11 @@ namespace game
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
                 if(improvedparticles) particle_splash(PART_SMOKE, 4, 1000, to, 0x4A3A3A, 5.0f, 40, -100);
                 particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, 0x404040, 0.6f, 20);
-                if(muzzleflash && d->muzzle.x >= 0) particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
+                if(muzzleflash && d->muzzle.x >= 0)
+                {
+                    particle_flare(d->muzzle, d->muzzle, 150, PART_MUZZLE_FLASH3, 0xFFFFFF, 1.25f, d);
+                    particle_flare(d->muzzle, d->muzzle, 250, PART_HAZE_MUZZLE_FLASH, 0xFFFFFF, 2.25f, d);
+                }
                 if(!local) addstain(STAIN_BULLET_HOLE, to, vec(from).sub(to).safenormalize(), 3.0f);
                 if(muzzlelight)
                 {

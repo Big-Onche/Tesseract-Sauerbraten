@@ -500,6 +500,20 @@ extern void rendereditmaterials();
 extern void renderminimapmaterials();
 extern int visiblematerial(const cube &c, int orient, const ivec &co, int size, ushort matmask = MATF_VOLUME);
 
+namespace heatHaze
+{
+    extern bool shouldRender();
+    extern bool bindSceneTexture();
+    extern void setShaderParams(bool scroll = true, bool fade = true);
+
+    static inline int strengthToColor(int strength)
+    {
+        int clamped = clamp(strength, 0, 100);
+        int level = (clamped*255 + 50)/100;
+        return (level<<16) | (level<<8) | level;
+    }
+}
+
 // water
 extern int vertwater, waterreflect, caustics;
 extern float watersx1, watersy1, watersx2, watersy2;
