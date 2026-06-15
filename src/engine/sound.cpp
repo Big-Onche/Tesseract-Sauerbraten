@@ -34,7 +34,8 @@ namespace sound
     static LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots_ = NULL;
     static LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti_ = NULL;
     static LPALAUXILIARYEFFECTSLOTF alAuxiliaryEffectSlotf_ = NULL;
-    static ALuint efxReverbEffect = 0, efxReverbSlot = 0;
+    static ALuint efxReverbEffect = 0, efxReverbSlot = 0, efxDistanceReverbEffect = 0, efxDistanceReverbSlot = 0;
+    static int efxMaxAuxiliarySends = 0;
 
     int play(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire);
     void stopAll();
@@ -190,17 +191,17 @@ namespace sound
     struct SoundChannel
     {
         int id;
-        ALuint source, filter;
+        ALuint source, filter, sendFilter, distanceSendFilter;
         bool inuse;
         vec loc;
         SoundSlot *slot;
         extentity *ent;
         int radius, volume, targetVolume, pan, flags, expire;
         int fadeStart, fadeEnd, fadeFrom;
-        float gainhf, targetGainHF, reverbSend, targetReverbSend;
+        float gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend;
         bool dirty, stopping;
 
-        SoundChannel(int id) : id(id), source(0), filter(0) { reset(); }
+        SoundChannel(int id) : id(id), source(0), filter(0), sendFilter(0), distanceSendFilter(0) { reset(); }
         ~SoundChannel() { cleanup(); }
 
         bool hasLoc() const { return loc.x >= -1e15f; }
@@ -220,8 +221,12 @@ namespace sound
             fadeStart = fadeEnd = fadeFrom = 0;
             gainhf = -1.0f;
             targetGainHF = 1.0f;
+            gainlf = -1.0f;
+            targetGainLF = 1.0f;
             reverbSend = -1.0f;
             targetReverbSend = 0.0f;
+            distanceReverbSend = -1.0f;
+            targetDistanceReverbSend = 0.0f;
             dirty = false;
             stopping = false;
         }
@@ -237,19 +242,35 @@ namespace sound
             return true;
         }
 
-        bool ensureFilter()
+        bool ensureFilter(ALuint &filterId, ALenum type)
         {
             if(!efxFilters) return false;
-            if(filter) return true;
-            alGenFilters_(1, &filter);
-            if(!checkAl("alGenFilters")) { filter = 0; return false; }
-            alFilteri_(filter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
-            alFilterf_(filter, AL_LOWPASS_GAIN, 1.0f);
-            alFilterf_(filter, AL_LOWPASS_GAINHF, 1.0f);
-            if(!checkAl("OpenAL low-pass filter setup"))
+            if(!filterId)
             {
-                alDeleteFilters_(1, &filter);
-                filter = 0;
+                alGenFilters_(1, &filterId);
+                if(!checkAl("alGenFilters")) { filterId = 0; return false; }
+            }
+            alFilteri_(filterId, AL_FILTER_TYPE, type);
+            switch(type)
+            {
+                case AL_FILTER_LOWPASS:
+                    alFilterf_(filterId, AL_LOWPASS_GAIN, 1.0f);
+                    alFilterf_(filterId, AL_LOWPASS_GAINHF, 1.0f);
+                    break;
+                case AL_FILTER_HIGHPASS:
+                    alFilterf_(filterId, AL_HIGHPASS_GAIN, 1.0f);
+                    alFilterf_(filterId, AL_HIGHPASS_GAINLF, 1.0f);
+                    break;
+                case AL_FILTER_BANDPASS:
+                    alFilterf_(filterId, AL_BANDPASS_GAIN, 1.0f);
+                    alFilterf_(filterId, AL_BANDPASS_GAINLF, 1.0f);
+                    alFilterf_(filterId, AL_BANDPASS_GAINHF, 1.0f);
+                    break;
+            }
+            if(!checkAl("OpenAL filter setup"))
+            {
+                alDeleteFilters_(1, &filterId);
+                filterId = 0;
                 return false;
             }
             return true;
@@ -269,6 +290,16 @@ namespace sound
                 if(alDeleteFilters_) alDeleteFilters_(1, &filter);
                 filter = 0;
             }
+            if(sendFilter)
+            {
+                if(alDeleteFilters_) alDeleteFilters_(1, &sendFilter);
+                sendFilter = 0;
+            }
+            if(distanceSendFilter)
+            {
+                if(alDeleteFilters_) alDeleteFilters_(1, &distanceSendFilter);
+                distanceSendFilter = 0;
+            }
             reset();
         }
     };
@@ -286,9 +317,13 @@ namespace sound
         SoundChannel &chan = channels[n];
         ALuint source = chan.source;
         ALuint filter = chan.filter;
+        ALuint sendFilter = chan.sendFilter;
+        ALuint distanceSendFilter = chan.distanceSendFilter;
         chan.reset();
         chan.source = source;
         chan.filter = filter;
+        chan.sendFilter = sendFilter;
+        chan.distanceSendFilter = distanceSendFilter;
         chan.inuse = true;
         if(loc) chan.loc = *loc;
         chan.slot = slot;
@@ -327,29 +362,74 @@ namespace sound
         return clamp(int(chan.fadeFrom + (chan.targetVolume - chan.fadeFrom)*t + 0.5f), 0, MaxVolume);
     }
 
+    static ALuint syncDirectFilter(SoundChannel &chan)
+    {
+        if(!efxFilters || (chan.targetGainHF >= 0.999f && chan.targetGainLF >= 0.999f))
+        {
+            alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            chan.gainhf = chan.gainlf = 1.0f;
+            return AL_FILTER_NULL;
+        }
+
+        ALenum type = chan.targetGainHF < 0.999f && chan.targetGainLF < 0.999f ? AL_FILTER_BANDPASS :
+                      chan.targetGainHF < 0.999f ? AL_FILTER_LOWPASS : AL_FILTER_HIGHPASS;
+        if(!chan.ensureFilter(chan.filter, type))
+        {
+            alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            chan.gainhf = chan.gainlf = 1.0f;
+            return AL_FILTER_NULL;
+        }
+
+        switch(type)
+        {
+            case AL_FILTER_LOWPASS:
+                alFilterf_(chan.filter, AL_LOWPASS_GAINHF, chan.targetGainHF);
+                break;
+            case AL_FILTER_HIGHPASS:
+                alFilterf_(chan.filter, AL_HIGHPASS_GAINLF, chan.targetGainLF);
+                break;
+            case AL_FILTER_BANDPASS:
+                alFilterf_(chan.filter, AL_BANDPASS_GAINLF, chan.targetGainLF);
+                alFilterf_(chan.filter, AL_BANDPASS_GAINHF, chan.targetGainHF);
+                break;
+        }
+        alSourcei(chan.source, AL_DIRECT_FILTER, chan.filter);
+        chan.gainhf = chan.targetGainHF;
+        chan.gainlf = chan.targetGainLF;
+        return chan.filter;
+    }
+
+    static ALuint syncSendFilter(SoundChannel &chan, ALuint &filterId, float sendGain)
+    {
+        if(!efxFilters) return AL_FILTER_NULL;
+        if(sendGain >= 0.999f && chan.targetGainHF >= 0.999f && chan.targetGainLF >= 0.999f) return AL_FILTER_NULL;
+        if(!chan.ensureFilter(filterId, AL_FILTER_BANDPASS)) return AL_FILTER_NULL;
+        alFilterf_(filterId, AL_BANDPASS_GAIN, clamp(sendGain, 0.0f, 1.0f));
+        alFilterf_(filterId, AL_BANDPASS_GAINLF, chan.targetGainLF);
+        alFilterf_(filterId, AL_BANDPASS_GAINHF, chan.targetGainHF);
+        return filterId;
+    }
+
     static void syncChannel(SoundChannel &chan)
     {
         if(!chan.source) return;
         int volume = effectiveVolume(chan);
-        if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f && fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f) return;
+        if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f && fabs(chan.targetGainLF - chan.gainlf) < 1e-3f &&
+           fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f && fabs(chan.targetDistanceReverbSend - chan.distanceReverbSend) < 1e-3f) return;
         chan.volume = volume;
         alSourcef(chan.source, AL_GAIN, clamp(chan.volume/float(MaxVolume), 0.0f, 1.0f));
         float pan = clamp(chan.pan/127.5f - 1.0f, -1.0f, 1.0f);
         alSource3f(chan.source, AL_POSITION, pan, 0.0f, -1.0f);
-        if(efxFilters && chan.targetGainHF < 0.999f && chan.ensureFilter())
+        if(efxFilters) syncDirectFilter(chan);
+        else
         {
-            alFilterf_(chan.filter, AL_LOWPASS_GAINHF, chan.targetGainHF);
-            alSourcei(chan.source, AL_DIRECT_FILTER, chan.filter);
             chan.gainhf = chan.targetGainHF;
-        }
-        else if(efxFilters)
-        {
-            alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
-            chan.gainhf = 1.0f;
+            chan.gainlf = chan.targetGainLF;
         }
         if(efxReverb && efxReverbSlot && chan.targetReverbSend > 0.001f)
         {
-            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, efxReverbSlot, 0, chan.filter && chan.targetGainHF < 0.999f ? chan.filter : AL_FILTER_NULL);
+            ALuint send = syncSendFilter(chan, chan.sendFilter, chan.targetReverbSend);
+            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, efxReverbSlot, 0, send);
             chan.reverbSend = chan.targetReverbSend;
         }
         else if(efxReverb)
@@ -357,7 +437,19 @@ namespace sound
             alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
             chan.reverbSend = 0.0f;
         }
+        if(efxReverb && efxDistanceReverbSlot && efxMaxAuxiliarySends > 1 && chan.targetDistanceReverbSend > 0.001f)
+        {
+            ALuint send = syncSendFilter(chan, chan.distanceSendFilter, chan.targetDistanceReverbSend);
+            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, efxDistanceReverbSlot, 1, send);
+            chan.distanceReverbSend = chan.targetDistanceReverbSend;
+        }
+        else if(efxReverb && efxMaxAuxiliarySends > 1)
+        {
+            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+            chan.distanceReverbSend = 0.0f;
+        }
         chan.dirty = false;
+        checkAl("OpenAL source update");
     }
 
     static void stopChannels()
@@ -589,6 +681,16 @@ namespace sound
 
     static void destroyEfxReverb()
     {
+        if(efxDistanceReverbSlot && alDeleteAuxiliaryEffectSlots_)
+        {
+            alDeleteAuxiliaryEffectSlots_(1, &efxDistanceReverbSlot);
+            efxDistanceReverbSlot = 0;
+        }
+        if(efxDistanceReverbEffect && alDeleteEffects_)
+        {
+            alDeleteEffects_(1, &efxDistanceReverbEffect);
+            efxDistanceReverbEffect = 0;
+        }
         if(efxReverbSlot && alDeleteAuxiliaryEffectSlots_)
         {
             alDeleteAuxiliaryEffectSlots_(1, &efxReverbSlot);
@@ -618,7 +720,26 @@ namespace sound
         alDeleteAuxiliaryEffectSlots_ = NULL;
         alAuxiliaryEffectSloti_ = NULL;
         alAuxiliaryEffectSlotf_ = NULL;
-        efxReverbEffect = efxReverbSlot = 0;
+        efxReverbEffect = efxReverbSlot = efxDistanceReverbEffect = efxDistanceReverbSlot = 0;
+        efxMaxAuxiliarySends = 0;
+    }
+
+    static void setReverbEffect(ALuint effect, const EFXEAXREVERBPROPERTIES &shape, float gainScale)
+    {
+        alEffecti_(effect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
+        alEffectf_(effect, AL_REVERB_DENSITY, clamp(shape.flDensity, 0.0f, 1.0f));
+        alEffectf_(effect, AL_REVERB_DIFFUSION, clamp(shape.flDiffusion, 0.0f, 1.0f));
+        alEffectf_(effect, AL_REVERB_GAIN, clamp(shape.flGain*gainScale, 0.0f, 1.0f));
+        alEffectf_(effect, AL_REVERB_GAINHF, clamp(shape.flGainHF, 0.0f, 1.0f));
+        alEffectf_(effect, AL_REVERB_DECAY_TIME, clamp(shape.flDecayTime, 0.1f, 20.0f));
+        alEffectf_(effect, AL_REVERB_DECAY_HFRATIO, clamp(shape.flDecayHFRatio, 0.1f, 2.0f));
+        alEffectf_(effect, AL_REVERB_REFLECTIONS_GAIN, clamp(shape.flReflectionsGain*sqrtf(max(gainScale, 0.0f)), 0.0f, 3.16f));
+        alEffectf_(effect, AL_REVERB_REFLECTIONS_DELAY, clamp(shape.flReflectionsDelay, 0.0f, 0.3f));
+        alEffectf_(effect, AL_REVERB_LATE_REVERB_GAIN, clamp(shape.flLateReverbGain*max(gainScale, 0.0f), 0.0f, 10.0f));
+        alEffectf_(effect, AL_REVERB_LATE_REVERB_DELAY, clamp(shape.flLateReverbDelay, 0.0f, 0.1f));
+        alEffectf_(effect, AL_REVERB_AIR_ABSORPTION_GAINHF, clamp(shape.flAirAbsorptionGainHF, 0.892f, 1.0f));
+        alEffectf_(effect, AL_REVERB_ROOM_ROLLOFF_FACTOR, clamp(shape.flRoomRolloffFactor, 0.0f, 10.0f));
+        alEffecti_(effect, AL_REVERB_DECAY_HFLIMIT, shape.iDecayHFLimit ? AL_TRUE : AL_FALSE);
     }
 
     static bool initEfxReverb()
@@ -629,15 +750,8 @@ namespace sound
 
         alGenEffects_(1, &efxReverbEffect);
         if(!checkAl("alGenEffects")) { efxReverbEffect = 0; return false; }
-        alEffecti_(efxReverbEffect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
-        alEffectf_(efxReverbEffect, AL_REVERB_DENSITY, 0.8f);
-        alEffectf_(efxReverbEffect, AL_REVERB_DIFFUSION, 0.75f);
-        alEffectf_(efxReverbEffect, AL_REVERB_GAIN, 0.0f);
-        alEffectf_(efxReverbEffect, AL_REVERB_GAINHF, 0.65f);
-        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_TIME, 0.4f);
-        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_HFRATIO, 0.75f);
-        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_GAIN, 0.05f);
-        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_DELAY, 0.018f);
+        EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
+        setReverbEffect(efxReverbEffect, generic, 0.0f);
         if(!checkAl("OpenAL reverb effect setup")) { destroyEfxReverb(); return false; }
 
         alGenAuxiliaryEffectSlots_(1, &efxReverbSlot);
@@ -645,6 +759,37 @@ namespace sound
         alAuxiliaryEffectSloti_(efxReverbSlot, AL_EFFECTSLOT_EFFECT, efxReverbEffect);
         alAuxiliaryEffectSlotf_(efxReverbSlot, AL_EFFECTSLOT_GAIN, 1.0f);
         if(!checkAl("OpenAL reverb slot setup")) { destroyEfxReverb(); return false; }
+
+        if(efxMaxAuxiliarySends > 1)
+        {
+            alGenEffects_(1, &efxDistanceReverbEffect);
+            if(!checkAl("alGenEffects"))
+            {
+                efxDistanceReverbEffect = 0;
+                return true;
+            }
+            EFXEAXREVERBPROPERTIES rolling = EFX_REVERB_PRESET_OUTDOORS_ROLLINGPLAINS;
+            setReverbEffect(efxDistanceReverbEffect, rolling, 6.0f);
+            if(!checkAl("OpenAL distance reverb effect setup"))
+            {
+                if(efxDistanceReverbEffect) { alDeleteEffects_(1, &efxDistanceReverbEffect); efxDistanceReverbEffect = 0; }
+                return true;
+            }
+            alGenAuxiliaryEffectSlots_(1, &efxDistanceReverbSlot);
+            if(!checkAl("alGenAuxiliaryEffectSlots"))
+            {
+                efxDistanceReverbSlot = 0;
+                if(efxDistanceReverbEffect) { alDeleteEffects_(1, &efxDistanceReverbEffect); efxDistanceReverbEffect = 0; }
+                return true;
+            }
+            alAuxiliaryEffectSloti_(efxDistanceReverbSlot, AL_EFFECTSLOT_EFFECT, efxDistanceReverbEffect);
+            alAuxiliaryEffectSlotf_(efxDistanceReverbSlot, AL_EFFECTSLOT_GAIN, 1.0f);
+            if(!checkAl("OpenAL distance reverb slot setup"))
+            {
+                if(efxDistanceReverbSlot) { alDeleteAuxiliaryEffectSlots_(1, &efxDistanceReverbSlot); efxDistanceReverbSlot = 0; }
+                if(efxDistanceReverbEffect) { alDeleteEffects_(1, &efxDistanceReverbEffect); efxDistanceReverbEffect = 0; }
+            }
+        }
         return true;
     }
 
@@ -665,6 +810,9 @@ namespace sound
         alAuxiliaryEffectSloti_ = (LPALAUXILIARYEFFECTSLOTI)alGetProcAddress("alAuxiliaryEffectSloti");
         alAuxiliaryEffectSlotf_ = (LPALAUXILIARYEFFECTSLOTF)alGetProcAddress("alAuxiliaryEffectSlotf");
         efxFilters = alGenFilters_ && alDeleteFilters_ && alFilteri_ && alFilterf_;
+        ALCint sends = 0;
+        alcGetIntegerv(alDevice, ALC_MAX_AUXILIARY_SENDS, 1, &sends);
+        efxMaxAuxiliarySends = max(int(sends), 0);
         efxReverb = initEfxReverb();
     }
 
@@ -1035,6 +1183,9 @@ namespace sound
     FVARP(soundattenuationneardistance, 0.0f, 8.0f, 100.0f);
     FVARP(soundattenuationhalfdistance, 1.0f, 80.0f, 1000.0f);
     FVARP(soundmufflingfactor, 0.0f, 1.0f, 4.0f);
+    FVAR(sounddistancereverb, 0.0f, 0.35f, 2.0f);
+    FVAR(sounddistancebasscut, 0.0f, 0.2f, 1.0f);
+    VARP(sounddistanceattack, 0, 250, 2000);
     FVARR(airhumidity, 0.0f, 50.0f, 100.0f); // percent
     FVARR(airtemperature, -50.0f, 20.0f, 60.0f); // celsius
     FVARR(airpressure, 0.5f, 1.0f, 2.0f); // atmo
@@ -1242,6 +1393,37 @@ namespace sound
                                   airAbsorptionDbPerMeter(SoundLoudnessFrequency))*meters;
         extraDb *= soundmufflingfactor;
         return clamp(powf(10.0f, -extraDb/20.0f), 0.0f, 1.0f);
+    }
+
+    static float soundDistanceFarMeters()
+    {
+        float farMeters = soundattenuationneardistance + max(soundattenuationhalfdistance, 1.0f)*4.0f;
+        if(maxsounddistance > soundattenuationneardistance) farMeters = min(farMeters, maxsounddistance);
+        return max(farMeters, soundattenuationneardistance + 1.0f);
+    }
+
+    static float soundDistanceEffect(float dist)
+    {
+        float meters = unitsToMeters(dist);
+        if(meters <= soundattenuationneardistance) return 0.0f;
+        return smoothramp(meters, soundattenuationneardistance, soundDistanceFarMeters());
+    }
+
+    static int soundDistanceAttackMillis(float dist)
+    {
+        float t = rampfactor(unitsToMeters(dist), soundattenuationneardistance, soundDistanceFarMeters());
+        return clamp(int(sounddistanceattack*t + 0.5f), 0, sounddistanceattack);
+    }
+
+    static float soundDistanceReverbSend(float distanceEffect)
+    {
+        return clamp(powf(clamp(distanceEffect, 0.0f, 1.0f), 0.60f)*sounddistancereverb, 0.0f, 1.0f);
+    }
+
+    static float soundDistanceBassGain(float distanceEffect)
+    {
+        float cutDb = 42.0f*clamp(distanceEffect, 0.0f, 1.0f)*sounddistancebasscut;
+        return clamp(powf(10.0f, -cutDb/20.0f), 0.01f, 1.0f);
     }
 
     struct AcousticRay
@@ -1513,7 +1695,7 @@ namespace sound
     {
         if(!efxReverb || !efxReverbEffect || !efxReverbSlot) return;
         const EFXEAXREVERBPROPERTIES &shape = acousticProbe.reverbShape;
-        float gain = soundacoustics ? clamp(shape.flGain*acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : 0.0f,
+        float gain = soundacoustics ? clamp(shape.flGain*acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : clamp(0.65f*sounddistancereverb, 0.0f, 1.0f),
               decay = clamp(acousticProbe.reverbDecay, 0.12f, 4.0f),
               reflection = clamp(shape.flReflectionsGain*(0.35f + acousticProbe.reflection*0.65f), 0.0f, 3.16f),
               density = clamp(shape.flDensity, 0.0f, 1.0f),
@@ -1666,7 +1848,7 @@ namespace sound
     static bool updateChannel(SoundChannel &chan)
     {
         if(!chan.slot) return false;
-        float volf = 1.0f, panf = 0.5f, gainhf = 1.0f, reverbSend = 0.0f;
+        float volf = 1.0f, panf = 0.5f, gainhf = 1.0f, gainlf = 1.0f, reverbSend = 0.0f, distanceReverbSend = 0.0f;
         if(chan.hasLoc())
         {
             vec v;
@@ -1684,8 +1866,13 @@ namespace sound
             else if(chan.radius > 0) rad = chan.radius;
             if(soundairattenuation)
             {
+                float distanceEffect = soundDistanceEffect(dist),
+                      distanceReverb = soundDistanceReverbSend(distanceEffect);
                 volf *= soundDistanceGain(dist);
                 gainhf = soundMuffleGainHF(dist);
+                gainlf = soundDistanceBassGain(distanceEffect);
+                reverbSend = max(reverbSend, distanceReverb);
+                distanceReverbSend = distanceReverb;
             }
             else if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
             acousticSource(chan.loc, dist, volf, gainhf, reverbSend);
@@ -1696,14 +1883,18 @@ namespace sound
             }
         }
         else if(chan.flags&SND_HUD) acousticHudSource(reverbSend);
-        if(!efxReverb) reverbSend = 0.0f;
+        if(!efxReverb) reverbSend = distanceReverbSend = 0.0f;
+        else if(!efxDistanceReverbSlot) reverbSend = max(reverbSend, distanceReverbSend);
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
-        if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f && fabs(reverbSend - chan.targetReverbSend) < 1e-3f) return false;
+        if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f && fabs(gainlf - chan.targetGainLF) < 1e-3f &&
+           fabs(reverbSend - chan.targetReverbSend) < 1e-3f && fabs(distanceReverbSend - chan.targetDistanceReverbSend) < 1e-3f) return false;
         chan.targetVolume = vol;
         chan.pan = pan;
         chan.targetGainHF = gainhf;
+        chan.targetGainLF = gainlf;
         chan.targetReverbSend = reverbSend;
+        chan.targetDistanceReverbSend = distanceReverbSend;
         chan.dirty = true;
         return true;
     }
@@ -1863,6 +2054,7 @@ namespace sound
 
         updateChannel(chan);
         chan.expire = expire >= 0 ? totalmillis + expire : -1;
+        if(soundairattenuation && chan.hasLoc()) fade = max(fade, soundDistanceAttackMillis(chan.loc.dist(camera1->o)));
         chan.fadeStart = totalmillis;
         chan.fadeEnd = fade > 0 ? totalmillis + fade : totalmillis;
         chan.fadeFrom = fade > 0 ? 0 : chan.targetVolume;
