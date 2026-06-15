@@ -14,7 +14,8 @@ Clients will need the following dynamic link libraries present:
 * libGL (OpenGL)
 * SDL2 (>= 2.0.0)
 * SDL2_image
-* SDL2_mixer
+* OpenAL Soft
+* libsndfile
 * libpng
 * libjpeg
 * zlib

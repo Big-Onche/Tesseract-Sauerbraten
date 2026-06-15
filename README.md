@@ -39,7 +39,7 @@ Yes! As long as your GPU or integrated graphics supports OpenGL 3.0+, the game s
 Just note that vanilla Sauerbraten will always run faster, since Tesseract adds more advanced rendering features.
 
 **How do I install the game on Linux?**
-Install or update these libraries: `build-essential lib32z1-dev freeglut3-dev libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev`.
+Install or update these libraries: `build-essential lib32z1-dev freeglut3-dev libsdl2-dev libsdl2-image-dev libopenal-dev libsndfile1-dev`.
 Then open a terminal in the project’s root directory and run: `make -C src install` to build the binaries.
 After that, you can launch the game using: `./sauerract_unix.sh`.
 

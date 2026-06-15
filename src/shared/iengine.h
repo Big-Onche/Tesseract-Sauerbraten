@@ -418,6 +418,22 @@ enum
     SND_USE_ALT = 1<<2
 };
 
+namespace sound
+{
+    extern int usesound, soundchans, soundfreq, soundbufferlen, soundvol, musicvol;
+    extern char *audiodriver;
+
+    extern int play(int n, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int loops = 0, int fade = 0, int chanid = -1, int radius = 0, int expire = -1);
+    extern int playName(const char *s, const vec *loc = NULL, int vol = 0, int flags = 0, int loops = 0, int fade = 0, int chanid = -1, int radius = 0, int expire = -1);
+    extern void preload(int n);
+    extern void preloadMap(int n);
+    extern bool stop(int n, int chanid, int fade = 0);
+    extern void stopAll();
+    extern void init();
+    extern void reset();
+    extern void cleanup();
+}
+
 extern int playsound(int n, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int loops = 0, int fade = 0, int chanid = -1, int radius = 0, int expire = -1);
 extern int playsoundname(const char *s, const vec *loc = NULL, int vol = 0, int flags = 0, int loops = 0, int fade = 0, int chanid = -1, int radius = 0, int expire = -1);
 extern void preloadsound(int n);

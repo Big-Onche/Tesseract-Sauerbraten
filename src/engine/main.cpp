@@ -113,13 +113,11 @@ void writeinitcfg()
     f->printf("fullscreen %d\n", fullscreen);
     f->printf("screenw %d\n", scr_w);
     f->printf("screenh %d\n", scr_h);
-    extern int usesound, soundchans, soundfreq, soundbufferlen;
-    extern char *audiodriver;
-    f->printf("sound %d\n", usesound);
-    f->printf("soundchans %d\n", soundchans);
-    f->printf("soundfreq %d\n", soundfreq);
-    f->printf("soundbufferlen %d\n", soundbufferlen);
-    if(audiodriver[0]) f->printf("audiodriver %s\n", escapestring(audiodriver));
+    f->printf("sound %d\n", sound::usesound);
+    f->printf("soundchans %d\n", sound::soundchans);
+    f->printf("soundfreq %d\n", sound::soundfreq);
+    f->printf("soundbufferlen %d\n", sound::soundbufferlen);
+    if(sound::audiodriver[0]) f->printf("audiodriver %s\n", escapestring(sound::audiodriver));
     delete f;
 }
 
@@ -1187,7 +1185,7 @@ int main(int argc, char **argv)
     {
         logoutf("init: sdl");
 
-        if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO|SDL_INIT_AUDIO)<0) fatal("Unable to initialize SDL: %s", SDL_GetError());
+        if(SDL_Init(SDL_INIT_TIMER|SDL_INIT_VIDEO)<0) fatal("Unable to initialize SDL: %s", SDL_GetError());
 
 #ifdef SDL_VIDEO_DRIVER_X11
         SDL_version version;
@@ -1260,8 +1258,7 @@ int main(int argc, char **argv)
     }
     execfile(game::autoexec(), false);
 
-    extern int musicvol;
-    if(musicvol) execute("playMusic");
+    if(sound::musicvol) execute("playMusic");
 
     identflags &= ~IDF_PERSIST;
 

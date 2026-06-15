@@ -67,7 +67,7 @@
 		D1FCB17618832B7500AFC227 /* waypoint.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D1FCB13418832B7500AFC227 /* waypoint.cpp */; };
 		D1FCB17718832B7500AFC227 /* weapon.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D1FCB13518832B7500AFC227 /* weapon.cpp */; };
 		D1FCB17B18832BBC00AFC227 /* SDL2_image.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D1FCB17818832BBC00AFC227 /* SDL2_image.framework */; };
-		D1FCB17C18832BBC00AFC227 /* SDL2_mixer.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D1FCB17918832BBC00AFC227 /* SDL2_mixer.framework */; };
+		D1FCB17C18832BBC00AFC227 /* OpenAL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D1FCB17918832BBC00AFC227 /* OpenAL.framework */; };
 		D1FCB17D18832BBC00AFC227 /* SDL2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D1FCB17A18832BBC00AFC227 /* SDL2.framework */; };
 		D1FCB19018832C7600AFC227 /* crypto.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D1FCB18018832C7600AFC227 /* crypto.cpp */; };
 		D1FCB19118832C7600AFC227 /* geom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D1FCB18318832C7600AFC227 /* geom.cpp */; };
@@ -179,7 +179,7 @@
 		D1FCB13418832B7500AFC227 /* waypoint.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = waypoint.cpp; sourceTree = "<group>"; };
 		D1FCB13518832B7500AFC227 /* weapon.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = weapon.cpp; sourceTree = "<group>"; };
 		D1FCB17818832BBC00AFC227 /* SDL2_image.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL2_image.framework; path = /Library/Frameworks/SDL2_image.framework; sourceTree = "<group>"; };
-		D1FCB17918832BBC00AFC227 /* SDL2_mixer.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL2_mixer.framework; path = /Library/Frameworks/SDL2_mixer.framework; sourceTree = "<group>"; };
+		D1FCB17918832BBC00AFC227 /* OpenAL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenAL.framework; path = /System/Library/Frameworks/OpenAL.framework; sourceTree = "<absolute>"; };
 		D1FCB17A18832BBC00AFC227 /* SDL2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL2.framework; path = /Library/Frameworks/SDL2.framework; sourceTree = "<group>"; };
 		D1FCB17F18832C7600AFC227 /* command.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = command.h; sourceTree = "<group>"; };
 		D1FCB18018832C7600AFC227 /* crypto.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = crypto.cpp; sourceTree = "<group>"; };
@@ -207,7 +207,7 @@
 				B94198C309207E810029DAD1 /* Cocoa.framework in Frameworks */,
 				B94198C409207E810029DAD1 /* OpenGL.framework in Frameworks */,
 				D1FCB17B18832BBC00AFC227 /* SDL2_image.framework in Frameworks */,
-				D1FCB17C18832BBC00AFC227 /* SDL2_mixer.framework in Frameworks */,
+				D1FCB17C18832BBC00AFC227 /* OpenAL.framework in Frameworks */,
 				D1FCB17D18832BBC00AFC227 /* SDL2.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -219,7 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				D1FCB17818832BBC00AFC227 /* SDL2_image.framework */,
-				D1FCB17918832BBC00AFC227 /* SDL2_mixer.framework */,
+				D1FCB17918832BBC00AFC227 /* OpenAL.framework */,
 				D1FCB17A18832BBC00AFC227 /* SDL2.framework */,
 				1058C7A1FEA54F0111CA2CBB /* Cocoa.framework */,
 				B2F67ED704C74A3F00A80002 /* OpenGL.framework */,
@@ -598,7 +598,10 @@
 				INFOPLIST_FILE = tesseract.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				OTHER_LDFLAGS = "-lz";
+				OTHER_LDFLAGS = (
+					"-lz",
+					"-lsndfile",
+				);
 				PRODUCT_NAME = tesseract;
 				USER_HEADER_SEARCH_PATHS = "";
 			};
@@ -621,7 +624,10 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
-				OTHER_LDFLAGS = "-lz";
+				OTHER_LDFLAGS = (
+					"-lz",
+					"-lsndfile",
+				);
 				PRODUCT_NAME = tesseract;
 				USER_HEADER_SEARCH_PATHS = "";
 			};
@@ -644,7 +650,10 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CFLAGS)";
-				OTHER_LDFLAGS = "-lz";
+				OTHER_LDFLAGS = (
+					"-lz",
+					"-lsndfile",
+				);
 				PRODUCT_NAME = tesseract;
 				USER_HEADER_SEARCH_PATHS = "";
 			};

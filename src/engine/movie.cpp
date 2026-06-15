@@ -8,7 +8,6 @@
 //   kino - ok
 
 #include "engine.h"
-#include "SDL_mixer.h"
 
 VAR(dbgmovie, 0, 0, 1);
 
@@ -189,23 +188,7 @@ struct aviwriter
         path(filename);
         if(!strrchr(filename, '.')) concatstring(filename, ".avi");
 
-        extern bool nosound; // sound.cpp
-        if(sound && !nosound)
-        {
-            Mix_QuerySpec(&soundfrequency, &soundformat, &soundchannels);
-            const char *desc;
-            switch(soundformat)
-            {
-                case AUDIO_U8:     desc = "u8"; break;
-                case AUDIO_S8:     desc = "s8"; break;
-                case AUDIO_U16LSB: desc = "u16l"; break;
-                case AUDIO_U16MSB: desc = "u16b"; break;
-                case AUDIO_S16LSB: desc = "s16l"; break;
-                case AUDIO_S16MSB: desc = "s16b"; break;
-                default:           desc = "unkn";
-            }
-            if(dbgmovie) conoutf(CON_DEBUG, "soundspec: %dhz %s x %d", soundfrequency, desc, soundchannels);
-        }
+        if(sound) conoutf(CON_WARN, "movie audio capture is disabled with the OpenAL sound backend");
     }
 
     ~aviwriter()
@@ -954,7 +937,6 @@ namespace recorder
         shouldencode = SDL_CreateCond();
         shouldread = SDL_CreateCond();
         thread = SDL_CreateThread(videoencoder, "video encoder", NULL);
-        if(file->soundfrequency > 0) Mix_SetPostMix(soundencoder, NULL);
     }
 
     void cleanup()
@@ -970,7 +952,6 @@ namespace recorder
     {
         if(!file) return;
         if(state == REC_OK) state = REC_USERHALT;
-        if(file->soundfrequency > 0) Mix_SetPostMix(NULL, NULL);
 
         SDL_LockMutex(videolock); // wakeup thread enough to kill it
         SDL_CondSignal(shouldencode);
