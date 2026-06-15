@@ -3,6 +3,7 @@
 #include "engine.h"
 #include "AL/al.h"
 #include "AL/alc.h"
+#include "AL/efx.h"
 #include "sndfile.h"
 
 namespace sound
@@ -16,6 +17,11 @@ namespace sound
     static ALCdevice *alDevice = NULL;
     static ALCcontext *alContext = NULL;
     static int maxChannels = 0;
+    static bool efxFilters = false;
+    static LPALGENFILTERS alGenFilters_ = NULL;
+    static LPALDELETEFILTERS alDeleteFilters_ = NULL;
+    static LPALFILTERI alFilteri_ = NULL;
+    static LPALFILTERF alFilterf_ = NULL;
 
     int play(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire);
     void stopAll();
@@ -171,16 +177,17 @@ namespace sound
     struct SoundChannel
     {
         int id;
-        ALuint source;
+        ALuint source, filter;
         bool inuse;
         vec loc;
         SoundSlot *slot;
         extentity *ent;
         int radius, volume, targetVolume, pan, flags, expire;
         int fadeStart, fadeEnd, fadeFrom;
+        float gainhf, targetGainHF;
         bool dirty, stopping;
 
-        SoundChannel(int id) : id(id), source(0) { reset(); }
+        SoundChannel(int id) : id(id), source(0), filter(0) { reset(); }
         ~SoundChannel() { cleanup(); }
 
         bool hasLoc() const { return loc.x >= -1e15f; }
@@ -198,6 +205,8 @@ namespace sound
             flags = 0;
             expire = -1;
             fadeStart = fadeEnd = fadeFrom = 0;
+            gainhf = -1.0f;
+            targetGainHF = 1.0f;
             dirty = false;
             stopping = false;
         }
@@ -209,6 +218,25 @@ namespace sound
             if(!checkAl("alGenSources")) { source = 0; return false; }
             alSourcei(source, AL_SOURCE_RELATIVE, AL_TRUE);
             alSourcef(source, AL_ROLLOFF_FACTOR, 0.0f);
+            if(efxFilters) alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            return true;
+        }
+
+        bool ensureFilter()
+        {
+            if(!efxFilters) return false;
+            if(filter) return true;
+            alGenFilters_(1, &filter);
+            if(!checkAl("alGenFilters")) { filter = 0; return false; }
+            alFilteri_(filter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+            alFilterf_(filter, AL_LOWPASS_GAIN, 1.0f);
+            alFilterf_(filter, AL_LOWPASS_GAINHF, 1.0f);
+            if(!checkAl("OpenAL low-pass filter setup"))
+            {
+                alDeleteFilters_(1, &filter);
+                filter = 0;
+                return false;
+            }
             return true;
         }
 
@@ -220,6 +248,11 @@ namespace sound
                 alSourcei(source, AL_BUFFER, 0);
                 alDeleteSources(1, &source);
                 source = 0;
+            }
+            if(filter)
+            {
+                if(alDeleteFilters_) alDeleteFilters_(1, &filter);
+                filter = 0;
             }
             reset();
         }
@@ -237,8 +270,10 @@ namespace sound
         while(!channels.inrange(n)) channels.add(channels.length());
         SoundChannel &chan = channels[n];
         ALuint source = chan.source;
+        ALuint filter = chan.filter;
         chan.reset();
         chan.source = source;
+        chan.filter = filter;
         chan.inuse = true;
         if(loc) chan.loc = *loc;
         chan.slot = slot;
@@ -279,11 +314,24 @@ namespace sound
 
     static void syncChannel(SoundChannel &chan)
     {
-        if(!chan.source || (!chan.dirty && effectiveVolume(chan) == chan.volume)) return;
-        chan.volume = effectiveVolume(chan);
+        if(!chan.source) return;
+        int volume = effectiveVolume(chan);
+        if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f) return;
+        chan.volume = volume;
         alSourcef(chan.source, AL_GAIN, clamp(chan.volume/float(MaxVolume), 0.0f, 1.0f));
         float pan = clamp(chan.pan/127.5f - 1.0f, -1.0f, 1.0f);
         alSource3f(chan.source, AL_POSITION, pan, 0.0f, -1.0f);
+        if(efxFilters && chan.targetGainHF < 0.999f && chan.ensureFilter())
+        {
+            alFilterf_(chan.filter, AL_LOWPASS_GAINHF, chan.targetGainHF);
+            alSourcei(chan.source, AL_DIRECT_FILTER, chan.filter);
+            chan.gainhf = chan.targetGainHF;
+        }
+        else if(efxFilters)
+        {
+            alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            chan.gainhf = 1.0f;
+        }
         chan.dirty = false;
     }
 
@@ -514,6 +562,26 @@ namespace sound
     VARF(soundfreq, 0, 44100, 48000, initwarning("sound configuration", INIT_RESET, CHANGE_SOUND));
     VARF(soundbufferlen, 128, 1024, 4096, initwarning("sound configuration", INIT_RESET, CHANGE_SOUND));
 
+    static void clearEfx()
+    {
+        efxFilters = false;
+        alGenFilters_ = NULL;
+        alDeleteFilters_ = NULL;
+        alFilteri_ = NULL;
+        alFilterf_ = NULL;
+    }
+
+    static void initEfx()
+    {
+        clearEfx();
+        if(alcIsExtensionPresent(alDevice, ALC_EXT_EFX_NAME) != ALC_TRUE) return;
+        alGenFilters_ = (LPALGENFILTERS)alGetProcAddress("alGenFilters");
+        alDeleteFilters_ = (LPALDELETEFILTERS)alGetProcAddress("alDeleteFilters");
+        alFilteri_ = (LPALFILTERI)alGetProcAddress("alFilteri");
+        alFilterf_ = (LPALFILTERF)alGetProcAddress("alFilterf");
+        efxFilters = alGenFilters_ && alDeleteFilters_ && alFilteri_ && alFilterf_;
+    }
+
     static bool initDevice()
     {
         const ALCchar *deviceName = audiodriver[0] ? audiodriver : NULL;
@@ -528,7 +596,6 @@ namespace sound
             conoutf(CON_ERROR, "sound init failed (OpenAL): could not open device");
             return false;
         }
-
         ALCint attrs[] = { ALC_FREQUENCY, soundfreq, 0 };
         alContext = alcCreateContext(alDevice, soundfreq > 0 ? attrs : NULL);
         if(!alContext || !alcMakeContextCurrent(alContext))
@@ -537,8 +604,10 @@ namespace sound
             if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
             alcCloseDevice(alDevice);
             alDevice = NULL;
+            clearEfx();
             return false;
         }
+        initEfx();
 
         alDistanceModel(AL_NONE);
         alListener3f(AL_POSITION, 0.0f, 0.0f, 0.0f);
@@ -558,6 +627,7 @@ namespace sound
                 alcMakeContextCurrent(NULL);
                 if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
                 if(alDevice) { alcCloseDevice(alDevice); alDevice = NULL; }
+                clearEfx();
             }
             if(!usesound || !initDevice())
             {
@@ -806,6 +876,7 @@ namespace sound
             if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
             if(alDevice) { alcCloseDevice(alDevice); alDevice = NULL; }
         }
+        clearEfx();
         nosound = true;
     }
 
@@ -829,6 +900,10 @@ namespace sound
         }
     }
 
+    static float metersToUnits(float meters);
+    extern int soundairattenuation;
+    extern float maxsounddistance;
+
     void checkMapSounds()
     {
         const vector<extentity *> &ents = entities::getents();
@@ -836,7 +911,8 @@ namespace sound
         {
             extentity &e = *ents[i];
             if(e.type!=ET_SOUND) continue;
-            if(camera1->o.dist(e.o) < e.attr2)
+            float maxdist = soundairattenuation && maxsounddistance > 0 ? metersToUnits(maxsounddistance) : e.attr2;
+            if((soundairattenuation && maxsounddistance <= 0) || camera1->o.dist(e.o) < maxdist)
             {
                 if(!(e.flags&EF_SOUND)) play(e.attr1, NULL, &e, SND_MAP, -1);
             }
@@ -846,11 +922,84 @@ namespace sound
 
     VAR(stereo, 0, 1, 1);
     VAR(maxsoundradius, 1, 340, 0);
+    VARP(soundairattenuation, 0, 0, 1);
+    FVARP(maxsounddistance, 0.0f, 1024.0f, 4096.0f);
+    FVARP(sounddistanceattenuationfactor, 0.0f, 2.0f, 4.0f);
+    FVARP(soundattenuationneardistance, 0.0f, 8.0f, 100.0f);
+    FVARP(soundattenuationhalfdistance, 1.0f, 80.0f, 1000.0f);
+    FVARP(soundmufflingfactor, 0.0f, 1.0f, 4.0f);
+    FVARR(airhumidity, 0.0f, 50.0f, 100.0f); // percent
+    FVARR(airtemperature, -50.0f, 20.0f, 60.0f); // celsius
+    FVARR(airpressure, 0.5f, 1.0f, 2.0f); // atmo
+
+    static const float SoundUnitsPerMeter = 5.0f;
+    static const float SoundLoudnessFrequency = 1000.0f;
+    static const float SoundMuffleFrequency = 16000.0f;
+
+    static float unitsToMeters(float units)
+    {
+        return max(units, 0.0f)/SoundUnitsPerMeter;
+    }
+
+    static float metersToUnits(float meters)
+    {
+        return max(meters, 0.0f)*SoundUnitsPerMeter;
+    }
+
+    static float airAbsorptionDbPerMeter(float frequency)
+    {
+        float tempK = airtemperature + 273.15f,
+              tempRel = tempK/293.15f,
+              pressure = max(airpressure, 0.1f),
+              humidity = clamp(airhumidity, 0.0f, 100.0f);
+        float saturation = powf(10.0f, -6.8346f*powf(273.16f/tempK, 1.261f) + 4.6151f),
+              h = (humidity/100.0f)*saturation/pressure;
+        float frO = pressure*(24.0f + 4.04e4f*h*(0.02f + h)/(0.391f + h)),
+              frN = pressure*powf(tempRel, -0.5f)*(9.0f + 280.0f*h*expf(-4.17f*(powf(tempRel, -1.0f/3.0f) - 1.0f))),
+              f2 = frequency*frequency;
+        return 8.686f*f2*(1.84e-11f*sqrtf(tempRel)/pressure +
+            powf(tempRel, -2.5f)*(0.01275f*expf(-2239.1f/tempK)/(frO + f2/frO) +
+                                  0.1068f*expf(-3352.0f/tempK)/(frN + f2/frN)));
+    }
+
+    static float soundDistanceGain(float dist)
+    {
+        float meters = unitsToMeters(dist);
+        if(meters <= 0) return 1.0f;
+
+        float rolloffMeters = max(meters - soundattenuationneardistance, 0.0f),
+              halfDistance = max(soundattenuationhalfdistance, 1.0f);
+        float attenuationDb = 20.0f*log10f(1.0f + rolloffMeters/halfDistance) +
+                              airAbsorptionDbPerMeter(SoundLoudnessFrequency)*meters;
+        attenuationDb *= sounddistanceattenuationfactor;
+        return clamp(powf(10.0f, -attenuationDb/20.0f), 0.0f, 1.0f);
+    }
+
+    static float soundMuffleGainHF(float dist)
+    {
+        float meters = unitsToMeters(dist);
+        if(meters <= 0) return 1.0f;
+
+        float extraDb = max(0.0f, airAbsorptionDbPerMeter(SoundMuffleFrequency) -
+                                  airAbsorptionDbPerMeter(SoundLoudnessFrequency))*meters;
+        extraDb *= soundmufflingfactor;
+        return clamp(powf(10.0f, -extraDb/20.0f), 0.0f, 1.0f);
+    }
+
+    static bool soundInRange(const vec &loc)
+    {
+        if(soundairattenuation)
+        {
+            if(maxsounddistance <= 0) return true;
+            return camera1->o.dist(loc) <= metersToUnits(maxsounddistance);
+        }
+        return true;
+    }
 
     static bool updateChannel(SoundChannel &chan)
     {
         if(!chan.slot) return false;
-        float volf = 1.0f, panf = 0.5f;
+        float volf = 1.0f, panf = 0.5f, gainhf = 1.0f;
         if(chan.hasLoc())
         {
             vec v;
@@ -866,7 +1015,12 @@ namespace sound
                 }
             }
             else if(chan.radius > 0) rad = chan.radius;
-            if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
+            if(soundairattenuation)
+            {
+                volf *= soundDistanceGain(dist);
+                gainhf = soundMuffleGainHF(dist);
+            }
+            else if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
             if(stereo && (v.x != 0 || v.y != 0) && dist>0)
             {
                 v.rotate_around_z(-camera1->yaw*RAD);
@@ -875,9 +1029,10 @@ namespace sound
         }
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
-        if(vol == chan.targetVolume && pan == chan.pan) return false;
+        if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f) return false;
         chan.targetVolume = vol;
         chan.pan = pan;
+        chan.targetGainHF = gainhf;
         chan.dirty = true;
         return true;
     }
@@ -972,9 +1127,15 @@ namespace sound
 
         if(loc)
         {
-            int maxrad = game::maxsoundradius(n);
-            if(radius <= 0 || maxrad < radius) radius = maxrad;
-            if(camera1->o.dist(*loc) > 1.5f*radius)
+            bool outofrange = false;
+            if(soundairattenuation) outofrange = !soundInRange(*loc);
+            else
+            {
+                int maxrad = game::maxsoundradius(n);
+                if(radius <= 0 || maxrad < radius) radius = maxrad;
+                outofrange = camera1->o.dist(*loc) > 1.5f*radius;
+            }
+            if(outofrange)
             {
                 if(channels.inrange(chanid) && sounds.playing(channels[chanid], config)) haltChannel(chanid);
                 return -1;
@@ -1096,6 +1257,7 @@ namespace sound
             if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
             if(alDevice) { alcCloseDevice(alDevice); alDevice = NULL; }
         }
+        clearEfx();
         shouldInitAudio = true;
         init();
 
