@@ -417,7 +417,7 @@ namespace game
         if(m_sp && slowmosp && d==player1 && d->health < 1) d->health = 1;
 
         if(d->health<=0) { if(local) killed(d, actor); }
-        else if(d==h) playsound(S_PAIN6);
+        else if(d==h) playsound(S_PAIN6, NULL, NULL, SND_HUD);
         else playsound(S_PAIN1+rnd(5), &d->o);
     }
 
@@ -432,15 +432,25 @@ namespace game
             gibeffect(max(-d->health, 0), d->vel, d);
             d->deaths++;
         }
-        if(d==player1)
+        fpsent *h = followingplayer(player1);
+        if(d==h)
         {
             // if(deathscore) showscores(true); TODO
-            disablezoom();
-            if(!restore) loopi(NUMGUNS) savedammo[i] = player1->ammo[i];
+            if(d==player1)
+            {
+                disablezoom();
+                if(!restore) loopi(NUMGUNS) savedammo[i] = player1->ammo[i];
+            }
+            else
+            {
+                d->move = d->strafe = 0;
+                d->resetinterp();
+                d->smoothmillis = 0;
+            }
             d->attacking = false;
             //d->pitch = 0;
             d->roll = 0;
-            playsound(S_DIE1+rnd(2));
+            playsound(S_DIE1+rnd(2), NULL, NULL, SND_HUD);
         }
         else
         {
@@ -689,8 +699,10 @@ namespace game
     void physicstrigger(physent *d, bool local, int floorlevel, int waterlevel, int material)
     {
         if(d->type==ENT_INANIMATE) return;
-        if     (waterlevel>0) { if(material!=MAT_LAVA) playsound(S_SPLASH1, d==player1 ? NULL : &d->o); }
-        else if(waterlevel<0) playsound(material==MAT_LAVA ? S_BURN : S_SPLASH2, d==player1 ? NULL : &d->o);
+        fpsent *h = followingplayer(player1);
+        bool hud = d==h;
+        if     (waterlevel>0) { if(material!=MAT_LAVA) playsound(S_SPLASH1, hud ? NULL : &d->o, NULL, hud ? SND_HUD : 0); }
+        else if(waterlevel<0) playsound(material==MAT_LAVA ? S_BURN : S_SPLASH2, hud ? NULL : &d->o, NULL, hud ? SND_HUD : 0);
         if     (floorlevel>0) { if(d==player1 || d->type!=ENT_PLAYER || ((fpsent *)d)->ai) msgsound(S_JUMP, d); }
         else if(floorlevel<0) { if(d==player1 || d->type!=ENT_PLAYER || ((fpsent *)d)->ai) msgsound(S_LAND, d); }
     }
@@ -709,7 +721,7 @@ namespace game
         if(!d || d==player1)
         {
             addmsg(N_SOUND, "ci", d, n);
-            playsound(n);
+            playsound(n, NULL, NULL, d==player1 ? SND_HUD : 0);
         }
         else
         {

@@ -1294,6 +1294,12 @@ namespace sound
         reverbSend = max(reverbSend, clamp((acousticProbe.reverbGain*(0.35f + 0.65f*occlusion))*soundacousticreverb, 0.0f, 1.0f));
     }
 
+    static void acousticHudSource(float &reverbSend)
+    {
+        if(!soundacoustics || acousticProbe.rays.empty()) return;
+        reverbSend = max(reverbSend, clamp(acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f));
+    }
+
     static int acousticDebugColor(float t)
     {
         t = clamp(t, 0.0f, 1.0f);
@@ -1354,6 +1360,7 @@ namespace sound
                 panf = 0.5f - 0.5f*v.x/v.magnitude2();
             }
         }
+        else if(chan.flags&SND_HUD) acousticHudSource(reverbSend);
         if(!efxReverb) reverbSend = 0.0f;
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
@@ -1400,7 +1407,7 @@ namespace sound
         {
             SoundChannel &chan = channels[i];
             if(!chan.inuse) continue;
-            if(chan.hasLoc()) updateChannel(chan);
+            if(chan.hasLoc() || chan.flags&SND_HUD) updateChannel(chan);
             if(chan.fadeEnd > chan.fadeStart && totalmillis < chan.fadeEnd) chan.dirty = true;
             syncChannel(chan);
         }
@@ -1495,6 +1502,8 @@ namespace sound
             {
                 if(loc) chan.loc = *loc;
                 else if(chan.hasLoc()) chan.clearLoc();
+                chan.flags = flags;
+                chan.radius = radius;
                 return chanid;
             }
         }

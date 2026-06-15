@@ -24,7 +24,7 @@ namespace game
         if(gun!=d->gunselect)
         {
             addmsg(N_GUNSELECT, "rci", d, gun);
-            playsound(S_WEAPLOAD, d == player1 ? NULL : &d->o);
+            playsound(S_WEAPLOAD, d == player1 ? NULL : &d->o, NULL, d == player1 ? SND_HUD : 0);
         }
         d->gunselect = gun;
     }
@@ -386,7 +386,7 @@ namespace game
                 {
                     damageblend(damage);
                     damagecompass(damage, at ? at->o : f->o);
-                    playsound(S_PAIN6);
+                    playsound(S_PAIN6, NULL, NULL, SND_HUD);
                 }
                 else playsound(S_PAIN1+rnd(5), &f->o);
             }
@@ -743,13 +743,13 @@ namespace game
             case S_CHAINSAW_ATTACK:
                 if(d->attacksound >= 0) looped = true;
                 d->attacksound = sound;
-                d->attackchan = playsound(sound, d==h ? NULL : &d->o, NULL, 0, -1, 100, d->attackchan);
+                d->attackchan = playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0, -1, 100, d->attackchan);
                 break;
             default:
-                playsound(sound, d==h ? NULL : &d->o);
+                playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0);
                 break;
         }
-        if(d->quadmillis && lastmillis-prevaction>200 && !looped) playsound(S_ITEMPUP, d==h ? NULL : &d->o);
+        if(d->quadmillis && lastmillis-prevaction>200 && !looped) playsound(S_ITEMPUP, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0);
     }
 
     void particletrack(physent *owner, vec &o, vec &d)
@@ -1007,7 +1007,7 @@ namespace game
            d->clientnum >= 0 && d->state == CS_ALIVE &&
            d->lastattackgun == gun && lastmillis - d->lastaction < guns[gun].attackdelay + 50)
         {
-            d->attackchan = playsound(d->attacksound, local ? NULL : &d->o, NULL, 0, -1, -1, d->attackchan);
+            d->attackchan = playsound(d->attacksound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, -1, d->attackchan);
             if(d->attackchan < 0) d->attacksound = -1;
         }
         else d->stopattacksound();
@@ -1031,13 +1031,13 @@ namespace game
             if(d->idlesound >= 0) d->stopidlesound();
             if(sound >= 0)
             {
-                d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, 0, -1, 100, d->idlechan, radius);
+                d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, 100, d->idlechan, radius);
                 if(d->idlechan >= 0) d->idlesound = sound;
             }
         }
         else if(sound >= 0)
         {
-            d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, 0, -1, -1, d->idlechan, radius);
+            d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, -1, d->idlechan, radius);
             if(d->idlechan < 0) d->idlesound = -1;
         }
     }

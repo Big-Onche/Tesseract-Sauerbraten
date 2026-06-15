@@ -662,7 +662,8 @@ struct collectclientmode : clientmode
         token *t = findtoken(id);
         if(t)
         {
-            playsound(t->team == team || (t->team < 0 && -t->team != team) ? S_ITEMAMMO : S_ITEMHEALTH, d!=player1 ? &d->o : NULL);
+            fpsent *h = followingplayer(player1);
+            playsound(t->team == team || (t->team < 0 && -t->team != team) ? S_ITEMAMMO : S_ITEMHEALTH, d!=h ? &d->o : NULL, NULL, d==h ? SND_HUD : 0);
             removetoken(id);
         }
         d->tokens = total;

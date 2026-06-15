@@ -1312,9 +1312,13 @@ namespace game
             }
 
             case N_SOUND:
+            {
                 if(!d) return;
-                playsound(getint(p), &d->o);
+                int sound = getint(p);
+                fpsent *h = followingplayer(player1);
+                playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0);
                 break;
+            }
 
             case N_TEXT:
             {
@@ -1567,7 +1571,8 @@ namespace game
                 if(!d) return;
                 int gun = getint(p);
                 d->gunselect = clamp(gun, int(GUN_FIST), int(GUN_PISTOL));
-                playsound(S_WEAPLOAD, &d->o);
+                fpsent *h = followingplayer(player1);
+                playsound(S_WEAPLOAD, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0);
                 break;
             }
 
