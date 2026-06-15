@@ -1257,11 +1257,11 @@ namespace sound
         vector<AcousticRay> rays;
         vec origin;
         int lastmillis, nextRay, lastDebugMillis;
-        float budget, openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, scores[AP_NUM];
+        float budget, openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, muffleOpen, scores[AP_NUM];
         EFXEAXREVERBPROPERTIES reverbShape;
         AcousticChoice indoorChoice, outdoorChoice;
 
-        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), lastDebugMillis(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1)
+        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), lastDebugMillis(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1), muffleOpen(1)
         {
             loopi(AP_NUM) scores[i] = 0.0f;
             EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
@@ -1485,23 +1485,27 @@ namespace sound
               outdoorStrength = acousticProbe.outdoorRatio*clamp(0.07f + horizontalNearRatio*0.35f + horizontalFarHitRatio*0.30f + corridorScore*0.25f, 0.04f, 0.75f),
               reverb = clamp(indoorStrength + outdoorStrength, 0.0f, 1.0f),
               decay = finalShape.flDecayTime,
-              reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f);
+              reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f),
+              indoorMuffleOpen = clamp(smoothramp(medianHorizontalDistance, 6.0f, 36.0f)*0.70f + horizontalOpenRatio*0.30f, 0.0f, 1.0f),
+              outdoorMuffleOpen = clamp(skyOpen*0.55f + horizontalOpenRatio*0.35f + smoothramp(medianHorizontalDistance, 24.0f, 96.0f)*0.10f, 0.0f, 1.0f),
+              muffleOpen = clamp(indoorMuffleOpen*(1.0f - acousticProbe.outdoorRatio) + outdoorMuffleOpen*acousticProbe.outdoorRatio, 0.0f, 1.0f);
         acousticProbe.openness += (open - acousticProbe.openness)*k;
         acousticProbe.walldist += (walldist - acousticProbe.walldist)*k;
         acousticProbe.reverbGain += (reverb - acousticProbe.reverbGain)*k;
         acousticProbe.reverbDecay += (decay - acousticProbe.reverbDecay)*k;
         acousticProbe.reflection += (reflection - acousticProbe.reflection)*k;
+        acousticProbe.muffleOpen += (muffleOpen - acousticProbe.muffleOpen)*k;
         acousticProbe.reverbShape = finalShape;
 
         if(debugsoundacoustics && totalmillis - acousticProbe.lastDebugMillis >= 1000)
         {
             acousticProbe.lastDebugMillis = totalmillis;
-            conoutf(CON_DEBUG, "sound acoustics: indoor %s %d%% / %s %d%%, outdoor %s %d%% / %s %d%%, outdoor ratio %d%%, sky %d%%, ceiling %.1fm, median %.1fm, irregular %d%%, corridor %d%%",
+            conoutf(CON_DEBUG, "sound acoustics: indoor %s %d%% / %s %d%%, outdoor %s %d%% / %s %d%%, outdoor ratio %d%%, sky %d%%, ceiling %.1fm, median %.1fm, irregular %d%%, corridor %d%%, muffle open %d%%",
                 acousticPresets[acousticProbe.indoorChoice.first].name, int(acousticProbe.indoorChoice.firstWeight*100.0f + 0.5f),
                 acousticPresets[acousticProbe.indoorChoice.second].name, int(acousticProbe.indoorChoice.secondWeight*100.0f + 0.5f),
                 acousticPresets[acousticProbe.outdoorChoice.first].name, int(acousticProbe.outdoorChoice.firstWeight*100.0f + 0.5f),
                 acousticPresets[acousticProbe.outdoorChoice.second].name, int(acousticProbe.outdoorChoice.secondWeight*100.0f + 0.5f),
-                int(acousticProbe.outdoorRatio*100.0f + 0.5f), int(skyOpen*100.0f + 0.5f), unitsToMeters(ceilingDist), medianHitDistance, int(irregularityScore*100.0f + 0.5f), int(corridorScore*100.0f + 0.5f));
+                int(acousticProbe.outdoorRatio*100.0f + 0.5f), int(skyOpen*100.0f + 0.5f), unitsToMeters(ceilingDist), medianHitDistance, int(irregularityScore*100.0f + 0.5f), int(corridorScore*100.0f + 0.5f), int(acousticProbe.muffleOpen*100.0f + 0.5f));
         }
     }
 
@@ -1585,7 +1589,7 @@ namespace sound
         dir.normalize();
 
         float mindot = cosf(clamp(soundacousticcone, 8.0f, 85.0f)*RAD),
-              weights = 0, blocked = 0;
+              weights = 0, blocked = 0, pathOpen = 0;
         loopv(acousticProbe.rays)
         {
             AcousticRay &ray = acousticProbe.rays[i];
@@ -1593,16 +1597,23 @@ namespace sound
             if(dot <= mindot) continue;
             float w = (dot - mindot)/(1.0f - mindot);
             w *= w;
-            float b = ray.dist + 2.0f < dist ? clamp((dist - ray.dist)/max(dist, 1.0f), 0.0f, 1.0f) : 0.0f;
+            float rayOpenToSource = ray.dist + 2.0f < dist ? clamp(ray.dist/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f,
+                  b = 1.0f - rayOpenToSource;
             weights += w;
             blocked += b*w;
+            pathOpen += rayOpenToSource*w;
             ray.influence = max(ray.influence, b*w);
         }
         if(weights <= 0) return;
 
         float occlusion = clamp(powf(blocked/weights, 0.75f)*soundacousticocclusion, 0.0f, 1.0f);
+        float directionalOpen = clamp(pathOpen/weights, 0.0f, 1.0f),
+              muffleOpen = clamp(directionalOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f),
+              closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
+              openGainHF = max(closedGainHF, 0.5f),
+              effectiveMuffleGainHF = closedGainHF + (openGainHF - closedGainHF)*muffleOpen;
         volf *= 1.0f - occlusion*(1.0f - soundacousticblockgain);
-        gainhf *= 1.0f - occlusion*(1.0f - soundacousticmufflegainhf);
+        gainhf *= 1.0f - occlusion*(1.0f - effectiveMuffleGainHF);
         reverbSend = max(reverbSend, clamp((acousticProbe.reverbGain*(0.35f + 0.65f*occlusion))*soundacousticreverb, 0.0f, 1.0f));
     }
 
