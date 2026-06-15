@@ -197,7 +197,15 @@ namespace sound
         extentity *ent;
         int radius, volume, targetVolume, pan, flags, expire;
         int fadeStart, fadeEnd, fadeFrom;
-        float gainhf, targetGainHF, reverbGainHF, targetReverbGainHF, reverbSend, targetReverbSend;
+        float gainhf, targetGainHF;
+        float reverbGainHF, targetReverbGainHF;
+        float reverbSend, targetReverbSend;
+
+        float smoothGainHF;
+        float smoothReverbGainHF;
+        float smoothReverbSend;
+        int acousticLastMillis;
+
         bool dirty, stopping;
 
         SoundChannel(int id) : id(id), source(0), filter(0), reverbFilter(0) { reset(); }
@@ -222,6 +230,10 @@ namespace sound
             targetGainHF = 1.0f;
             reverbGainHF = -1.0f;
             targetReverbGainHF = 1.0f;
+            smoothGainHF = 1.0f;
+            smoothReverbGainHF = 1.0f;
+            smoothReverbSend = 0.0f;
+            acousticLastMillis = 0;
             reverbSend = -1.0f;
             targetReverbSend = 0.0f;
             dirty = false;
@@ -1073,7 +1085,11 @@ namespace sound
     FVARP(soundacousticblockgain, 0.05f, 0.30f, 1.0f);
     FVARP(soundacousticmufflegainhf, 0.02f, 0.2f, 1.0f);
     FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
-    SVARR(soundoutdoorreverb, "backyard");
+
+    SVARR(soundoutdoorreverb, "rollingplains");
+    FVAR(soundoutdoorreverbgain, 0.0f, 0.9f, 3.0f);
+    FVAR(soundoutdoorreflectiongain, 0.0f, 0.2f, 4.0f);
+    FVAR(soundoutdoorlategain, 0.0f, 1.25f, 3.0f);
 
     static const float SoundUnitsPerMeter = 5.0f;
     static const float SoundLoudnessFrequency = 1000.0f;
@@ -1252,6 +1268,47 @@ namespace sound
     {
         if(soundacousticsmooth <= 0) return 1.0f;
         return clamp(elapsed/float(soundacousticsmooth), 0.0f, 1.0f);
+    }
+
+    static float acousticExpSmooth(float current, float target, int elapsed, float milliseconds)
+    {
+        if(milliseconds <= 0.0f) return target;
+        float k = clamp(1.0f - expf(-elapsed / milliseconds), 0.0f, 1.0f);
+        return current + (target - current)*k;
+    }
+
+    static void smoothChannelAcoustics(SoundChannel &chan, float &gainhf, float &reverbSend, float &reverbGainHF)
+    {
+        int now = totalmillis;
+        if(!chan.acousticLastMillis)
+        {
+            chan.acousticLastMillis = now;
+            chan.smoothGainHF = gainhf;
+            chan.smoothReverbSend = reverbSend;
+            chan.smoothReverbGainHF = reverbGainHF;
+            return;
+        }
+
+        int elapsed = max(now - chan.acousticLastMillis, 1);
+        chan.acousticLastMillis = now;
+
+        bool mapsound = chan.ent || (chan.flags&SND_MAP);
+
+        // if going more muffled, react reasonably fast
+        // if going clearer, release slower to avoid OCCLUDED -> CRYSTAL CLEAR pop
+        float muffleMs = gainhf < chan.smoothGainHF ? 180.0f : (mapsound ? 950.0f : 520.0f);
+
+        //reverb should move slower than muffling, especially for looping map sounds
+        float sendMs = mapsound ? 1100.0f : 650.0f;
+        float sendHfMs = mapsound ? 850.0f : 500.0f;
+
+        chan.smoothGainHF = acousticExpSmooth(chan.smoothGainHF, gainhf, elapsed, muffleMs);
+        chan.smoothReverbSend = acousticExpSmooth(chan.smoothReverbSend, reverbSend, elapsed, sendMs);
+        chan.smoothReverbGainHF = acousticExpSmooth(chan.smoothReverbGainHF, reverbGainHF, elapsed, sendHfMs);
+
+        gainhf = chan.smoothGainHF;
+        reverbSend = chan.smoothReverbSend;
+        reverbGainHF = chan.smoothReverbGainHF;
     }
 
     static void resizeAcousticProbe(int rays)
@@ -1460,7 +1517,7 @@ namespace sound
         // closed ceiling prevents full outdoor.
         if(acousticProbe.ceilingopen < 0.25f) outdoorblend = min(outdoorblend, 0.35f);
 
-        float indoorMask = 1.0f - outdoorblend*0.88f;
+        float indoorMask = clamp(1.0f - outdoorblend*0.94f, 0.04f, 1.0f);
         float wallOutdoorReflection = acousticProbe.closewall * outdoorblend;
 
         ReverbShape indoor =
@@ -1481,11 +1538,62 @@ namespace sound
         ReverbShape outdoor = outdoorReverbShape();
 
         // outdoor reverb should stay subtle. Wall nearby adds early reflection, not indoor soup
-        outdoor.gain = clamp(outdoor.gain*(0.18f + outdoorblend*0.55f + wallOutdoorReflection*0.12f)*envgain, 0.0f, 1.0f);
+        outdoor.gain = clamp(
+            outdoor.gain *
+            (0.28f + outdoorblend*0.72f + wallOutdoorReflection*0.22f + acousticProbe.corridor*0.10f) *
+            envgain *
+            soundoutdoorreverbgain,
+            0.0f,
+            1.0f
+        );
+
+        outdoor.reflectiongain = clamp(
+            outdoor.reflectiongain *
+            (0.38f + acousticProbe.farwall*0.65f + wallOutdoorReflection*1.45f + acousticProbe.corridor*0.28f) *
+            soundoutdoorreflectiongain,
+            0.0f,
+            2.2f
+        );
+
+        outdoor.lategain = clamp(
+            outdoor.lategain *
+            (0.48f + outdoorblend*0.62f + acousticProbe.corridor*0.22f + acousticProbe.farwall*0.18f) *
+            soundoutdoorlategain,
+            0.0f,
+            4.0f
+        );
         outdoor.reflectiongain = clamp(outdoor.reflectiongain*(0.25f + acousticProbe.farwall*0.45f + wallOutdoorReflection*0.95f), 0.0f, 1.0f);
         outdoor.lategain = clamp(outdoor.lategain*(0.35f + outdoorblend*0.45f + acousticProbe.corridor*0.12f), 0.0f, 3.0f);
 
         ReverbShape target = blendShapes(indoor, outdoor, outdoorblend);
+
+        // if we are clearly outdoors, indoor reverb must not dominate
+        if(outdoorblend > 0.55f)
+        {
+            float kill = clamp((outdoorblend - 0.55f)/0.45f, 0.0f, 1.0f);
+
+            // suppress indoor room tail, but do not murder outdoor space
+            target.gain *= 1.0f - kill*0.25f;
+            target.lategain *= 1.0f - kill*0.35f;
+
+            // density/diffusion are the real "indoor soup" offenders
+            target.density *= 1.0f - kill*0.50f;
+            target.diffusion *= 1.0f - kill*0.32f;
+
+            // outdoor can have some tail, especially streets/courtyards/canyons, but do not let it become enclosed-room decay.
+            target.decay = min(target.decay, 1.85f + acousticProbe.farwall*0.65f + acousticProbe.corridor*0.45f);
+
+            // preserve strong early reflections outdoors near walls
+            target.reflectiongain = max(
+                target.reflectiongain,
+                wallOutdoorReflection*0.22f*soundoutdoorreflectiongain
+            );
+
+            target.lategain = max(
+                target.lategain,
+                outdoorblend*(0.28f + acousticProbe.farwall*0.22f + acousticProbe.corridor*0.18f)*soundoutdoorlategain
+            );
+        }
 
         // extra safety: if sky is open, do not allow full indoor room behavior
         if(outdoorblend > 0.65f)
@@ -1601,18 +1709,69 @@ namespace sound
         loopv(acousticProbe.rays) acousticProbe.rays[i].influence = 0.0f;
     }
 
+    static float acousticOutdoorBlend()
+    {
+        if(!soundacoustics) return 0.0f;
+
+        float outdoor = clamp((acousticProbe.outdoor - 0.35f)/0.50f, 0.0f, 1.0f);
+
+        // open ceiling should dominate. A nearby wall should not make us indoor
+        if(acousticProbe.ceilingopen > 0.70f) outdoor = max(outdoor, 0.80f);
+        if(acousticProbe.ceilingopen > 0.85f) outdoor = max(outdoor, 0.92f);
+
+        if(acousticProbe.ceilingopen < 0.25f) outdoor = min(outdoor, 0.35f);// closed ceiling prevents full outdoor
+
+        return clamp(outdoor, 0.0f, 1.0f);
+    }
+
+    static float acousticIndoorReverbMask()
+    {
+        float outdoor = acousticOutdoorBlend();
+        return clamp(1.0f - outdoor*0.92f, 0.06f, 1.0f); // strong suppression: outdoor should kill indoor room reverb hard
+    }
+
     static float acousticBaseReverbSend()
     {
         if(!soundacoustics) return 0.0f;
-        return clamp((acousticProbe.reverbGain*0.82f + acousticProbe.reflection*0.18f +
-                      acousticProbe.corridor*0.12f + acousticProbe.outdoor*0.14f)*soundacousticreverb, 0.0f, 1.0f);
+
+        float outdoor = acousticOutdoorBlend();
+        float indoorMask = acousticIndoorReverbMask();
+
+        // indoor room send. Still heavily reduced outdoors
+        float indoorSend =
+            (acousticProbe.reverbGain*0.82f +
+             acousticProbe.reflection*0.12f +
+             acousticProbe.corridor*0.10f) * indoorMask;
+
+        // outdoor acoustic presence
+        float outdoorSend =
+            outdoor * (
+                0.075f +
+                acousticProbe.closewall*0.090f +
+                acousticProbe.farwall*0.060f +
+                acousticProbe.corridor*0.055f +
+                acousticProbe.reflection*0.045f
+            ) * soundoutdoorreverbgain;
+
+        return clamp((indoorSend + outdoorSend)*soundacousticreverb, 0.0f, 1.0f);
     }
 
     static float acousticBaseReverbGainHF()
     {
         if(!soundacoustics) return 1.0f;
-        return clamp(0.58f + acousticProbe.openness*0.28f + acousticProbe.outdoor*0.10f -
-                     acousticProbe.closewall*0.18f, 0.32f, 1.0f);
+
+        float outdoor = acousticOutdoorBlend();
+
+        // outdoors should stay brighter than indoor muffled reverb
+        // near wall can darken it slightly, but not like a closed room
+        return clamp(
+            0.60f +
+            acousticProbe.openness*0.22f +
+            outdoor*0.24f -
+            acousticProbe.closewall*(outdoor > 0.65f ? 0.035f : 0.16f),
+            0.40f,
+            1.0f
+        );
     }
 
     static void acousticListenerSource(float &reverbSend, float &reverbGainHF)
@@ -1716,6 +1875,7 @@ namespace sound
         }
         else acousticListenerSource(reverbSend, reverbGainHF);
         if(!efxReverb) { reverbSend = 0.0f; reverbGainHF = 1.0f; }
+        smoothChannelAcoustics(chan, gainhf, reverbSend, reverbGainHF);
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
         if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f &&
