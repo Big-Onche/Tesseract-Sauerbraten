@@ -2543,6 +2543,9 @@ void gl_drawview()
         GLERROR;
     }
 
+    rendersounddebug();
+    GLERROR;
+
     rendervolumetric();
     GLERROR;
 

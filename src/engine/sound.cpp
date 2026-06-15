@@ -4,6 +4,7 @@
 #include "AL/al.h"
 #include "AL/alc.h"
 #include "AL/efx.h"
+#include "AL/efx-presets.h"
 #include "sndfile.h"
 
 extern vec hitsurface;
@@ -1040,16 +1041,16 @@ namespace sound
 
     VARP(soundacoustics, 0, 0, 1);
     VARP(soundacousticrays, 4, 32, 128);
-    VARP(soundacousticinterval, 20, 100, 1000);
+    VARP(soundacousticinterval, 20, 50, 1000);
     VARP(soundacousticmaxrays, 1, 8, 32);
     VARP(soundacousticbounces, 0, 1, 4);
-    VARP(soundacousticsmooth, 0, 300, 2000);
-    VARP(debugsoundacoustics, 0, 0, 1);
-    FVARP(soundacousticrange, 4.0f, 512.0f, 1024.0f);
-    FVARP(soundacousticcone, 8.0f, 38.0f, 85.0f);
-    FVARP(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
-    FVARP(soundacousticblockgain, 0.05f, 0.30f, 1.0f);
-    FVARP(soundacousticmufflegainhf, 0.02f, 0.2f, 1.0f);
+    VAR(soundacousticsmooth, 0, 150, 2000);
+    VAR(debugsoundacoustics, 0, 0, 1);
+    FVAR(soundacousticrange, 4.0f, 512.0f, 1024.0f);
+    FVAR(soundacousticcone, 8.0f, 38.0f, 85.0f);
+    FVAR(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
+    FVAR(soundacousticblockgain, 0.05f, 0.7f, 1.0f);
+    FVAR(soundacousticmufflegainhf, 0.02f, 0.1f, 1.0f);
     FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
 
     static const float SoundUnitsPerMeter = 5.0f;
@@ -1064,6 +1065,143 @@ namespace sound
     static float metersToUnits(float meters)
     {
         return max(meters, 0.0f)*SoundUnitsPerMeter;
+    }
+
+    enum
+    {
+        AP_SMALLROOM = 0,
+        AP_HALL,
+        AP_CORRIDOR,
+        AP_CAVE,
+        AP_OPENOUTDOOR,
+        AP_COURTYARD,
+        AP_STREET,
+        AP_CANYON,
+        AP_NUM
+    };
+
+    struct AcousticPreset
+    {
+        const char *name;
+        bool outdoor;
+        EFXEAXREVERBPROPERTIES efx;
+    };
+
+    static const AcousticPreset acousticPresets[AP_NUM] =
+    {
+        { "small_room", false, EFX_REVERB_PRESET_CASTLE_SMALLROOM },
+        { "hall", false, EFX_REVERB_PRESET_CASTLE_HALL },
+        { "corridor", false, EFX_REVERB_PRESET_STONECORRIDOR },
+        { "cave", false, EFX_REVERB_PRESET_CAVE },
+        { "open_outdoor", true, EFX_REVERB_PRESET_OUTDOORS_ROLLINGPLAINS },
+        { "courtyard", true, EFX_REVERB_PRESET_CASTLE_COURTYARD },
+        { "street", true, EFX_REVERB_PRESET_CITY_STREETS },
+        { "canyon", true, EFX_REVERB_PRESET_OUTDOORS_DEEPCANYON }
+    };
+
+    struct AcousticChoice
+    {
+        int first, second;
+        float firstWeight, secondWeight;
+
+        AcousticChoice() : first(0), second(0), firstWeight(1), secondWeight(0) {}
+    };
+
+    static float rampfactor(float x, float low, float high)
+    {
+        if(high <= low) return x >= high ? 1.0f : 0.0f;
+        return clamp((x - low)/(high - low), 0.0f, 1.0f);
+    }
+
+    static float smoothramp(float x, float low, float high)
+    {
+        float t = rampfactor(x, low, high);
+        return t*t*(3.0f - 2.0f*t);
+    }
+
+    static float acousticPercentile(vector<float> &values, float p, float fallback)
+    {
+        if(values.empty()) return fallback;
+        values.sort();
+        float pos = clamp(p, 0.0f, 1.0f)*(values.length() - 1),
+              frac = pos - floorf(pos);
+        int lo = clamp(int(pos), 0, values.length() - 1),
+            hi = min(lo + 1, values.length() - 1);
+        return values[lo] + (values[hi] - values[lo])*frac;
+    }
+
+    static EFXEAXREVERBPROPERTIES blendEfx(const EFXEAXREVERBPROPERTIES &a, const EFXEAXREVERBPROPERTIES &b, float t)
+    {
+        t = clamp(t, 0.0f, 1.0f);
+        EFXEAXREVERBPROPERTIES out;
+        #define BLEND_EFX_FIELD(name) out.name = a.name + (b.name - a.name)*t
+        BLEND_EFX_FIELD(flDensity);
+        BLEND_EFX_FIELD(flDiffusion);
+        BLEND_EFX_FIELD(flGain);
+        BLEND_EFX_FIELD(flGainHF);
+        BLEND_EFX_FIELD(flGainLF);
+        BLEND_EFX_FIELD(flDecayTime);
+        BLEND_EFX_FIELD(flDecayHFRatio);
+        BLEND_EFX_FIELD(flDecayLFRatio);
+        BLEND_EFX_FIELD(flReflectionsGain);
+        BLEND_EFX_FIELD(flReflectionsDelay);
+        loopi(3) BLEND_EFX_FIELD(flReflectionsPan[i]);
+        BLEND_EFX_FIELD(flLateReverbGain);
+        BLEND_EFX_FIELD(flLateReverbDelay);
+        loopi(3) BLEND_EFX_FIELD(flLateReverbPan[i]);
+        BLEND_EFX_FIELD(flEchoTime);
+        BLEND_EFX_FIELD(flEchoDepth);
+        BLEND_EFX_FIELD(flModulationTime);
+        BLEND_EFX_FIELD(flModulationDepth);
+        BLEND_EFX_FIELD(flAirAbsorptionGainHF);
+        BLEND_EFX_FIELD(flHFReference);
+        BLEND_EFX_FIELD(flLFReference);
+        BLEND_EFX_FIELD(flRoomRolloffFactor);
+        #undef BLEND_EFX_FIELD
+        out.iDecayHFLimit = t < 0.5f ? a.iDecayHFLimit : b.iDecayHFLimit;
+        return out;
+    }
+
+    static AcousticChoice chooseAcousticPresets(const float *scores, bool outdoor, int fallback)
+    {
+        AcousticChoice choice;
+        choice.first = fallback;
+        choice.second = fallback;
+        float best = -1.0f, next = -1.0f;
+        loopi(AP_NUM) if(acousticPresets[i].outdoor == outdoor)
+        {
+            float score = scores[i];
+            if(score > best)
+            {
+                next = best;
+                choice.second = choice.first;
+                best = score;
+                choice.first = i;
+            }
+            else if(score > next)
+            {
+                next = score;
+                choice.second = i;
+            }
+        }
+        if(best <= 1e-4f)
+        {
+            choice.first = choice.second = fallback;
+            choice.firstWeight = 1.0f;
+            choice.secondWeight = 0.0f;
+            return choice;
+        }
+        if(next <= 1e-4f || choice.second == choice.first)
+        {
+            choice.second = choice.first;
+            choice.firstWeight = 1.0f;
+            choice.secondWeight = 0.0f;
+            return choice;
+        }
+        float total = best + next;
+        choice.firstWeight = best/total;
+        choice.secondWeight = next/total;
+        return choice;
     }
 
     static float airAbsorptionDbPerMeter(float frequency)
@@ -1118,14 +1256,23 @@ namespace sound
     {
         vector<AcousticRay> rays;
         vec origin;
-        int lastmillis, nextRay;
-        float budget, openness, walldist, reverbGain, reverbDecay, reflection;
+        int lastmillis, nextRay, lastDebugMillis;
+        float budget, openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, scores[AP_NUM];
+        EFXEAXREVERBPROPERTIES reverbShape;
+        AcousticChoice indoorChoice, outdoorChoice;
 
-        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0) {}
+        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), lastDebugMillis(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1)
+        {
+            loopi(AP_NUM) scores[i] = 0.0f;
+            EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
+            reverbShape = generic;
+            indoorChoice.first = indoorChoice.second = AP_HALL;
+            outdoorChoice.first = outdoorChoice.second = AP_OPENOUTDOOR;
+        }
     };
 
     static AcousticProbe acousticProbe;
-    static float currentReverbGain = -1.0f, currentReverbDecay = -1.0f, currentReverbReflection = -1.0f;
+    static float currentReverbGain = -1.0f, currentReverbDecay = -1.0f, currentReverbReflection = -1.0f, currentReverbDensity = -1.0f, currentReverbGainHF = -1.0f, currentReverbLateGain = -1.0f;
 
     static float smoothstepfactor(int elapsed)
     {
@@ -1180,51 +1327,216 @@ namespace sound
     static void updateAcousticStats(int elapsed, float range)
     {
         if(acousticProbe.rays.empty()) return;
-        float open = 0, walldist = 0, hits = 0;
+        float nearDist = metersToUnits(6.0f),
+              farDist = metersToUnits(24.0f),
+              maxHitDist = range*0.98f,
+              open = 0, walldist = 0, hits = 0,
+              skyOpen = 1.0f, ceilingDist = 0,
+              skyCount = 0, skyOpenCount = 0, ceilingHits = 0,
+              horizontalCount = 0, horizontalHits = 0, horizontalNear = 0, horizontalFar = 0, horizontalFarHits = 0, horizontalDist = 0, horizontalDist2 = 0,
+              downCount = 0, downOpen = 0;
+        vector<float> hitDistances, horizontalDistances;
+
+        struct AcousticSector
+        {
+            int count, hits;
+            float dist, nearHits, farHits;
+
+            AcousticSector() : count(0), hits(0), dist(0), nearHits(0), farHits(0) {}
+        } sectors[8];
+
         loopv(acousticProbe.rays)
         {
             const AcousticRay &ray = acousticProbe.rays[i];
+            bool hit = ray.dist < maxHitDist;
             open += ray.open;
             walldist += ray.dist;
-            if(ray.dist < range*0.98f) hits += 1.0f;
+            if(hit)
+            {
+                hits += 1.0f;
+                hitDistances.add(unitsToMeters(ray.dist));
+            }
+            if(ray.dir.z > 0.65f)
+            {
+                skyCount += 1.0f;
+                if(!hit) skyOpenCount += 1.0f;
+                else
+                {
+                    ceilingHits += 1.0f;
+                    ceilingDist += ray.dist;
+                }
+            }
+            else if(fabs(ray.dir.z) < 0.30f)
+            {
+                horizontalCount += 1.0f;
+                horizontalDist += ray.dist;
+                horizontalDist2 += ray.dist*ray.dist;
+                horizontalDistances.add(unitsToMeters(ray.dist));
+                if(hit)
+                {
+                    horizontalHits += 1.0f;
+                    if(ray.dist <= nearDist) horizontalNear += 1.0f;
+                    if(ray.dist >= farDist) horizontalFarHits += 1.0f;
+                }
+                if(ray.dist >= farDist) horizontalFar += 1.0f;
+
+                float yaw = atan2f(ray.dir.y, ray.dir.x);
+                int sector = clamp(int(floorf((yaw + PI)*(8.0f/(2.0f*PI)))), 0, 7);
+                sectors[sector].count++;
+                sectors[sector].dist += ray.dist;
+                if(hit)
+                {
+                    sectors[sector].hits++;
+                    if(ray.dist <= nearDist) sectors[sector].nearHits += 1.0f;
+                    if(ray.dist >= farDist) sectors[sector].farHits += 1.0f;
+                }
+            }
+            else if(ray.dir.z < -0.35f)
+            {
+                downCount += 1.0f;
+                if(!hit) downOpen += 1.0f;
+            }
         }
         float invrays = 1.0f/acousticProbe.rays.length();
         open *= invrays;
         walldist *= invrays;
         hits *= invrays;
+        if(skyCount > 0) skyOpen = skyOpenCount/skyCount;
+        if(ceilingHits > 0) ceilingDist /= ceilingHits;
 
-        float meters = unitsToMeters(walldist),
-              enclosed = clamp(1.0f - open, 0.0f, 1.0f),
-              reverb = clamp((enclosed*0.75f + hits*0.20f)*(0.45f + min(meters/18.0f, 1.0f)*0.55f), 0.0f, 1.0f),
-              decay = clamp(0.18f + meters*0.09f + enclosed*1.4f, 0.18f, 3.6f),
-              reflection = clamp(hits*(1.0f - open*0.45f), 0.0f, 1.0f);
-        float k = smoothstepfactor(elapsed);
+        float horizontalHitRatio = horizontalCount > 0 ? horizontalHits/horizontalCount : hits,
+              horizontalNearRatio = horizontalCount > 0 ? horizontalNear/horizontalCount : 0.0f,
+              horizontalFarRatio = horizontalCount > 0 ? horizontalFar/horizontalCount : open,
+              horizontalFarHitRatio = horizontalCount > 0 ? horizontalFarHits/horizontalCount : 0.0f,
+              horizontalOpenRatio = max(horizontalFarRatio - horizontalFarHitRatio, 0.0f),
+              horizontalAvgDist = horizontalCount > 0 ? horizontalDist/horizontalCount : walldist,
+              horizontalVariance = 0.0f,
+              downOpenRatio = downCount > 0 ? downOpen/downCount : 0.0f;
+        if(horizontalCount > 1)
+        {
+            float mean = horizontalAvgDist;
+            horizontalVariance = max(horizontalDist2/horizontalCount - mean*mean, 0.0f);
+        }
+
+        float avgHitDistance = hitDistances.empty() ? unitsToMeters(walldist) : 0.0f;
+        loopv(hitDistances) avgHitDistance += hitDistances[i];
+        if(!hitDistances.empty()) avgHitDistance /= hitDistances.length();
+        float nearPercentile = acousticPercentile(hitDistances, 0.25f, avgHitDistance),
+              medianHitDistance = acousticPercentile(hitDistances, 0.50f, avgHitDistance),
+              farPercentile = acousticPercentile(hitDistances, 0.75f, avgHitDistance),
+              medianHorizontalDistance = acousticPercentile(horizontalDistances, 0.50f, unitsToMeters(horizontalAvgDist)),
+              varianceScore = clamp(sqrtf(horizontalVariance)/max(horizontalAvgDist, 1.0f), 0.0f, 1.0f),
+              percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
+              irregularityScore = clamp(varianceScore*0.65f + percentileSpread*0.35f, 0.0f, 1.0f);
+
+        float sectorOpen[8];
+        loopi(8) sectorOpen[i] = sectors[i].count ? clamp(sectors[i].dist/(sectors[i].count*range), 0.0f, 1.0f) : open;
+        float sectorCorridor = 0.0f;
+        loopi(4)
+        {
+            int a = i, b = i + 4, side1 = (i + 2)&7, side2 = (i + 6)&7;
+            float alongFar = min(sectorOpen[a], sectorOpen[b]),
+                  sideNear = 1.0f - 0.5f*(sectorOpen[side1] + sectorOpen[side2]);
+            sectorCorridor = max(sectorCorridor, clamp(alongFar*sideNear, 0.0f, 1.0f));
+        }
+
+        float corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), sectorCorridor), 0.0f, 1.0f),
+              outdoorRaw = smoothramp(skyOpen, 0.35f, 0.70f),
+              indoorRaw = 1.0f - outdoorRaw,
+              ceilingOpen = skyOpen,
+              ceilingBlocked = 1.0f - ceilingOpen,
+              fill = clamp(horizontalNearRatio + horizontalHitRatio - horizontalFarHitRatio, 0.0f, 1.0f),
+              roomSizeScore = 1.0f - smoothramp(medianHorizontalDistance, 6.0f, 24.0f);
+
+        float rawScores[AP_NUM];
+        rawScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*0.80f;
+        rawScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.55f)*(1.0f - irregularityScore*0.35f)*1.10f;
+        rawScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.20f;
+        rawScores[AP_CAVE] = indoorRaw*(0.30f + hits*0.70f)*(0.30f + irregularityScore*0.90f)*(0.35f + horizontalFarHitRatio*0.65f)*(0.45f + ceilingBlocked*0.55f)*1.25f;
+        rawScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f);
+        rawScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f);
+        rawScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*corridorScore;
+        rawScores[AP_CANYON] = outdoorRaw*skyOpen*(0.25f + horizontalFarHitRatio*0.75f)*(0.35f + irregularityScore*0.65f)*(0.70f + downOpenRatio*0.30f);
+
+        if(indoorRaw > 0.2f && rawScores[AP_SMALLROOM] + rawScores[AP_HALL] + rawScores[AP_CORRIDOR] + rawScores[AP_CAVE] <= 1e-4f)
+            rawScores[medianHorizontalDistance < 10.0f ? AP_SMALLROOM : AP_HALL] = indoorRaw;
+        if(outdoorRaw > 0.2f && rawScores[AP_OPENOUTDOOR] + rawScores[AP_COURTYARD] + rawScores[AP_STREET] + rawScores[AP_CANYON] <= 1e-4f)
+            rawScores[AP_OPENOUTDOOR] = outdoorRaw;
+
+        float k = acousticProbe.walldist <= 0 ? 1.0f : smoothstepfactor(elapsed);
+        loopi(AP_NUM)
+        {
+            float scorek = k;
+            if(rawScores[i] > acousticProbe.scores[i])
+                scorek = acousticPresets[i].outdoor ? max(k, clamp(elapsed/120.0f, 0.0f, 1.0f)) : k*0.70f;
+            acousticProbe.scores[i] += (rawScores[i] - acousticProbe.scores[i])*scorek;
+        }
+
+        float ratiok = outdoorRaw > acousticProbe.outdoorRatio ? max(k, clamp(elapsed/120.0f, 0.0f, 1.0f)) : k;
+        acousticProbe.outdoorRatio += (outdoorRaw - acousticProbe.outdoorRatio)*ratiok;
+        acousticProbe.indoorChoice = chooseAcousticPresets(acousticProbe.scores, false, AP_HALL);
+        acousticProbe.outdoorChoice = chooseAcousticPresets(acousticProbe.scores, true, AP_OPENOUTDOOR);
+
+        EFXEAXREVERBPROPERTIES indoorShape = blendEfx(acousticPresets[acousticProbe.indoorChoice.first].efx, acousticPresets[acousticProbe.indoorChoice.second].efx, acousticProbe.indoorChoice.secondWeight),
+                                outdoorShape = blendEfx(acousticPresets[acousticProbe.outdoorChoice.first].efx, acousticPresets[acousticProbe.outdoorChoice.second].efx, acousticProbe.outdoorChoice.secondWeight),
+                                finalShape = blendEfx(indoorShape, outdoorShape, acousticProbe.outdoorRatio);
+
+        float indoorStrength = (1.0f - acousticProbe.outdoorRatio)*clamp(0.25f + hits*0.35f + horizontalFarHitRatio*0.25f + fill*0.15f, 0.0f, 1.0f),
+              outdoorStrength = acousticProbe.outdoorRatio*clamp(0.07f + horizontalNearRatio*0.35f + horizontalFarHitRatio*0.30f + corridorScore*0.25f, 0.04f, 0.75f),
+              reverb = clamp(indoorStrength + outdoorStrength, 0.0f, 1.0f),
+              decay = finalShape.flDecayTime,
+              reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f);
         acousticProbe.openness += (open - acousticProbe.openness)*k;
         acousticProbe.walldist += (walldist - acousticProbe.walldist)*k;
         acousticProbe.reverbGain += (reverb - acousticProbe.reverbGain)*k;
         acousticProbe.reverbDecay += (decay - acousticProbe.reverbDecay)*k;
         acousticProbe.reflection += (reflection - acousticProbe.reflection)*k;
+        acousticProbe.reverbShape = finalShape;
+
+        if(debugsoundacoustics && totalmillis - acousticProbe.lastDebugMillis >= 1000)
+        {
+            acousticProbe.lastDebugMillis = totalmillis;
+            conoutf(CON_DEBUG, "sound acoustics: indoor %s %d%% / %s %d%%, outdoor %s %d%% / %s %d%%, outdoor ratio %d%%, sky %d%%, ceiling %.1fm, median %.1fm, irregular %d%%, corridor %d%%",
+                acousticPresets[acousticProbe.indoorChoice.first].name, int(acousticProbe.indoorChoice.firstWeight*100.0f + 0.5f),
+                acousticPresets[acousticProbe.indoorChoice.second].name, int(acousticProbe.indoorChoice.secondWeight*100.0f + 0.5f),
+                acousticPresets[acousticProbe.outdoorChoice.first].name, int(acousticProbe.outdoorChoice.firstWeight*100.0f + 0.5f),
+                acousticPresets[acousticProbe.outdoorChoice.second].name, int(acousticProbe.outdoorChoice.secondWeight*100.0f + 0.5f),
+                int(acousticProbe.outdoorRatio*100.0f + 0.5f), int(skyOpen*100.0f + 0.5f), unitsToMeters(ceilingDist), medianHitDistance, int(irregularityScore*100.0f + 0.5f), int(corridorScore*100.0f + 0.5f));
+        }
     }
 
     static void updateEfxReverb()
     {
         if(!efxReverb || !efxReverbEffect || !efxReverbSlot) return;
-        float gain = soundacoustics ? clamp(acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : 0.0f,
+        const EFXEAXREVERBPROPERTIES &shape = acousticProbe.reverbShape;
+        float gain = soundacoustics ? clamp(shape.flGain*acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : 0.0f,
               decay = clamp(acousticProbe.reverbDecay, 0.12f, 4.0f),
-              reflection = clamp(acousticProbe.reflection, 0.0f, 1.0f);
-        if(fabs(gain - currentReverbGain) < 0.015f && fabs(decay - currentReverbDecay) < 0.05f && fabs(reflection - currentReverbReflection) < 0.03f) return;
+              reflection = clamp(shape.flReflectionsGain*(0.35f + acousticProbe.reflection*0.65f), 0.0f, 3.16f),
+              density = clamp(shape.flDensity, 0.0f, 1.0f),
+              gainhf = clamp(shape.flGainHF, 0.0f, 1.0f),
+              lateGain = clamp(shape.flLateReverbGain, 0.0f, 10.0f);
+        if(fabs(gain - currentReverbGain) < 0.015f && fabs(decay - currentReverbDecay) < 0.05f && fabs(reflection - currentReverbReflection) < 0.03f &&
+           fabs(density - currentReverbDensity) < 0.03f && fabs(gainhf - currentReverbGainHF) < 0.03f && fabs(lateGain - currentReverbLateGain) < 0.05f) return;
 
         currentReverbGain = gain;
         currentReverbDecay = decay;
         currentReverbReflection = reflection;
-        alEffectf_(efxReverbEffect, AL_REVERB_DENSITY, clamp(0.55f + reflection*0.4f, 0.0f, 1.0f));
-        alEffectf_(efxReverbEffect, AL_REVERB_DIFFUSION, clamp(0.45f + reflection*0.45f, 0.0f, 1.0f));
-        alEffectf_(efxReverbEffect, AL_REVERB_GAIN, clamp(gain*0.28f, 0.0f, 1.0f));
-        alEffectf_(efxReverbEffect, AL_REVERB_GAINHF, clamp(0.45f + acousticProbe.openness*0.35f, 0.1f, 1.0f));
+        currentReverbDensity = density;
+        currentReverbGainHF = gainhf;
+        currentReverbLateGain = lateGain;
+        alEffectf_(efxReverbEffect, AL_REVERB_DENSITY, density);
+        alEffectf_(efxReverbEffect, AL_REVERB_DIFFUSION, clamp(shape.flDiffusion, 0.0f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_GAIN, gain);
+        alEffectf_(efxReverbEffect, AL_REVERB_GAINHF, gainhf);
         alEffectf_(efxReverbEffect, AL_REVERB_DECAY_TIME, decay);
-        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_HFRATIO, clamp(0.55f + acousticProbe.openness*0.35f, 0.1f, 2.0f));
-        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_GAIN, clamp(reflection*0.18f, 0.0f, 1.0f));
-        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_DELAY, clamp(unitsToMeters(acousticProbe.walldist)*0.003f, 0.005f, 0.08f));
+        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_HFRATIO, clamp(shape.flDecayHFRatio, 0.1f, 2.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_GAIN, reflection);
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_DELAY, clamp(shape.flReflectionsDelay, 0.0f, 0.3f));
+        alEffectf_(efxReverbEffect, AL_REVERB_LATE_REVERB_GAIN, lateGain);
+        alEffectf_(efxReverbEffect, AL_REVERB_LATE_REVERB_DELAY, clamp(shape.flLateReverbDelay, 0.0f, 0.1f));
+        alEffectf_(efxReverbEffect, AL_REVERB_AIR_ABSORPTION_GAINHF, clamp(shape.flAirAbsorptionGainHF, 0.892f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_ROOM_ROLLOFF_FACTOR, clamp(shape.flRoomRolloffFactor, 0.0f, 10.0f));
+        alEffecti_(efxReverbEffect, AL_REVERB_DECAY_HFLIMIT, shape.iDecayHFLimit ? AL_TRUE : AL_FALSE);
         alAuxiliaryEffectSloti_(efxReverbSlot, AL_EFFECTSLOT_EFFECT, efxReverbEffect);
         checkAl("OpenAL acoustic reverb update");
     }
@@ -1300,22 +1612,34 @@ namespace sound
         reverbSend = max(reverbSend, clamp(acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f));
     }
 
-    static int acousticDebugColor(float t)
+    static bvec acousticDebugColor(float t)
     {
         t = clamp(t, 0.0f, 1.0f);
         int r = int(255.0f*t + 0.5f),
             g = int(255.0f*(1.0f - max(t - 0.5f, 0.0f)*2.0f) + 0.5f);
-        return (r<<16) | (g<<8);
+        return bvec(r, g, 0);
     }
 
     static void drawAcousticsDebug()
     {
         if(!soundacoustics || !debugsoundacoustics || acousticProbe.rays.empty()) return;
+        ldrnotextureshader->set();
+        GLboolean cull = glIsEnabled(GL_CULL_FACE);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        gle::defvertex();
+        gle::defcolor(4, GL_UNSIGNED_BYTE);
+        gle::begin(GL_LINES, acousticProbe.rays.length()*2);
         loopv(acousticProbe.rays)
         {
             const AcousticRay &ray = acousticProbe.rays[i];
-            particle_flare(acousticProbe.origin, ray.hit, 16, PART_STREAK, acousticDebugColor(ray.influence), 0.12f);
+            bvec color = acousticDebugColor(ray.influence);
+            gle::attrib(acousticProbe.origin); gle::attrib(color, 180);
+            gle::attrib(ray.hit);              gle::attrib(color, 255);
         }
+        xtraverts += gle::end();
+        glDepthMask(GL_TRUE);
+        if(cull) glEnable(GL_CULL_FACE);
     }
 
     static bool soundInRange(const vec &loc)
@@ -1428,7 +1752,6 @@ namespace sound
             updateAcoustics();
             resetAcousticInfluence();
             syncChannels();
-            drawAcousticsDebug();
         }
         music.update();
     }
@@ -1664,6 +1987,7 @@ void clear_sound() { sound::cleanup(); }
 void clearmapsounds() { sound::clearMapSounds(); }
 void checkmapsounds() { sound::checkMapSounds(); }
 void updatesounds() { sound::update(); }
+void rendersounddebug() { sound::drawAcousticsDebug(); }
 void preloadsound(int n) { sound::preload(n); }
 void preloadmapsound(int n) { sound::preloadMap(n); }
 void preloadmapsounds() { sound::preloadMapSounds(); }

@@ -784,6 +784,7 @@ namespace sound
 extern void clearmapsounds();
 extern void checkmapsounds();
 extern void updatesounds();
+extern void rendersounddebug();
 extern void preloadmapsounds();
 
 extern void initmumble();
