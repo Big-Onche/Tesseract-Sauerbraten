@@ -567,20 +567,19 @@ namespace sound
         AudioFile audio;
         if(!audio.open(name)) return false;
 
-        ALenum format = alFormatForChannels(audio.info.channels);
-        if(!format)
+        if(audio.info.channels <= 0)
         {
             conoutf(CON_ERROR, "unsupported sample channel count: %d (%s)", audio.info.channels, name);
             return false;
         }
-        if(audio.info.frames <= 0 || audio.info.frames > sf_count_t(INT_MAX/(audio.info.channels*sizeof(short))))
+        if(audio.info.frames <= 0 || audio.info.frames > sf_count_t(INT_MAX/(audio.info.channels*sizeof(short))) || audio.info.frames > sf_count_t(INT_MAX/sizeof(short)))
         {
             conoutf(CON_ERROR, "invalid sample length: %s", name);
             return false;
         }
 
-        int samples = int(audio.info.frames*audio.info.channels);
-        short *pcm = new (false) short[samples];
+        int inputSamples = int(audio.info.frames*audio.info.channels);
+        short *pcm = new (false) short[inputSamples];
         if(!pcm)
         {
             conoutf(CON_ERROR, "could not allocate sample: %s", name);
@@ -595,17 +594,38 @@ namespace sound
             return false;
         }
 
+        int outputSamples = int(audio.info.frames);
+        short *mono = pcm;
+        if(audio.info.channels > 1)
+        {
+            mono = new (false) short[outputSamples];
+            if(!mono)
+            {
+                conoutf(CON_ERROR, "could not allocate mono sample: %s", name);
+                delete[] pcm;
+                return false;
+            }
+            loopi(outputSamples)
+            {
+                const short *frame = &pcm[i*audio.info.channels];
+                int sample = 0;
+                loopj(audio.info.channels) sample += frame[j];
+                mono[i] = short(sample/audio.info.channels);
+            }
+        }
+
         ALuint newBuffer = 0;
         alGenBuffers(1, &newBuffer);
         if(checkAl("alGenBuffers"))
         {
-            alBufferData(newBuffer, format, pcm, ALsizei(samples*sizeof(short)), ALsizei(audio.info.samplerate));
+            alBufferData(newBuffer, AL_FORMAT_MONO16, mono, ALsizei(outputSamples*sizeof(short)), ALsizei(audio.info.samplerate));
             if(!checkAl("alBufferData"))
             {
                 alDeleteBuffers(1, &newBuffer);
                 newBuffer = 0;
             }
         }
+        if(mono != pcm) delete[] mono;
         delete[] pcm;
         if(!newBuffer) return false;
         buffer = newBuffer;
