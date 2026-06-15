@@ -1046,12 +1046,31 @@ namespace sound
     void checkMapSounds()
     {
         const vector<extentity *> &ents = entities::getents();
+
         loopv(ents)
         {
             extentity &e = *ents[i];
-            if(e.type!=ET_SOUND) continue;
-            float maxdist = soundairattenuation && maxsounddistance > 0 ? metersToUnits(maxsounddistance) : e.attr2;
-            if((soundairattenuation && maxsounddistance <= 0) || camera1->o.dist(e.o) < maxdist)
+            if(e.type != ET_SOUND) continue;
+
+            float dist = camera1->o.dist(e.o);
+
+            // ET_SOUND attr2 is the mapper-authored radius, it must always be respected for map sounds
+            float mapradius = e.attr2 > 0 ? float(e.attr2) : 0.0f;
+
+            // global max sound distance is only a fallback/extra cap, never a replacement for map sound radius
+            float globalradius = soundairattenuation && maxsounddistance > 0
+                ? metersToUnits(maxsounddistance)
+                : 0.0f;
+
+            float maxdist = 0.0f;
+
+            if(mapradius > 0.0f && globalradius > 0.0f) maxdist = min(mapradius, globalradius);
+            else if(mapradius > 0.0f) maxdist = mapradius;
+            else if(globalradius > 0.0f) maxdist = globalradius;
+
+            bool inrange = maxdist <= 0.0f || dist < maxdist;
+
+            if(inrange)
             {
                 if(!(e.flags&EF_SOUND)) play(e.attr1, NULL, &e, SND_MAP, -1);
             }
@@ -1074,9 +1093,9 @@ namespace sound
     VARP(soundacoustics, 0, 0, 1);
     VARP(soundacousticrays, 4, 32, 128);
     VARP(soundacousticinterval, 20, 100, 1000);
-    VARP(soundacousticmaxrays, 1, 8, 32);
+    VAR(soundacousticmaxrays, 1, 10, 32);
     VARP(soundacousticbounces, 0, 1, 4);
-    VARP(soundacousticsmooth, 0, 900, 2000);
+    VAR(soundacousticsmooth, 0, 150, 2000);
     VAR(debugsoundacoustics, 0, 0, 1);
     FVARP(soundacousticrange, 4.0f, 64.0f, 1024.0f);
     VARP(soundreverbupdateinterval, 5, 10, 250);
