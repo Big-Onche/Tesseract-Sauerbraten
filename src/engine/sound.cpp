@@ -63,6 +63,13 @@ namespace sound
         }
     }
 
+    static short floatToShort(float sample, float scale)
+    {
+        float scaled = sample*scale;
+        int isample = scaled >= 0 ? int(scaled + 0.5f) : int(scaled - 0.5f);
+        return short(clamp(isample, -32768, 32767));
+    }
+
     static const char *alErrorName(ALenum error)
     {
         switch(error)
@@ -579,26 +586,26 @@ namespace sound
         }
 
         int inputSamples = int(audio.info.frames*audio.info.channels);
-        short *pcm = new (false) short[inputSamples];
+        float *pcm = new (false) float[inputSamples];
         if(!pcm)
         {
             conoutf(CON_ERROR, "could not allocate sample: %s", name);
             return false;
         }
 
-        sf_count_t frames = sf_readf_short(audio.handle, pcm, audio.info.frames);
+        sf_count_t frames = sf_readf_float(audio.handle, pcm, audio.info.frames);
         if(frames != audio.info.frames)
         {
-            conoutf(CON_ERROR, "short read while loading sample: %s", name);
+            conoutf(CON_ERROR, "incomplete read while loading sample: %s", name);
             delete[] pcm;
             return false;
         }
 
         int outputSamples = int(audio.info.frames);
-        short *mono = pcm;
+        float *mono = pcm;
         if(audio.info.channels > 1)
         {
-            mono = new (false) short[outputSamples];
+            mono = new (false) float[outputSamples];
             if(!mono)
             {
                 conoutf(CON_ERROR, "could not allocate mono sample: %s", name);
@@ -607,24 +614,39 @@ namespace sound
             }
             loopi(outputSamples)
             {
-                const short *frame = &pcm[i*audio.info.channels];
-                int sample = 0;
+                const float *frame = &pcm[i*audio.info.channels];
+                float sample = 0;
                 loopj(audio.info.channels) sample += frame[j];
-                mono[i] = short(sample/audio.info.channels);
+                mono[i] = sample/audio.info.channels;
             }
         }
+
+        float peak = 0;
+        loopi(outputSamples) peak = max(peak, float(fabs(mono[i])));
+        float scale = peak > 1.0f ? 32767.0f/peak : 32767.0f;
+
+        short *out = new (false) short[outputSamples];
+        if(!out)
+        {
+            conoutf(CON_ERROR, "could not allocate output sample: %s", name);
+            if(mono != pcm) delete[] mono;
+            delete[] pcm;
+            return false;
+        }
+        loopi(outputSamples) out[i] = floatToShort(mono[i], scale);
 
         ALuint newBuffer = 0;
         alGenBuffers(1, &newBuffer);
         if(checkAl("alGenBuffers"))
         {
-            alBufferData(newBuffer, AL_FORMAT_MONO16, mono, ALsizei(outputSamples*sizeof(short)), ALsizei(audio.info.samplerate));
+            alBufferData(newBuffer, AL_FORMAT_MONO16, out, ALsizei(outputSamples*sizeof(short)), ALsizei(audio.info.samplerate));
             if(!checkAl("alBufferData"))
             {
                 alDeleteBuffers(1, &newBuffer);
                 newBuffer = 0;
             }
         }
+        delete[] out;
         if(mono != pcm) delete[] mono;
         delete[] pcm;
         if(!newBuffer) return false;
