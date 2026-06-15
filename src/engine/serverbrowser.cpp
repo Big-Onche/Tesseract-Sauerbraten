@@ -594,22 +594,25 @@ ICOMMAND(servinfokeep, "i", (int *i), GETSERVERINFO_(*i, si, intret(si.keep ? 1 
 ICOMMAND(servinfomap, "i", (int *i), GETSERVERINFO(*i, si, result(si.map)));
 ICOMMAND(servinfoping, "i", (int *i), GETSERVERINFO(*i, si, intret(si.ping)));
 ICOMMAND(servinfonumplayers, "i", (int *i), GETSERVERINFO(*i, si, intret(si.numplayers)));
-ICOMMAND(servinfomaxplayers, "i", (int *i), GETSERVERINFO(*i, si, intret(si.attr[3]))); // attr[3] = maxplayers
+ICOMMAND(servinfomaxplayers, "i", (int *i), GETSERVERINFO(*i, si,
+{
+    intret(si.attr.inrange(3) ? si.attr[3] : 0); // attr[3] = maxplayers
+}));
 ICOMMAND(servinfoplayers, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
-        if(si.attr[3] <= 0) intret(si.numplayers);
+        if(!si.attr.inrange(3) || si.attr[3] <= 0) intret(si.numplayers);
         else result(tempformatstring(si.numplayers >= si.attr[3] ? "\f3%d/%d" : "%d/%d", si.numplayers, si.attr[3]));
     }));
 ICOMMAND(servinfoattr, "ii", (int *i, int *n), GETSERVERINFO(*i, si, { if(si.attr.inrange(*n)) intret(si.attr[*n]); }));
-ICOMMAND(servinfomode, "i", (int *i), GETSERVINFOATTR(*i, 1, mode, intret(mode)));
+ICOMMAND(servinfomode, "i", (int *i), GETSERVERINFO(*i, si, intret(si.attr.inrange(1) ? si.attr[1] : STARTGAMEMODE - 1)));
 ICOMMAND(servinfomodename, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
-        const char *name = server::modename(si.attr[1], NULL);
+        const char *name = si.attr.inrange(1) ? server::modename(si.attr[1], NULL) : NULL;
         if(name) result(name);
     }));
-ICOMMAND(servinfomastermode, "i", (int *i), GETSERVERINFO(*i, si, {if(si.attr.inrange(4)) intret(si.attr[4]); }));
+ICOMMAND(servinfomastermode, "i", (int *i), GETSERVERINFO(*i, si, intret(si.attr.inrange(4) ? si.attr[4] : MM_INVALID)));
 ICOMMAND(servinfomastermodename, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
@@ -635,8 +638,8 @@ ICOMMAND(servinfotime, "ii", (int *i, int *raw),
 ICOMMAND(servinfoicon, "i", (int *i),
     GETSERVERINFO(*i, si,
     {
-        int mm = si.attr.inrange(2) ? si.attr[2] : MM_INVALID;
-        result(si.attr[3] > 0 && si.numplayers >= si.attr[3] ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
+        int mm = si.attr.inrange(4) ? si.attr[4] : MM_INVALID;
+        result(si.attr.inrange(3) && si.attr[3] > 0 && si.numplayers >= si.attr[3] ? "serverfull" : game::mastermodeicon(mm, "serverunk"));
     }
     ));
 ICOMMAND(connectservinfo, "is", (int *i, char *pw), GETSERVERINFO_(*i, si, connectserv(si.name, si.address.port - 1, pw[0] ? pw : si.password)));
