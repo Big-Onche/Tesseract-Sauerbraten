@@ -6,6 +6,8 @@
 #include "AL/efx.h"
 #include "sndfile.h"
 
+extern vec hitsurface;
+
 namespace sound
 {
     static const int MaxVolume = 128;
@@ -18,10 +20,20 @@ namespace sound
     static ALCcontext *alContext = NULL;
     static int maxChannels = 0;
     static bool efxFilters = false;
+    static bool efxReverb = false;
     static LPALGENFILTERS alGenFilters_ = NULL;
     static LPALDELETEFILTERS alDeleteFilters_ = NULL;
     static LPALFILTERI alFilteri_ = NULL;
     static LPALFILTERF alFilterf_ = NULL;
+    static LPALGENEFFECTS alGenEffects_ = NULL;
+    static LPALDELETEEFFECTS alDeleteEffects_ = NULL;
+    static LPALEFFECTI alEffecti_ = NULL;
+    static LPALEFFECTF alEffectf_ = NULL;
+    static LPALGENAUXILIARYEFFECTSLOTS alGenAuxiliaryEffectSlots_ = NULL;
+    static LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots_ = NULL;
+    static LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti_ = NULL;
+    static LPALAUXILIARYEFFECTSLOTF alAuxiliaryEffectSlotf_ = NULL;
+    static ALuint efxReverbEffect = 0, efxReverbSlot = 0;
 
     int play(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire);
     void stopAll();
@@ -184,7 +196,7 @@ namespace sound
         extentity *ent;
         int radius, volume, targetVolume, pan, flags, expire;
         int fadeStart, fadeEnd, fadeFrom;
-        float gainhf, targetGainHF;
+        float gainhf, targetGainHF, reverbSend, targetReverbSend;
         bool dirty, stopping;
 
         SoundChannel(int id) : id(id), source(0), filter(0) { reset(); }
@@ -207,6 +219,8 @@ namespace sound
             fadeStart = fadeEnd = fadeFrom = 0;
             gainhf = -1.0f;
             targetGainHF = 1.0f;
+            reverbSend = -1.0f;
+            targetReverbSend = 0.0f;
             dirty = false;
             stopping = false;
         }
@@ -316,7 +330,7 @@ namespace sound
     {
         if(!chan.source) return;
         int volume = effectiveVolume(chan);
-        if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f) return;
+        if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f && fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f) return;
         chan.volume = volume;
         alSourcef(chan.source, AL_GAIN, clamp(chan.volume/float(MaxVolume), 0.0f, 1.0f));
         float pan = clamp(chan.pan/127.5f - 1.0f, -1.0f, 1.0f);
@@ -331,6 +345,16 @@ namespace sound
         {
             alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
             chan.gainhf = 1.0f;
+        }
+        if(efxReverb && efxReverbSlot && chan.targetReverbSend > 0.001f)
+        {
+            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, efxReverbSlot, 0, chan.filter && chan.targetGainHF < 0.999f ? chan.filter : AL_FILTER_NULL);
+            chan.reverbSend = chan.targetReverbSend;
+        }
+        else if(efxReverb)
+        {
+            alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+            chan.reverbSend = 0.0f;
         }
         chan.dirty = false;
     }
@@ -562,13 +586,65 @@ namespace sound
     VARF(soundfreq, 0, 44100, 48000, initwarning("sound configuration", INIT_RESET, CHANGE_SOUND));
     VARF(soundbufferlen, 128, 1024, 4096, initwarning("sound configuration", INIT_RESET, CHANGE_SOUND));
 
+    static void destroyEfxReverb()
+    {
+        if(efxReverbSlot && alDeleteAuxiliaryEffectSlots_)
+        {
+            alDeleteAuxiliaryEffectSlots_(1, &efxReverbSlot);
+            efxReverbSlot = 0;
+        }
+        if(efxReverbEffect && alDeleteEffects_)
+        {
+            alDeleteEffects_(1, &efxReverbEffect);
+            efxReverbEffect = 0;
+        }
+        efxReverb = false;
+    }
+
     static void clearEfx()
     {
         efxFilters = false;
+        efxReverb = false;
         alGenFilters_ = NULL;
         alDeleteFilters_ = NULL;
         alFilteri_ = NULL;
         alFilterf_ = NULL;
+        alGenEffects_ = NULL;
+        alDeleteEffects_ = NULL;
+        alEffecti_ = NULL;
+        alEffectf_ = NULL;
+        alGenAuxiliaryEffectSlots_ = NULL;
+        alDeleteAuxiliaryEffectSlots_ = NULL;
+        alAuxiliaryEffectSloti_ = NULL;
+        alAuxiliaryEffectSlotf_ = NULL;
+        efxReverbEffect = efxReverbSlot = 0;
+    }
+
+    static bool initEfxReverb()
+    {
+        if(!alGenEffects_ || !alDeleteEffects_ || !alEffecti_ || !alEffectf_ ||
+           !alGenAuxiliaryEffectSlots_ || !alDeleteAuxiliaryEffectSlots_ || !alAuxiliaryEffectSloti_ || !alAuxiliaryEffectSlotf_)
+            return false;
+
+        alGenEffects_(1, &efxReverbEffect);
+        if(!checkAl("alGenEffects")) { efxReverbEffect = 0; return false; }
+        alEffecti_(efxReverbEffect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
+        alEffectf_(efxReverbEffect, AL_REVERB_DENSITY, 0.8f);
+        alEffectf_(efxReverbEffect, AL_REVERB_DIFFUSION, 0.75f);
+        alEffectf_(efxReverbEffect, AL_REVERB_GAIN, 0.0f);
+        alEffectf_(efxReverbEffect, AL_REVERB_GAINHF, 0.65f);
+        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_TIME, 0.4f);
+        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_HFRATIO, 0.75f);
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_GAIN, 0.05f);
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_DELAY, 0.018f);
+        if(!checkAl("OpenAL reverb effect setup")) { destroyEfxReverb(); return false; }
+
+        alGenAuxiliaryEffectSlots_(1, &efxReverbSlot);
+        if(!checkAl("alGenAuxiliaryEffectSlots")) { efxReverbSlot = 0; destroyEfxReverb(); return false; }
+        alAuxiliaryEffectSloti_(efxReverbSlot, AL_EFFECTSLOT_EFFECT, efxReverbEffect);
+        alAuxiliaryEffectSlotf_(efxReverbSlot, AL_EFFECTSLOT_GAIN, 1.0f);
+        if(!checkAl("OpenAL reverb slot setup")) { destroyEfxReverb(); return false; }
+        return true;
     }
 
     static void initEfx()
@@ -579,7 +655,16 @@ namespace sound
         alDeleteFilters_ = (LPALDELETEFILTERS)alGetProcAddress("alDeleteFilters");
         alFilteri_ = (LPALFILTERI)alGetProcAddress("alFilteri");
         alFilterf_ = (LPALFILTERF)alGetProcAddress("alFilterf");
+        alGenEffects_ = (LPALGENEFFECTS)alGetProcAddress("alGenEffects");
+        alDeleteEffects_ = (LPALDELETEEFFECTS)alGetProcAddress("alDeleteEffects");
+        alEffecti_ = (LPALEFFECTI)alGetProcAddress("alEffecti");
+        alEffectf_ = (LPALEFFECTF)alGetProcAddress("alEffectf");
+        alGenAuxiliaryEffectSlots_ = (LPALGENAUXILIARYEFFECTSLOTS)alGetProcAddress("alGenAuxiliaryEffectSlots");
+        alDeleteAuxiliaryEffectSlots_ = (LPALDELETEAUXILIARYEFFECTSLOTS)alGetProcAddress("alDeleteAuxiliaryEffectSlots");
+        alAuxiliaryEffectSloti_ = (LPALAUXILIARYEFFECTSLOTI)alGetProcAddress("alAuxiliaryEffectSloti");
+        alAuxiliaryEffectSlotf_ = (LPALAUXILIARYEFFECTSLOTF)alGetProcAddress("alAuxiliaryEffectSlotf");
         efxFilters = alGenFilters_ && alDeleteFilters_ && alFilteri_ && alFilterf_;
+        efxReverb = initEfxReverb();
     }
 
     static bool initDevice()
@@ -624,6 +709,7 @@ namespace sound
             shouldInitAudio = false;
             if(alContext || alDevice)
             {
+                destroyEfxReverb();
                 alcMakeContextCurrent(NULL);
                 if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
                 if(alDevice) { alcCloseDevice(alDevice); alDevice = NULL; }
@@ -872,6 +958,7 @@ namespace sound
         resetChannels();
         if(alContext || alDevice)
         {
+            destroyEfxReverb();
             alcMakeContextCurrent(NULL);
             if(alContext) { alcDestroyContext(alContext); alContext = NULL; }
             if(alDevice) { alcCloseDevice(alDevice); alDevice = NULL; }
@@ -932,6 +1019,20 @@ namespace sound
     FVARR(airtemperature, -50.0f, 20.0f, 60.0f); // celsius
     FVARR(airpressure, 0.5f, 1.0f, 2.0f); // atmo
 
+    VARP(soundacoustics, 0, 0, 1);
+    VARP(soundacousticrays, 4, 32, 128);
+    VARP(soundacousticinterval, 20, 100, 1000);
+    VARP(soundacousticmaxrays, 1, 8, 32);
+    VARP(soundacousticbounces, 0, 1, 4);
+    VARP(soundacousticsmooth, 0, 300, 2000);
+    VARP(debugsoundacoustics, 0, 0, 1);
+    FVARP(soundacousticrange, 4.0f, 512.0f, 1024.0f);
+    FVARP(soundacousticcone, 8.0f, 38.0f, 85.0f);
+    FVARP(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
+    FVARP(soundacousticblockgain, 0.05f, 0.30f, 1.0f);
+    FVARP(soundacousticmufflegainhf, 0.02f, 0.2f, 1.0f);
+    FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
+
     static const float SoundUnitsPerMeter = 5.0f;
     static const float SoundLoudnessFrequency = 1000.0f;
     static const float SoundMuffleFrequency = 16000.0f;
@@ -986,6 +1087,212 @@ namespace sound
         return clamp(powf(10.0f, -extraDb/20.0f), 0.0f, 1.0f);
     }
 
+    struct AcousticRay
+    {
+        vec dir, hit;
+        float dist, open, influence;
+
+        AcousticRay() : dir(0, 0, 1), hit(0, 0, 0), dist(0), open(1), influence(0) {}
+    };
+
+    struct AcousticProbe
+    {
+        vector<AcousticRay> rays;
+        vec origin;
+        int lastmillis, nextRay;
+        float budget, openness, walldist, reverbGain, reverbDecay, reflection;
+
+        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0) {}
+    };
+
+    static AcousticProbe acousticProbe;
+    static float currentReverbGain = -1.0f, currentReverbDecay = -1.0f, currentReverbReflection = -1.0f;
+
+    static float smoothstepfactor(int elapsed)
+    {
+        if(soundacousticsmooth <= 0) return 1.0f;
+        return clamp(elapsed/float(soundacousticsmooth), 0.0f, 1.0f);
+    }
+
+    static void resizeAcousticProbe(int rays)
+    {
+        rays = clamp(rays, 4, 128);
+        if(acousticProbe.rays.length() == rays) return;
+        acousticProbe.rays.setsize(0);
+        const float golden = PI*(3.0f - sqrtf(5.0f));
+        loopi(rays)
+        {
+            float z = 1.0f - (2.0f*(i + 0.5f))/rays,
+                  r = sqrtf(max(0.0f, 1.0f - z*z)),
+                  a = golden*i;
+            AcousticRay &ray = acousticProbe.rays.add();
+            ray.dir = vec(cosf(a)*r, sinf(a)*r, z);
+        }
+        acousticProbe.nextRay = 0;
+        acousticProbe.budget = 0;
+    }
+
+    static void castAcousticRay(AcousticRay &ray, const vec &origin, float range)
+    {
+        float dist = raycube(origin, ray.dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+        dist = clamp(dist, 0.0f, range);
+        ray.dist = dist;
+        ray.open = dist/range;
+        ray.hit = vec(ray.dir).mul(dist).add(origin);
+
+        if(soundacousticbounces > 0 && dist < range - 1.0f)
+        {
+            vec normal = hitsurface;
+            if(!normal.iszero())
+            {
+                normal.normalize();
+                vec reflected = vec(ray.dir).sub(vec(normal).mul(2.0f*ray.dir.dot(normal)));
+                if(!reflected.iszero())
+                {
+                    reflected.normalize();
+                    vec bounceorigin = vec(ray.hit).add(vec(normal).mul(0.5f));
+                    float bdist = raycube(bounceorigin, reflected, range - dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+                    ray.open = clamp((dist + 0.35f*bdist)/range, 0.0f, 1.0f);
+                }
+            }
+        }
+    }
+
+    static void updateAcousticStats(int elapsed, float range)
+    {
+        if(acousticProbe.rays.empty()) return;
+        float open = 0, walldist = 0, hits = 0;
+        loopv(acousticProbe.rays)
+        {
+            const AcousticRay &ray = acousticProbe.rays[i];
+            open += ray.open;
+            walldist += ray.dist;
+            if(ray.dist < range*0.98f) hits += 1.0f;
+        }
+        float invrays = 1.0f/acousticProbe.rays.length();
+        open *= invrays;
+        walldist *= invrays;
+        hits *= invrays;
+
+        float meters = unitsToMeters(walldist),
+              enclosed = clamp(1.0f - open, 0.0f, 1.0f),
+              reverb = clamp((enclosed*0.75f + hits*0.20f)*(0.45f + min(meters/18.0f, 1.0f)*0.55f), 0.0f, 1.0f),
+              decay = clamp(0.18f + meters*0.09f + enclosed*1.4f, 0.18f, 3.6f),
+              reflection = clamp(hits*(1.0f - open*0.45f), 0.0f, 1.0f);
+        float k = smoothstepfactor(elapsed);
+        acousticProbe.openness += (open - acousticProbe.openness)*k;
+        acousticProbe.walldist += (walldist - acousticProbe.walldist)*k;
+        acousticProbe.reverbGain += (reverb - acousticProbe.reverbGain)*k;
+        acousticProbe.reverbDecay += (decay - acousticProbe.reverbDecay)*k;
+        acousticProbe.reflection += (reflection - acousticProbe.reflection)*k;
+    }
+
+    static void updateEfxReverb()
+    {
+        if(!efxReverb || !efxReverbEffect || !efxReverbSlot) return;
+        float gain = soundacoustics ? clamp(acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : 0.0f,
+              decay = clamp(acousticProbe.reverbDecay, 0.12f, 4.0f),
+              reflection = clamp(acousticProbe.reflection, 0.0f, 1.0f);
+        if(fabs(gain - currentReverbGain) < 0.015f && fabs(decay - currentReverbDecay) < 0.05f && fabs(reflection - currentReverbReflection) < 0.03f) return;
+
+        currentReverbGain = gain;
+        currentReverbDecay = decay;
+        currentReverbReflection = reflection;
+        alEffectf_(efxReverbEffect, AL_REVERB_DENSITY, clamp(0.55f + reflection*0.4f, 0.0f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_DIFFUSION, clamp(0.45f + reflection*0.45f, 0.0f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_GAIN, clamp(gain*0.28f, 0.0f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_GAINHF, clamp(0.45f + acousticProbe.openness*0.35f, 0.1f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_TIME, decay);
+        alEffectf_(efxReverbEffect, AL_REVERB_DECAY_HFRATIO, clamp(0.55f + acousticProbe.openness*0.35f, 0.1f, 2.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_GAIN, clamp(reflection*0.18f, 0.0f, 1.0f));
+        alEffectf_(efxReverbEffect, AL_REVERB_REFLECTIONS_DELAY, clamp(unitsToMeters(acousticProbe.walldist)*0.003f, 0.005f, 0.08f));
+        alAuxiliaryEffectSloti_(efxReverbSlot, AL_EFFECTSLOT_EFFECT, efxReverbEffect);
+        checkAl("OpenAL acoustic reverb update");
+    }
+
+    static void updateAcoustics()
+    {
+        if(!soundacoustics || !camera1)
+        {
+            updateEfxReverb();
+            return;
+        }
+
+        int now = totalmillis;
+        if(!acousticProbe.lastmillis) acousticProbe.lastmillis = now;
+        int elapsed = max(now - acousticProbe.lastmillis, 1);
+        acousticProbe.lastmillis = now;
+        acousticProbe.origin = camera1->o;
+        resizeAcousticProbe(soundacousticrays);
+        float range = metersToUnits(soundacousticrange);
+
+        acousticProbe.budget += acousticProbe.rays.length()*elapsed/float(max(soundacousticinterval, 1));
+        int work = clamp(int(acousticProbe.budget), 0, soundacousticmaxrays);
+        if(work <= 0 && acousticProbe.walldist <= 0) work = min(soundacousticmaxrays, acousticProbe.rays.length());
+        loopi(work)
+        {
+            AcousticRay &ray = acousticProbe.rays[acousticProbe.nextRay];
+            castAcousticRay(ray, acousticProbe.origin, range);
+            acousticProbe.nextRay = (acousticProbe.nextRay + 1)%acousticProbe.rays.length();
+        }
+        acousticProbe.budget = max(acousticProbe.budget - work, 0.0f);
+
+        updateAcousticStats(elapsed, range);
+        updateEfxReverb();
+    }
+
+    static void resetAcousticInfluence()
+    {
+        loopv(acousticProbe.rays) acousticProbe.rays[i].influence = 0.0f;
+    }
+
+    static void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend)
+    {
+        if(!soundacoustics || acousticProbe.rays.empty() || dist <= 1.0f) return;
+        vec dir = vec(loc).sub(acousticProbe.origin);
+        if(dir.iszero()) return;
+        dir.normalize();
+
+        float mindot = cosf(clamp(soundacousticcone, 8.0f, 85.0f)*RAD),
+              weights = 0, blocked = 0;
+        loopv(acousticProbe.rays)
+        {
+            AcousticRay &ray = acousticProbe.rays[i];
+            float dot = ray.dir.dot(dir);
+            if(dot <= mindot) continue;
+            float w = (dot - mindot)/(1.0f - mindot);
+            w *= w;
+            float b = ray.dist + 2.0f < dist ? clamp((dist - ray.dist)/max(dist, 1.0f), 0.0f, 1.0f) : 0.0f;
+            weights += w;
+            blocked += b*w;
+            ray.influence = max(ray.influence, b*w);
+        }
+        if(weights <= 0) return;
+
+        float occlusion = clamp(powf(blocked/weights, 0.75f)*soundacousticocclusion, 0.0f, 1.0f);
+        volf *= 1.0f - occlusion*(1.0f - soundacousticblockgain);
+        gainhf *= 1.0f - occlusion*(1.0f - soundacousticmufflegainhf);
+        reverbSend = max(reverbSend, clamp((acousticProbe.reverbGain*(0.35f + 0.65f*occlusion))*soundacousticreverb, 0.0f, 1.0f));
+    }
+
+    static int acousticDebugColor(float t)
+    {
+        t = clamp(t, 0.0f, 1.0f);
+        int r = int(255.0f*t + 0.5f),
+            g = int(255.0f*(1.0f - max(t - 0.5f, 0.0f)*2.0f) + 0.5f);
+        return (r<<16) | (g<<8);
+    }
+
+    static void drawAcousticsDebug()
+    {
+        if(!soundacoustics || !debugsoundacoustics || acousticProbe.rays.empty()) return;
+        loopv(acousticProbe.rays)
+        {
+            const AcousticRay &ray = acousticProbe.rays[i];
+            particle_flare(acousticProbe.origin, ray.hit, 16, PART_STREAK, acousticDebugColor(ray.influence), 0.12f);
+        }
+    }
+
     static bool soundInRange(const vec &loc)
     {
         if(soundairattenuation)
@@ -999,7 +1306,7 @@ namespace sound
     static bool updateChannel(SoundChannel &chan)
     {
         if(!chan.slot) return false;
-        float volf = 1.0f, panf = 0.5f, gainhf = 1.0f;
+        float volf = 1.0f, panf = 0.5f, gainhf = 1.0f, reverbSend = 0.0f;
         if(chan.hasLoc())
         {
             vec v;
@@ -1021,18 +1328,21 @@ namespace sound
                 gainhf = soundMuffleGainHF(dist);
             }
             else if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
+            acousticSource(chan.loc, dist, volf, gainhf, reverbSend);
             if(stereo && (v.x != 0 || v.y != 0) && dist>0)
             {
                 v.rotate_around_z(-camera1->yaw*RAD);
                 panf = 0.5f - 0.5f*v.x/v.magnitude2();
             }
         }
+        if(!efxReverb) reverbSend = 0.0f;
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
-        if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f) return false;
+        if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f && fabs(reverbSend - chan.targetReverbSend) < 1e-3f) return false;
         chan.targetVolume = vol;
         chan.pan = pan;
         chan.targetGainHF = gainhf;
+        chan.targetReverbSend = reverbSend;
         chan.dirty = true;
         return true;
     }
@@ -1089,7 +1399,10 @@ namespace sound
             reclaimChannels();
             if(mainmenu) stopMapSounds();
             else checkMapSounds();
+            updateAcoustics();
+            resetAcousticInfluence();
             syncChannels();
+            drawAcousticsDebug();
         }
         music.update();
     }
