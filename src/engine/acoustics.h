@@ -5,8 +5,17 @@
 
 namespace acoustics
 {
+    struct AcousticSourceInfo
+    {
+        vec apparent;
+        float occlusion, virtualGain, virtualGainHF;
+        bool path;
+
+        AcousticSourceInfo() : apparent(0, 0, 0), occlusion(0), virtualGain(0), virtualGainHF(1), path(false) {}
+    };
+
     void updateAcoustics();
-    void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend);
+    void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend, AcousticSourceInfo *info = NULL);
     void acousticHudSource(float &reverbSend);
     void drawAcousticsDebug();
 

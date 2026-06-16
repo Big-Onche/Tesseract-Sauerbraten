@@ -181,28 +181,30 @@ namespace sound
             return p >= v.getbuf() + slots && p < v.getbuf() + slots+numslots && slots+numslots <= v.length();
         }
 
-        int chooseSlot(int flags) const
+        int chooseSlot(int flags, uint seed = 0) const
         {
             if(flags&SND_NO_ALT || numslots <= 1) return slots;
-            if(flags&SND_USE_ALT) return slots + 1 + rnd(numslots - 1);
-            return slots + rnd(numslots);
+            if(flags&SND_USE_ALT) return slots + 1 + (seed ? detrnd(seed, numslots - 1) : rnd(numslots - 1));
+            return slots + (seed ? detrnd(seed, numslots) : rnd(numslots));
         }
     };
 
     struct SoundChannel
     {
         int id;
-        ALuint source, filter, sendFilter, distanceSendFilter;
+        ALuint source, filter, sendFilter, distanceSendFilter, acousticSource, acousticFilter;
         bool inuse;
         vec loc;
         SoundSlot *slot;
         extentity *ent;
-        int radius, volume, targetVolume, pan, flags, expire, soundentity;
+        int radius, volume, targetVolume, pan, acousticPan, targetAcousticPan, flags, expire, soundentity;
+        uint eventseed;
         int fadeStart, fadeEnd, fadeFrom;
-        float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend;
+        float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend,
+              acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF;
         bool dirty, stopping;
 
-        SoundChannel(int id) : id(id), source(0), filter(0), sendFilter(0), distanceSendFilter(0) { reset(); }
+        SoundChannel(int id) : id(id), source(0), filter(0), sendFilter(0), distanceSendFilter(0), acousticSource(0), acousticFilter(0) { reset(); }
         ~SoundChannel() { cleanup(); }
 
         bool hasLoc() const { return loc.x >= -1e15f; }
@@ -217,9 +219,11 @@ namespace sound
             radius = 0;
             volume = targetVolume = -1;
             pan = -1;
+            acousticPan = targetAcousticPan = 128;
             flags = 0;
             expire = -1;
             soundentity = 0;
+            eventseed = 0;
             fadeStart = fadeEnd = fadeFrom = 0;
             pitch = 1.0f;
             gainhf = -1.0f;
@@ -230,6 +234,8 @@ namespace sound
             targetReverbSend = 0.0f;
             distanceReverbSend = -1.0f;
             targetDistanceReverbSend = 0.0f;
+            acousticGain = targetAcousticGain = 0.0f;
+            acousticGainHF = targetAcousticGainHF = 1.0f;
             dirty = false;
             stopping = false;
         }
@@ -242,6 +248,17 @@ namespace sound
             alSourcei(source, AL_SOURCE_RELATIVE, AL_TRUE);
             alSourcef(source, AL_ROLLOFF_FACTOR, 0.0f);
             if(efxFilters) alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            return true;
+        }
+
+        bool ensureAcousticSource()
+        {
+            if(acousticSource) return true;
+            alGenSources(1, &acousticSource);
+            if(!checkAl("alGenSources acoustic voice")) { acousticSource = 0; return false; }
+            alSourcei(acousticSource, AL_SOURCE_RELATIVE, AL_TRUE);
+            alSourcef(acousticSource, AL_ROLLOFF_FACTOR, 0.0f);
+            if(efxFilters) alSourcei(acousticSource, AL_DIRECT_FILTER, AL_FILTER_NULL);
             return true;
         }
 
@@ -303,6 +320,18 @@ namespace sound
                 if(alDeleteFilters_) alDeleteFilters_(1, &distanceSendFilter);
                 distanceSendFilter = 0;
             }
+            if(acousticSource)
+            {
+                alSourceStop(acousticSource);
+                alSourcei(acousticSource, AL_BUFFER, 0);
+                alDeleteSources(1, &acousticSource);
+                acousticSource = 0;
+            }
+            if(acousticFilter)
+            {
+                if(alDeleteFilters_) alDeleteFilters_(1, &acousticFilter);
+                acousticFilter = 0;
+            }
             reset();
         }
     };
@@ -322,11 +351,15 @@ namespace sound
         ALuint filter = chan.filter;
         ALuint sendFilter = chan.sendFilter;
         ALuint distanceSendFilter = chan.distanceSendFilter;
+        ALuint acousticSource = chan.acousticSource;
+        ALuint acousticFilter = chan.acousticFilter;
         chan.reset();
         chan.source = source;
         chan.filter = filter;
         chan.sendFilter = sendFilter;
         chan.distanceSendFilter = distanceSendFilter;
+        chan.acousticSource = acousticSource;
+        chan.acousticFilter = acousticFilter;
         chan.inuse = true;
         if(loc) chan.loc = *loc;
         chan.slot = slot;
@@ -342,6 +375,11 @@ namespace sound
         if(!channels.inrange(n) || !channels[n].inuse) return;
         SoundChannel &chan = channels[n];
         if(chan.ent) chan.ent->flags &= ~EF_SOUND;
+        if(chan.acousticSource)
+        {
+            alSourceStop(chan.acousticSource);
+            alSourcei(chan.acousticSource, AL_BUFFER, 0);
+        }
         chan.reset();
     }
 
@@ -353,6 +391,11 @@ namespace sound
         {
             alSourceStop(chan.source);
             alSourcei(chan.source, AL_BUFFER, 0);
+        }
+        if(chan.acousticSource)
+        {
+            alSourceStop(chan.acousticSource);
+            alSourcei(chan.acousticSource, AL_BUFFER, 0);
         }
         freeChannel(n);
     }
@@ -414,12 +457,43 @@ namespace sound
         return filterId;
     }
 
+    extern int soundacousticdualvoice;
+
+    static bool acousticDualVoiceImportant(const SoundChannel &chan)
+    {
+        return soundacousticdualvoice && chan.hasLoc() && !(chan.flags&(SND_MAP|SND_HUD));
+    }
+
+    static void syncAcousticVoice(SoundChannel &chan, int volume)
+    {
+        if(!chan.acousticSource) return;
+        float gain = acousticDualVoiceImportant(chan) ? clamp(volume/float(MaxVolume)*chan.targetAcousticGain, 0.0f, 1.0f) : 0.0f,
+              pan = clamp(chan.targetAcousticPan/127.5f - 1.0f, -1.0f, 1.0f);
+        alSourcef(chan.acousticSource, AL_GAIN, gain);
+        alSource3f(chan.acousticSource, AL_POSITION, pan, 0.0f, -1.0f);
+        if(efxFilters && chan.targetAcousticGainHF < 0.999f)
+        {
+            if(chan.ensureFilter(chan.acousticFilter, AL_FILTER_LOWPASS))
+            {
+                alFilterf_(chan.acousticFilter, AL_LOWPASS_GAINHF, chan.targetAcousticGainHF);
+                alSourcei(chan.acousticSource, AL_DIRECT_FILTER, chan.acousticFilter);
+            }
+            else alSourcei(chan.acousticSource, AL_DIRECT_FILTER, AL_FILTER_NULL);
+        }
+        else if(efxFilters) alSourcei(chan.acousticSource, AL_DIRECT_FILTER, AL_FILTER_NULL);
+        chan.acousticGain = chan.targetAcousticGain;
+        chan.acousticGainHF = chan.targetAcousticGainHF;
+        chan.acousticPan = chan.targetAcousticPan;
+    }
+
     static void syncChannel(SoundChannel &chan)
     {
         if(!chan.source) return;
         int volume = effectiveVolume(chan);
         if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f && fabs(chan.targetGainLF - chan.gainlf) < 1e-3f &&
-           fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f && fabs(chan.targetDistanceReverbSend - chan.distanceReverbSend) < 1e-3f) return;
+           fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f && fabs(chan.targetDistanceReverbSend - chan.distanceReverbSend) < 1e-3f &&
+           fabs(chan.targetAcousticGain - chan.acousticGain) < 1e-3f && fabs(chan.targetAcousticGainHF - chan.acousticGainHF) < 1e-3f &&
+           chan.targetAcousticPan == chan.acousticPan) return;
         chan.volume = volume;
         alSourcef(chan.source, AL_GAIN, clamp(chan.volume/float(MaxVolume), 0.0f, 1.0f));
         float pan = clamp(chan.pan/127.5f - 1.0f, -1.0f, 1.0f);
@@ -452,6 +526,7 @@ namespace sound
             alSource3i(chan.source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
             chan.distanceReverbSend = 0.0f;
         }
+        syncAcousticVoice(chan, volume);
         chan.dirty = false;
         checkAl("OpenAL source update");
     }
@@ -1184,6 +1259,7 @@ namespace sound
     VARP(soundfollowentities, 0, 1, 1);
     VARP(soundpitchrandom, 0, 0, 1);
     FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
+    VARP(soundacousticdualvoice, 0, 1, 1);
     VARP(soundairattenuation, 0, 0, 1);
     FVARP(maxsounddistance, 0.0f, 1024.0f, 4096.0f);
     FVARP(sounddistanceattenuationfactor, 0.0f, 2.0f, 4.0f);
@@ -1212,11 +1288,42 @@ namespace sound
         return max(meters, 0.0f)*SoundUnitsPerMeter;
     }
 
-    static float randomPitchOffset(const vec *loc, int flags, const extentity *ent)
+    static uint soundEventSerial = 0;
+
+    static uint mixSoundSeed(uint seed, uint value)
+    {
+        seed ^= value + 0x9E3779B9U + (seed << 6) + (seed >> 2);
+        return seed ? seed : 0xA511E9B3U;
+    }
+
+    static uint quantizeSoundCoord(float v)
+    {
+        return uint(int(v*16.0f + (v >= 0 ? 0.5f : -0.5f)));
+    }
+
+    static uint soundEventSeed(int n, const vec *loc, const extentity *ent, int flags, int soundentity)
+    {
+        uint seed = mixSoundSeed(0x6D2B79F5U, uint(n));
+        seed = mixSoundSeed(seed, uint(flags));
+        seed = mixSoundSeed(seed, uint(totalmillis));
+        seed = mixSoundSeed(seed, ++soundEventSerial);
+        seed = mixSoundSeed(seed, uint(soundentity));
+        if(ent) seed = mixSoundSeed(seed, uint(size_t(ent)));
+        if(loc)
+        {
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->x));
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->y));
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->z));
+        }
+        return seed;
+    }
+
+    static float randomPitchOffset(const vec *loc, int flags, const extentity *ent, uint seed)
     {
         if(!soundpitchrandom || soundpitchrandomamount <= 0.0f || ent || (flags&SND_MAP) || (!loc && !(flags&SND_HUD))) return 1.0f;
         float amount = min(soundpitchrandomamount, 0.99f);
-        return clamp(1.0f + rndscale(2.0f*amount) - amount, 0.01f, 4.0f);
+        float r = float(detrnd(seed, 0x10000))/float(0xFFFF);
+        return clamp(1.0f + r*(2.0f*amount) - amount, 0.01f, 4.0f);
     }
 
     static int soundEntityId(const vec *loc, const extentity *ent, int flags)
@@ -1354,7 +1461,9 @@ namespace sound
         alEffecti_(efxReverbEffect, AL_REVERB_DECAY_HFLIMIT, shape.iDecayHFLimit ? AL_TRUE : AL_FALSE);
         alAuxiliaryEffectSloti_(efxReverbSlot, AL_EFFECTSLOT_EFFECT, efxReverbEffect);
         checkAl("OpenAL acoustic reverb update");
-    }    static bool soundInRange(const vec &loc)
+    }
+
+    static bool soundInRange(const vec &loc)
     {
         if(soundairattenuation)
         {
@@ -1368,6 +1477,8 @@ namespace sound
     {
         if(!chan.slot) return false;
         float volf = 1.0f, panf = 0.5f, gainhf = 1.0f, gainlf = 1.0f, reverbSend = 0.0f, distanceReverbSend = 0.0f;
+        float acousticGain = 0.0f, acousticGainHF = 1.0f;
+        int acousticPan = 128;
         updateSoundEntity(chan);
         if(chan.hasLoc())
         {
@@ -1395,11 +1506,25 @@ namespace sound
                 distanceReverbSend = distanceReverb;
             }
             else if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
-            acoustics::acousticSource(chan.loc, dist, volf, gainhf, reverbSend);
+            acoustics::AcousticSourceInfo acousticInfo;
+            acoustics::acousticSource(chan.loc, dist, volf, gainhf, reverbSend, &acousticInfo);
             if(stereo && (v.x != 0 || v.y != 0) && dist>0)
             {
                 v.rotate_around_z(-camera1->yaw*RAD);
                 panf = 0.5f - 0.5f*v.x/v.magnitude2();
+                if(acousticInfo.path)
+                {
+                    vec av;
+                    float adist = acousticInfo.apparent.dist(camera1->o, av);
+                    if(adist > 0 && (av.x != 0 || av.y != 0))
+                    {
+                        av.rotate_around_z(-camera1->yaw*RAD);
+                        acousticPan = clamp(int((0.5f - 0.5f*av.x/av.magnitude2())*255.9f), 0, 255);
+                        if(!acousticDualVoiceImportant(chan)) panf = acousticPan/255.9f;
+                    }
+                    acousticGain = acousticInfo.virtualGain;
+                    acousticGainHF = acousticInfo.virtualGainHF;
+                }
             }
         }
         else if(chan.flags&SND_HUD) acoustics::acousticHudSource(reverbSend);
@@ -1408,13 +1533,18 @@ namespace sound
         int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
         if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f && fabs(gainlf - chan.targetGainLF) < 1e-3f &&
-           fabs(reverbSend - chan.targetReverbSend) < 1e-3f && fabs(distanceReverbSend - chan.targetDistanceReverbSend) < 1e-3f) return false;
+           fabs(reverbSend - chan.targetReverbSend) < 1e-3f && fabs(distanceReverbSend - chan.targetDistanceReverbSend) < 1e-3f &&
+           fabs(acousticGain - chan.targetAcousticGain) < 1e-3f && fabs(acousticGainHF - chan.targetAcousticGainHF) < 1e-3f &&
+           acousticPan == chan.targetAcousticPan) return false;
         chan.targetVolume = vol;
         chan.pan = pan;
         chan.targetGainHF = gainhf;
         chan.targetGainLF = gainlf;
         chan.targetReverbSend = reverbSend;
         chan.targetDistanceReverbSend = distanceReverbSend;
+        chan.targetAcousticGain = acousticGain;
+        chan.targetAcousticGainHF = acousticGainHF;
+        chan.targetAcousticPan = acousticPan;
         chan.dirty = true;
         return true;
     }
@@ -1554,7 +1684,9 @@ namespace sound
         }
         if(fade < 0) return -1;
 
-        SoundSlot &slot = sounds.slots[config.chooseSlot(flags)];
+        int soundentity = soundEntityId(loc, ent, flags);
+        uint eventseed = soundEventSeed(n, loc, ent, flags, soundentity);
+        SoundSlot &slot = sounds.slots[config.chooseSlot(flags, eventseed)];
         if(!slot.sample->buffer && !slot.sample->load(sounds.dir)) return -1;
 
         if(dbgsound) conoutf(CON_DEBUG, "sound: %s%s", sounds.dir, slot.sample->name);
@@ -1565,13 +1697,15 @@ namespace sound
         if(chanid < 0) loopv(channels) if(!channels[i].targetVolume) { haltChannel(i); chanid = i; break; }
         if(chanid < 0) return -1;
 
-        SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundEntityId(loc, ent, flags));
-        chan.pitch = randomPitchOffset(loc, flags, ent);
+        SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundentity);
+        chan.eventseed = eventseed;
+        chan.pitch = randomPitchOffset(loc, flags, ent, eventseed);
         if(!chan.ensureSource())
         {
             freeChannel(chanid);
             return -1;
         }
+        bool useAcousticVoice = soundacousticdualvoice && loc && !(flags&(SND_MAP|SND_HUD)) && chan.ensureAcousticSource();
 
         updateChannel(chan);
         chan.expire = expire >= 0 ? totalmillis + expire : -1;
@@ -1587,8 +1721,23 @@ namespace sound
         alSourcei(chan.source, AL_BUFFER, slot.sample->buffer);
         alSourcei(chan.source, AL_LOOPING, loops ? AL_TRUE : AL_FALSE);
         alSourcef(chan.source, AL_PITCH, chan.pitch);
+        if(useAcousticVoice && chan.acousticSource)
+        {
+            alSourceStop(chan.acousticSource);
+            alSourcei(chan.acousticSource, AL_BUFFER, 0);
+            alSourcei(chan.acousticSource, AL_BUFFER, slot.sample->buffer);
+            alSourcei(chan.acousticSource, AL_LOOPING, loops ? AL_TRUE : AL_FALSE);
+            alSourcef(chan.acousticSource, AL_PITCH, chan.pitch);
+            alSourcef(chan.acousticSource, AL_GAIN, 0.0f);
+        }
+        else if(chan.acousticSource)
+        {
+            alSourceStop(chan.acousticSource);
+            alSourcei(chan.acousticSource, AL_BUFFER, 0);
+        }
         syncChannel(chan);
         alSourcePlay(chan.source);
+        if(useAcousticVoice && chan.acousticSource) alSourcePlay(chan.acousticSource);
         if(!checkAl("alSourcePlay"))
         {
             freeChannel(chanid);

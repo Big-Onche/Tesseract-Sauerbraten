@@ -19,6 +19,11 @@ namespace acoustics
     VARP(soundacousticbakerays, 16, 64, 256);
     VARP(soundacousticgridradius, 32, 256, 256);
     VARP(soundacousticthreads, 0, 0, 16);
+    VARP(soundacousticastarrange, 0, 512, 4096);
+    VARP(soundacousticastarbudget, 0, 1024, 100000);
+    FVARP(soundacousticsourcereverbmix, 0.0f, 0.45f, 2.0f);
+    FVARP(soundacousticlistenerreverbmix, 0.0f, 0.35f, 2.0f);
+    FVARP(soundacousticpathreverbmix, 0.0f, 0.20f, 2.0f);
 
     static const float SoundUnitsPerMeter = 5.0f;
 
@@ -159,35 +164,36 @@ namespace acoustics
             highFrequencyLoss(0), diffractionCost(0), traversalCost(0), visibility(0), thickness(0), transitionStrength(0) {}
     };
 
-    struct AcousticPath
+    struct AcousticAStarNode
     {
-        vector<int> regions, portals;
-        float acousticDistance, pathCost, diffractionAmount, occlusionAmount;
-        int bestPortal;
+        int prev;
+        float g, f;
+        bool open, closed;
 
-        AcousticPath() : acousticDistance(0), pathCost(0), diffractionAmount(0), occlusionAmount(0), bestPortal(-1) {}
+        AcousticAStarNode() : prev(-1), g(1e16f), f(1e16f), open(false), closed(false) {}
     };
 
-    struct AcousticFieldNode
+    struct AcousticAStarQueueNode
     {
-        int prevRegion, prevPortal, hops;
-        float cost, diffractionAmount, occlusionAmount, pathReverbGain, pathReverbDecay, pathReflection, pathWeight;
-        bool reached;
+        int cell;
+        float f;
 
-        AcousticFieldNode() : prevRegion(-1), prevPortal(-1), hops(0), cost(1e16f), diffractionAmount(0), occlusionAmount(0),
-            pathReverbGain(0), pathReverbDecay(0.3f), pathReflection(0), pathWeight(0), reached(false) {}
+        AcousticAStarQueueNode() {}
+        AcousticAStarQueueNode(int cell, float f) : cell(cell), f(f) {}
     };
 
-    struct AcousticQueueNode
+    static inline float heapscore(const AcousticAStarQueueNode &node) { return node.f; }
+
+    struct AcousticAStarResult
     {
-        int region;
-        float cost;
+        vector<int> cells;
+        vec virtualPosition;
+        float pathCost, pathLength, sourceReverbGain, pathReverbGain, pathReverbDecay, pathReflection, muffleOpen, occlusion, diffraction, complexity;
+        bool found;
 
-        AcousticQueueNode() {}
-        AcousticQueueNode(int region, float cost) : region(region), cost(cost) {}
+        AcousticAStarResult() : virtualPosition(0, 0, 0), pathCost(0), pathLength(0), sourceReverbGain(0), pathReverbGain(0),
+            pathReverbDecay(0.3f), pathReflection(0), muffleOpen(1), occlusion(0), diffraction(0), complexity(0), found(false) {}
     };
-
-    static inline float heapscore(const AcousticQueueNode &node) { return node.cost; }
 
     static float acousticPercentile(vector<float> &values, float p, float fallback)
     {
@@ -371,9 +377,10 @@ namespace acoustics
     static vector<AcousticRegion> acousticRegions;
     static vector<AcousticPortal> acousticPortals;
     static vector<int> acousticRegionPortalEdges;
-    static vector<AcousticFieldNode> acousticListenerField;
     static hashtable<ivec, int> acousticCellLookup(1<<12);
-    static int acousticListenerFieldRegion = -1, acousticGraphVersion = 0, acousticListenerFieldVersion = -1;
+    static vector<int> acousticDebugPath;
+    static vec acousticDebugVirtualSource(0, 0, 0);
+    static int acousticAStarFrame = -1, acousticAStarNodesThisFrame = 0, acousticDebugPathMillis = 0;
 
     struct AcousticBakeRequest
     {
@@ -1149,93 +1156,9 @@ namespace acoustics
         }
     }
 
-    static void invalidateAcousticListenerField()
-    {
-        acousticListenerField.setsize(0);
-        acousticListenerFieldRegion = -1;
-        acousticListenerFieldVersion = -1;
-        acousticGraphVersion++;
-    }
-
-    static void rebuildAcousticListenerField(int listenerRegion)
-    {
-        acousticListenerField.setsize(0);
-        loopv(acousticRegions) acousticListenerField.add(AcousticFieldNode());
-        acousticListenerFieldRegion = -1;
-        acousticListenerFieldVersion = acousticGraphVersion;
-        if(!acousticRegions.inrange(listenerRegion)) return;
-
-        AcousticRegion &start = acousticRegions[listenerRegion];
-        AcousticFieldNode &startNode = acousticListenerField[listenerRegion];
-        startNode.reached = true;
-        startNode.cost = 0.0f;
-        startNode.prevRegion = startNode.prevPortal = -1;
-        startNode.hops = 0;
-        startNode.pathReverbGain = start.reverbGain;
-        startNode.pathReverbDecay = start.reverbDecay;
-        startNode.pathReflection = start.reflection;
-        startNode.pathWeight = 1.0f;
-
-        vector<AcousticQueueNode> queue;
-        queue.addheap(AcousticQueueNode(listenerRegion, 0.0f));
-        float range = max(metersToUnits(soundacousticrange), 1.0f);
-        while(!queue.empty())
-        {
-            AcousticQueueNode cur = queue.removeheap();
-            if(!acousticListenerField.inrange(cur.region)) continue;
-            AcousticFieldNode &curNode = acousticListenerField[cur.region];
-            if(cur.cost > curNode.cost + 1e-4f || !acousticRegions.inrange(cur.region)) continue;
-
-            const AcousticRegion &region = acousticRegions[cur.region];
-            loopi(region.portalCount)
-            {
-                int portalidx = acousticRegionPortalEdges[region.firstPortal + i];
-                if(!acousticPortals.inrange(portalidx)) continue;
-                const AcousticPortal &portal = acousticPortals[portalidx];
-                int nextRegion = portal.regionA == cur.region ? portal.regionB : portal.regionA;
-                if(!acousticRegions.inrange(nextRegion) || !acousticListenerField.inrange(nextRegion)) continue;
-
-                const AcousticRegion &next = acousticRegions[nextRegion];
-                float regionDistance = region.center.dist(next.center)/range,
-                      edgeCost = max(portal.acousticCost + regionDistance*0.15f, 0.001f),
-                      nextCost = curNode.cost + edgeCost;
-                AcousticFieldNode &nextNode = acousticListenerField[nextRegion];
-                if(nextNode.reached && nextCost >= nextNode.cost - 1e-4f) continue;
-
-                float edgeWeight = max(edgeCost, 0.10f),
-                      totalWeight = max(curNode.pathWeight + edgeWeight, edgeWeight);
-                nextNode.reached = true;
-                nextNode.cost = nextCost;
-                nextNode.prevRegion = cur.region;
-                nextNode.prevPortal = portalidx;
-                nextNode.hops = curNode.hops + 1;
-                nextNode.diffractionAmount = clamp(curNode.diffractionAmount + portal.diffractionCost*(1.0f - curNode.diffractionAmount), 0.0f, 1.0f);
-                nextNode.occlusionAmount = clamp(curNode.occlusionAmount + (portal.highFrequencyLoss*0.85f + portal.diffractionCost*0.15f)*(1.0f - curNode.occlusionAmount), 0.0f, 1.0f);
-                nextNode.pathReverbGain = clamp((curNode.pathReverbGain*curNode.pathWeight + next.reverbGain*edgeWeight)/totalWeight, 0.0f, 1.0f);
-                nextNode.pathReverbDecay = (curNode.pathReverbDecay*curNode.pathWeight + next.reverbDecay*edgeWeight)/totalWeight;
-                nextNode.pathReflection = clamp((curNode.pathReflection*curNode.pathWeight + next.reflection*edgeWeight)/totalWeight, 0.0f, 1.0f);
-                nextNode.pathWeight = totalWeight;
-                queue.addheap(AcousticQueueNode(nextRegion, nextCost));
-            }
-        }
-        acousticListenerFieldRegion = listenerRegion;
-    }
-
-    static void updateAcousticListenerField()
-    {
-        if(!acousticProbe.baked || !acousticRegions.inrange(acousticProbe.region))
-        {
-            acousticListenerFieldRegion = -1;
-            return;
-        }
-        if(acousticListenerFieldRegion != acousticProbe.region || acousticListenerFieldVersion != acousticGraphVersion ||
-           acousticListenerField.length() != acousticRegions.length())
-            rebuildAcousticListenerField(acousticProbe.region);
-    }
-
     void clearAcousticGrid()
     {
-        invalidateAcousticListenerField();
+        acousticDebugPath.setsize(0);
         acousticCells.setsize(0);
         acousticRegions.setsize(0);
         acousticPortals.setsize(0);
@@ -1395,7 +1318,6 @@ namespace acoustics
             acousticProbe.baked = false;
             acousticProbe.cell = -1;
             acousticProbe.region = -1;
-            acousticListenerFieldRegion = -1;
             updateEfxReverb();
             return;
         }
@@ -1405,11 +1327,12 @@ namespace acoustics
         int elapsed = max(now - acousticProbe.lastmillis, 1);
         acousticProbe.lastmillis = now;
         acousticProbe.origin = camera1->o;
+        acousticAStarFrame = now;
+        acousticAStarNodesThisFrame = 0;
         AcousticCell *cell = findAcousticCell(acousticProbe.origin);
         if(cell)
         {
             applyAcousticCell(*cell, elapsed);
-            updateAcousticListenerField();
             updateEfxReverb();
             return;
         }
@@ -1417,74 +1340,176 @@ namespace acoustics
         acousticProbe.baked = false;
         acousticProbe.cell = -1;
         acousticProbe.region = -1;
-        acousticListenerFieldRegion = -1;
         updateEfxReverb();
     }
 
-    static bool queryAcousticListenerField(const AcousticCell &sourceCell, float &occlusion, float &muffleOpen, float &pathReverbGain, float &pathComplexity, float &diffraction)
+    static bool acousticAStarBudgetAvailable()
     {
-        if(!acousticRegions.inrange(sourceCell.region) || !acousticListenerField.inrange(sourceCell.region) ||
-           acousticListenerFieldRegion != acousticProbe.region || sourceCell.region == acousticProbe.region)
-            return false;
-        const AcousticFieldNode &node = acousticListenerField[sourceCell.region];
-        if(!node.reached) return false;
+        if(acousticAStarFrame != totalmillis)
+        {
+            acousticAStarFrame = totalmillis;
+            acousticAStarNodesThisFrame = 0;
+        }
+        return soundacousticastarbudget > 0 && acousticAStarNodesThisFrame < soundacousticastarbudget;
+    }
 
-        const AcousticRegion &sourceRegion = acousticRegions[sourceCell.region];
-        float costOcclusion = smoothramp(node.cost, 0.15f, 1.75f);
-        diffraction = node.diffractionAmount;
-        occlusion = clamp((node.occlusionAmount*0.70f + costOcclusion*0.30f)*soundacousticocclusion, 0.0f, 1.0f);
-        pathComplexity = clamp(float(node.hops)*0.22f + node.cost*0.35f + diffraction*0.25f, 0.0f, 1.0f);
-        muffleOpen = clamp(acousticProbe.muffleOpen*0.35f + sourceRegion.muffleOpen*0.35f + (1.0f - node.occlusionAmount)*0.30f - diffraction*0.15f, 0.0f, 1.0f);
-        pathReverbGain = clamp(node.pathReverbGain, 0.0f, 1.0f);
-        return true;
+    static float acousticAStarHeuristic(const AcousticCell &cell, const AcousticCell &target, float cellsize)
+    {
+        return cell.origin.dist(target.origin)/max(cellsize, 1.0f);
+    }
+
+    static bool acousticAStarPassable(int cellidx, int targetidx)
+    {
+        if(cellidx == targetidx) return true;
+        return acousticCells.inrange(cellidx) && acousticCells[cellidx].valid && acousticCells[cellidx].airOccupancy > 0.5f;
+    }
+
+    static void buildAcousticAStarResult(int sourceidx, int targetidx, const vector<AcousticAStarNode> &nodes, AcousticAStarResult &result)
+    {
+        result.cells.setsize(0);
+        for(int cur = targetidx; acousticCells.inrange(cur); cur = nodes[cur].prev)
+        {
+            result.cells.add(cur);
+            if(cur == sourceidx) break;
+        }
+        result.cells.reverse();
+        if(result.cells.empty() || result.cells[0] != sourceidx || result.cells.last() != targetidx)
+        {
+            result.cells.setsize(0);
+            return;
+        }
+
+        result.found = true;
+        result.pathCost = nodes[targetidx].g;
+        result.pathLength = 0.0f;
+        result.sourceReverbGain = acousticCells[sourceidx].reverbGain;
+        float reverbGain = 0.0f, reverbDecay = 0.0f, reflection = 0.0f, muffleOpen = 0.0f, air = 0.0f;
+        loopv(result.cells)
+        {
+            const AcousticCell &cell = acousticCells[result.cells[i]];
+            if(i) result.pathLength += acousticCells[result.cells[i-1]].origin.dist(cell.origin);
+            reverbGain += cell.reverbGain;
+            reverbDecay += cell.reverbDecay;
+            reflection += cell.reflection;
+            muffleOpen += cell.muffleOpen;
+            air += cell.airOccupancy;
+        }
+        float count = max(float(result.cells.length()), 1.0f),
+              direct = max(acousticCells[sourceidx].origin.dist(acousticProbe.origin), 1.0f);
+        result.pathReverbGain = clamp(reverbGain/count, 0.0f, 1.0f);
+        result.pathReverbDecay = reverbDecay/count;
+        result.pathReflection = clamp(reflection/count, 0.0f, 1.0f);
+        result.muffleOpen = clamp(muffleOpen/count, 0.0f, 1.0f);
+        result.complexity = clamp((result.pathLength/direct - 1.0f)*0.65f + float(max(result.cells.length() - 2, 0))*0.045f, 0.0f, 1.0f);
+        result.diffraction = clamp((1.0f - air/count)*0.60f + result.complexity*0.40f, 0.0f, 1.0f);
+        result.occlusion = clamp((result.diffraction*0.55f + result.complexity*0.45f)*soundacousticocclusion, 0.0f, 1.0f);
+
+        vec portal = acousticCells[result.cells.length() >= 2 ? result.cells[result.cells.length() - 2] : targetidx].origin,
+            listenerToPortal = vec(portal).sub(acousticProbe.origin);
+        if(!listenerToPortal.iszero()) listenerToPortal.safenormalize();
+        float portalBias = clamp(0.35f + result.occlusion*0.35f + result.complexity*0.20f, 0.20f, 0.82f),
+              behind = max(soundacousticcellsize, 16)*(0.20f + result.occlusion*0.35f);
+        result.virtualPosition = vec(acousticCells[sourceidx].origin).mul(1.0f - portalBias).add(vec(portal).mul(portalBias));
+        result.virtualPosition.add(vec(listenerToPortal).mul(behind));
+    }
+
+    static bool findAcousticAStarPath(int sourceidx, int targetidx, float dist, AcousticAStarResult &result)
+    {
+        if(!acousticCells.inrange(sourceidx) || !acousticCells.inrange(targetidx) || sourceidx == targetidx) return false;
+        if(soundacousticastarrange > 0 && dist > soundacousticastarrange) return false;
+        if(!acousticAStarBudgetAvailable()) return false;
+
+        vector<AcousticAStarNode> nodes;
+        loopv(acousticCells) nodes.add(AcousticAStarNode());
+        vector<AcousticAStarQueueNode> queue;
+        float cellsize = max(soundacousticcellsize, 16);
+        nodes[sourceidx].g = 0.0f;
+        nodes[sourceidx].f = acousticAStarHeuristic(acousticCells[sourceidx], acousticCells[targetidx], cellsize);
+        nodes[sourceidx].open = true;
+        queue.addheap(AcousticAStarQueueNode(sourceidx, nodes[sourceidx].f));
+
+        static const ivec dirs[6] = { ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0), ivec(0, 0, 1), ivec(0, 0, -1) };
+        while(!queue.empty())
+        {
+            if(!acousticAStarBudgetAvailable()) return false;
+            AcousticAStarQueueNode q = queue.removeheap();
+            if(!nodes.inrange(q.cell) || nodes[q.cell].closed || q.f > nodes[q.cell].f + 1e-4f) continue;
+            acousticAStarNodesThisFrame++;
+            if(q.cell == targetidx)
+            {
+                buildAcousticAStarResult(sourceidx, targetidx, nodes, result);
+                return result.found;
+            }
+
+            AcousticAStarNode &curNode = nodes[q.cell];
+            curNode.closed = true;
+            const AcousticCell &curCell = acousticCells[q.cell];
+            loopi(6)
+            {
+                int nextidx = acousticCellIndex(ivec(curCell.coord).add(dirs[i]));
+                if(!acousticAStarPassable(nextidx, targetidx) || nodes[nextidx].closed) continue;
+                const AcousticCell &nextCell = acousticCells[nextidx];
+                float airPenalty = 1.0f + (1.0f - clamp(nextCell.airOccupancy, 0.0f, 1.0f))*1.25f,
+                      wallPenalty = 1.0f + nextCell.nearWallRatio*0.35f,
+                      g = curNode.g + airPenalty*wallPenalty;
+                if(nodes[nextidx].open && g >= nodes[nextidx].g - 1e-4f) continue;
+                nodes[nextidx].prev = q.cell;
+                nodes[nextidx].g = g;
+                nodes[nextidx].f = g + acousticAStarHeuristic(nextCell, acousticCells[targetidx], cellsize);
+                nodes[nextidx].open = true;
+                queue.addheap(AcousticAStarQueueNode(nextidx, nodes[nextidx].f));
+            }
+        }
+        return false;
     }
 
     static float acousticTravelReverbSend(float sourceReverbGain, float listenerReverbGain, float pathReverbGain, float occlusion, float pathComplexity, float diffraction)
     {
         float directness = clamp(1.0f - occlusion*0.75f - diffraction*0.35f - pathComplexity*0.25f, 0.0f, 1.0f),
-              sourceWeight = clamp(0.45f + directness*0.20f - occlusion*0.25f, 0.15f, 0.65f),
-              listenerWeight = clamp(0.30f + listenerReverbGain*0.25f + occlusion*0.30f, 0.20f, 0.75f),
-              pathWeight = clamp(0.10f + pathComplexity*0.35f + diffraction*0.25f, 0.05f, 0.55f),
+              sourceWeight = max(soundacousticsourcereverbmix*(0.75f + directness*0.25f - occlusion*0.25f), 0.0f),
+              listenerWeight = max(soundacousticlistenerreverbmix*(0.85f + listenerReverbGain*0.25f + occlusion*0.35f), 0.0f),
+              pathWeight = max(soundacousticpathreverbmix*(0.80f + pathComplexity*0.60f + diffraction*0.40f), 0.0f),
               totalWeight = max(sourceWeight + listenerWeight + pathWeight, 1e-4f),
               mixedReverb = (sourceReverbGain*sourceWeight + listenerReverbGain*listenerWeight + pathReverbGain*pathWeight)/totalWeight,
               travelWetness = clamp(0.30f + occlusion*0.45f + pathComplexity*0.25f + diffraction*0.15f, 0.0f, 1.0f);
         return clamp(mixedReverb*travelWetness*soundacousticreverb, 0.0f, 1.0f);
     }
 
-    void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend)
+    void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend, AcousticSourceInfo *info)
     {
+        if(info)
+        {
+            info->apparent = loc;
+            info->occlusion = info->virtualGain = 0.0f;
+            info->virtualGainHF = 1.0f;
+            info->path = false;
+        }
         if(!soundacoustics || !acousticProbe.baked || dist <= 1.0f) return;
         AcousticCell *sourceCell = findAcousticCell(loc);
-        float occlusion = 0.0f, pathComplexity = 0.0f, diffraction = 0.0f,
-              muffleOpen = acousticProbe.muffleOpen,
-              sourceReverbGain = acousticProbe.reverbGain,
-              pathReverbGain = acousticProbe.reverbGain;
-        bool useField = false;
-        if(sourceCell)
-        {
-            if(acousticRegions.inrange(sourceCell->region)) sourceReverbGain = acousticRegions[sourceCell->region].reverbGain;
-            else sourceReverbGain = sourceCell->reverbGain;
-            useField = queryAcousticListenerField(*sourceCell, occlusion, muffleOpen, pathReverbGain, pathComplexity, diffraction);
-        }
-        if(!useField)
-        {
-            vec dir = vec(loc).sub(acousticProbe.origin);
-            if(dir.iszero()) return;
-            dir.normalize();
-            float clear = acousticRaycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
-                  pathOpen = clear + 2.0f < dist ? clamp(clear/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f;
-            occlusion = clamp(powf(1.0f - pathOpen, 0.75f)*soundacousticocclusion, 0.0f, 1.0f);
-            pathComplexity = 1.0f - pathOpen;
-            muffleOpen = clamp(pathOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f);
-            pathReverbGain = clamp((sourceReverbGain + acousticProbe.reverbGain)*0.5f, 0.0f, 1.0f);
-        }
+        if(!sourceCell || !acousticCells.inrange(acousticProbe.cell)) return;
+        int sourceidx = acousticCellIndex(sourceCell->coord),
+            targetidx = acousticProbe.cell;
+        AcousticAStarResult path;
+        if(!findAcousticAStarPath(sourceidx, targetidx, dist, path)) return;
+
+        acousticDebugPath = path.cells;
+        acousticDebugVirtualSource = path.virtualPosition;
+        acousticDebugPathMillis = totalmillis;
 
         float closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
               openGainHF = max(closedGainHF, 0.5f),
-              effectiveMuffleGainHF = closedGainHF + (openGainHF - closedGainHF)*muffleOpen;
-        volf *= 1.0f - occlusion*(1.0f - soundacousticblockgain);
-        gainhf *= 1.0f - occlusion*(1.0f - effectiveMuffleGainHF);
-        reverbSend = max(reverbSend, acousticTravelReverbSend(sourceReverbGain, acousticProbe.reverbGain, pathReverbGain, occlusion, pathComplexity, diffraction));
+              effectiveMuffleGainHF = closedGainHF + (openGainHF - closedGainHF)*path.muffleOpen;
+        volf *= 1.0f - path.occlusion*(1.0f - soundacousticblockgain);
+        gainhf *= 1.0f - path.occlusion*(1.0f - effectiveMuffleGainHF);
+        reverbSend = max(reverbSend, acousticTravelReverbSend(path.sourceReverbGain, acousticProbe.reverbGain, path.pathReverbGain, path.occlusion, path.complexity, path.diffraction));
+        if(info)
+        {
+            info->apparent = path.virtualPosition;
+            info->occlusion = path.occlusion;
+            info->virtualGain = clamp(path.occlusion*(0.35f + path.complexity*0.45f), 0.0f, 0.75f);
+            info->virtualGainHF = clamp(effectiveMuffleGainHF + (1.0f - effectiveMuffleGainHF)*0.45f, 0.02f, 1.0f);
+            info->path = true;
+        }
     }
 
     void acousticHudSource(float &reverbSend)
@@ -1507,28 +1532,21 @@ namespace acoustics
         gle::attrib(v[b]); gle::attrib(color, alpha);
     }
 
-    static void drawAcousticFieldLine(const vec &a, const vec &b, uchar alpha)
+    static void drawAcousticDebugLine(const vec &a, const vec &b, uchar alpha)
     {
         bvec white(255, 255, 255);
         gle::attrib(a); gle::attrib(white, alpha);
         gle::attrib(b); gle::attrib(white, alpha);
     }
 
-    static void drawAcousticListenerFieldDebug(int maxradius)
+    static void drawAcousticAStarDebug(int maxradius)
     {
-        if(acousticListenerFieldRegion < 0 || !acousticRegions.inrange(acousticListenerFieldRegion) ||
-           acousticListenerField.length() != acousticRegions.length() || !camera1)
+        if(acousticDebugPath.empty() || !camera1 || totalmillis - acousticDebugPathMillis > 500)
             return;
 
         int lines = 3;
-        loopv(acousticListenerField)
-        {
-            const AcousticFieldNode &node = acousticListenerField[i];
-            if(i == acousticListenerFieldRegion || !node.reached || !acousticRegions.inrange(i) || !acousticRegions.inrange(node.prevRegion) ||
-               !acousticPortals.inrange(node.prevPortal) || acousticRegions[i].center.dist(camera1->o) > maxradius)
-                continue;
-            lines += 2;
-        }
+        loopv(acousticDebugPath) if(acousticCells.inrange(acousticDebugPath[i]) && acousticCells[acousticDebugPath[i]].origin.dist(camera1->o) <= maxradius)
+            lines += 3 + (i ? 1 : 0);
         if(lines <= 0) return;
 
         GLfloat oldwidth = 1.0f;
@@ -1536,23 +1554,21 @@ namespace acoustics
         glLineWidth(3.0f);
         gle::begin(GL_LINES, lines*2);
 
-        const AcousticRegion &listener = acousticRegions[acousticListenerFieldRegion];
         float marker = max(soundacousticcellsize, 16)*0.35f;
-        drawAcousticFieldLine(vec(listener.center.x - marker, listener.center.y, listener.center.z), vec(listener.center.x + marker, listener.center.y, listener.center.z), 255);
-        drawAcousticFieldLine(vec(listener.center.x, listener.center.y - marker, listener.center.z), vec(listener.center.x, listener.center.y + marker, listener.center.z), 255);
-        drawAcousticFieldLine(vec(listener.center.x, listener.center.y, listener.center.z - marker), vec(listener.center.x, listener.center.y, listener.center.z + marker), 255);
+        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x - marker, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z), vec(acousticDebugVirtualSource.x + marker, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z), 255);
+        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y - marker, acousticDebugVirtualSource.z), vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y + marker, acousticDebugVirtualSource.z), 255);
+        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z - marker), vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z + marker), 255);
 
-        loopv(acousticListenerField)
+        loopv(acousticDebugPath)
         {
-            const AcousticFieldNode &node = acousticListenerField[i];
-            if(i == acousticListenerFieldRegion || !node.reached || !acousticRegions.inrange(i) || !acousticRegions.inrange(node.prevRegion) ||
-               !acousticPortals.inrange(node.prevPortal) || acousticRegions[i].center.dist(camera1->o) > maxradius)
-                continue;
-            const AcousticRegion &region = acousticRegions[i], &prev = acousticRegions[node.prevRegion];
-            const AcousticPortal &portal = acousticPortals[node.prevPortal];
-            uchar alpha = uchar(clamp(235 - int(node.cost*55.0f), 90, 235));
-            drawAcousticFieldLine(region.center, portal.center, alpha);
-            drawAcousticFieldLine(portal.center, prev.center, alpha);
+            if(!acousticCells.inrange(acousticDebugPath[i])) continue;
+            const vec &cur = acousticCells[acousticDebugPath[i]].origin;
+            if(cur.dist(camera1->o) > maxradius) continue;
+            drawAcousticDebugLine(vec(cur.x - marker*0.45f, cur.y, cur.z), vec(cur.x + marker*0.45f, cur.y, cur.z), 210);
+            drawAcousticDebugLine(vec(cur.x, cur.y - marker*0.45f, cur.z), vec(cur.x, cur.y + marker*0.45f, cur.z), 210);
+            drawAcousticDebugLine(vec(cur.x, cur.y, cur.z - marker*0.45f), vec(cur.x, cur.y, cur.z + marker*0.45f), 210);
+            if(i && acousticCells.inrange(acousticDebugPath[i-1]))
+                drawAcousticDebugLine(acousticCells[acousticDebugPath[i-1]].origin, cur, 235);
         }
 
         xtraverts += gle::end();
@@ -1612,7 +1628,7 @@ namespace acoustics
                 xtraverts += gle::end();
             }
         }
-        drawAcousticListenerFieldDebug(min(max(soundacousticgridradius, 32), 256));
+        drawAcousticAStarDebug(min(max(soundacousticgridradius, 32), 256));
         glDepthMask(GL_TRUE);
         if(cull) glEnable(GL_CULL_FACE);
     }
