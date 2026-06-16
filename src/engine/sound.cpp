@@ -1197,18 +1197,17 @@ namespace sound
     FVARR(airpressure, 0.5f, 1.0f, 2.0f); // atmo
 
     VARP(soundacoustics, 0, 0, 1);
-    VARP(soundacousticrays, 4, 32, 128);
-    VARP(soundacousticinterval, 20, 50, 1000);
-    VARP(soundacousticmaxrays, 1, 8, 32);
-    VARP(soundacousticbounces, 0, 1, 4);
     VAR(soundacousticsmooth, 0, 150, 2000);
     VAR(debugsoundacoustics, 0, 0, 1);
     FVAR(soundacousticrange, 4.0f, 512.0f, 1024.0f);
-    FVAR(soundacousticcone, 8.0f, 38.0f, 85.0f);
     FVAR(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
     FVAR(soundacousticblockgain, 0.05f, 0.7f, 1.0f);
     FVAR(soundacousticmufflegainhf, 0.02f, 0.1f, 1.0f);
     FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
+    VARP(soundacousticgrid, 0, 1, 1);
+    VARP(soundacousticcellsize, 16, 32, 128);
+    VARP(soundacousticbakerays, 16, 64, 256);
+    VARP(soundacousticgridradius, 32, 256, 256);
 
     static const float SoundUnitsPerMeter = 5.0f;
     static const float SoundLoudnessFrequency = 1000.0f;
@@ -1282,6 +1281,61 @@ namespace sound
         float firstWeight, secondWeight;
 
         AcousticChoice() : first(0), second(0), firstWeight(1), secondWeight(0) {}
+    };
+
+    struct AcousticCell
+    {
+        ivec coord;
+        vec origin;
+        float airOccupancy, skyOpenness, openness, hitRatio, nearWallRatio, farWallRatio, nearDistance, medianDistance, farDistance, distanceVariance,
+              corridorScore, verticalOpenness, clutterScore, irregularityScore, outdoorConnectivity, presetScores[AP_NUM], presetBlend, confidence,
+              reverbGain, reverbDecay, reflection, muffleOpen, outdoorRatio;
+        int primaryPreset, secondaryPreset, region, connections;
+        bool valid, boundary;
+        EFXEAXREVERBPROPERTIES reverbShape;
+        AcousticChoice indoorChoice, outdoorChoice;
+
+        AcousticCell() : coord(0, 0, 0), origin(0, 0, 0), airOccupancy(0), skyOpenness(0), openness(0), hitRatio(0), nearWallRatio(0), farWallRatio(0),
+            nearDistance(0), medianDistance(0), farDistance(0), distanceVariance(0), corridorScore(0), verticalOpenness(0), clutterScore(0),
+            irregularityScore(0), outdoorConnectivity(0), presetBlend(0), confidence(0), reverbGain(0), reverbDecay(0.3f), reflection(0),
+            muffleOpen(1), outdoorRatio(1), primaryPreset(AP_OPENOUTDOOR), secondaryPreset(AP_OPENOUTDOOR), region(-1), connections(0),
+            valid(false), boundary(false)
+        {
+            loopi(AP_NUM) presetScores[i] = 0.0f;
+            EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
+            reverbShape = generic;
+            indoorChoice.first = indoorChoice.second = AP_HALL;
+            outdoorChoice.first = outdoorChoice.second = AP_OPENOUTDOOR;
+        }
+    };
+
+    struct AcousticRegion
+    {
+        int id, firstCell, cellCount, primaryPreset, secondaryPreset;
+        vec center;
+        float confidence, outdoorRatio, presetBlend;
+
+        AcousticRegion() : id(-1), firstCell(-1), cellCount(0), primaryPreset(AP_OPENOUTDOOR), secondaryPreset(AP_OPENOUTDOOR), center(0, 0, 0),
+            confidence(0), outdoorRatio(1), presetBlend(0) {}
+    };
+
+    struct AcousticPortal
+    {
+        int regionA, regionB;
+        vec center, normal;
+        float apertureSize, openingStrength, acousticCost, highFrequencyLoss, diffractionCost;
+
+        AcousticPortal() : regionA(-1), regionB(-1), center(0, 0, 0), normal(0, 0, 1), apertureSize(0), openingStrength(0), acousticCost(0),
+            highFrequencyLoss(0), diffractionCost(0) {}
+    };
+
+    struct AcousticPath
+    {
+        vector<int> regions, portals;
+        float acousticDistance, pathCost, diffractionAmount, occlusionAmount;
+        int bestPortal;
+
+        AcousticPath() : acousticDistance(0), pathCost(0), diffractionAmount(0), occlusionAmount(0), bestPortal(-1) {}
     };
 
     static float rampfactor(float x, float low, float high)
@@ -1452,24 +1506,16 @@ namespace sound
         return clamp(powf(10.0f, -cutDb/20.0f), 0.01f, 1.0f);
     }
 
-    struct AcousticRay
-    {
-        vec dir, hit;
-        float dist, open, influence;
-
-        AcousticRay() : dir(0, 0, 1), hit(0, 0, 0), dist(0), open(1), influence(0) {}
-    };
-
     struct AcousticProbe
     {
-        vector<AcousticRay> rays;
         vec origin;
-        int lastmillis, nextRay, lastDebugMillis;
-        float budget, openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, muffleOpen, scores[AP_NUM];
+        int lastmillis, lastDebugMillis, cell;
+        float openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, muffleOpen, scores[AP_NUM];
+        bool baked;
         EFXEAXREVERBPROPERTIES reverbShape;
         AcousticChoice indoorChoice, outdoorChoice;
 
-        AcousticProbe() : origin(0, 0, 0), lastmillis(0), nextRay(0), lastDebugMillis(0), budget(0), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1), muffleOpen(1)
+        AcousticProbe() : origin(0, 0, 0), lastmillis(0), lastDebugMillis(0), cell(-1), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1), muffleOpen(1), baked(false)
         {
             loopi(AP_NUM) scores[i] = 0.0f;
             EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
@@ -1481,73 +1527,139 @@ namespace sound
 
     static AcousticProbe acousticProbe;
     static float currentReverbGain = -1.0f, currentReverbDecay = -1.0f, currentReverbReflection = -1.0f, currentReverbDensity = -1.0f, currentReverbGainHF = -1.0f, currentReverbLateGain = -1.0f;
+    static vector<AcousticCell> acousticCells;
+    static vector<AcousticRegion> acousticRegions;
+    static vector<AcousticPortal> acousticPortals;
+    static hashtable<ivec, int> acousticCellLookup(1<<12);
 
-    static float smoothstepfactor(int elapsed)
+    static ivec acousticCellCoord(const vec &o)
     {
-        if(soundacousticsmooth <= 0) return 1.0f;
-        return clamp(elapsed/float(soundacousticsmooth), 0.0f, 1.0f);
+        int size = max(soundacousticcellsize, 16);
+        return ivec(int(floorf(o.x/size)), int(floorf(o.y/size)), int(floorf(o.z/size)));
     }
 
-    static void resizeAcousticProbe(int rays)
+    static vec acousticCellCenter(const ivec &coord)
     {
-        rays = clamp(rays, 4, 128);
-        if(acousticProbe.rays.length() == rays) return;
-        acousticProbe.rays.setsize(0);
-        const float golden = PI*(3.0f - sqrtf(5.0f));
-        loopi(rays)
-        {
-            float z = 1.0f - (2.0f*(i + 0.5f))/rays,
-                  r = sqrtf(max(0.0f, 1.0f - z*z)),
-                  a = golden*i;
-            AcousticRay &ray = acousticProbe.rays.add();
-            ray.dir = vec(cosf(a)*r, sinf(a)*r, z);
-        }
-        int skyDiagRays = rays >= 16 ? min(rays/4, 8) : max(rays/4, 1);
-        loopi(skyDiagRays)
-        {
-            float a = (2.0f*PI*i)/skyDiagRays,
-                  z = 0.45f,
-                  r = sqrtf(max(0.0f, 1.0f - z*z));
-            acousticProbe.rays[i].dir = vec(cosf(a)*r, sinf(a)*r, z);
-        }
-        acousticProbe.nextRay = 0;
-        acousticProbe.budget = 0;
+        float size = max(soundacousticcellsize, 16);
+        return vec((coord.x + 0.5f)*size, (coord.y + 0.5f)*size, (coord.z + 0.5f)*size);
     }
 
-    static void castAcousticRay(AcousticRay &ray, const vec &origin, float range)
+    static int acousticCellIndex(const ivec &coord)
     {
-        float dist = raycube(origin, ray.dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
-        dist = clamp(dist, 0.0f, range);
-        ray.dist = dist;
-        ray.open = dist/range;
-        ray.hit = vec(ray.dir).mul(dist).add(origin);
+        int *idx = acousticCellLookup.access(coord);
+        return idx ? *idx : -1;
+    }
 
-        if(soundacousticbounces > 0 && dist < range - 1.0f)
+    static AcousticCell *findAcousticCell(const vec &o)
+    {
+        if(!soundacousticgrid || acousticCells.empty()) return NULL;
+        int idx = acousticCellIndex(acousticCellCoord(o));
+        return acousticCells.inrange(idx) && acousticCells[idx].valid ? &acousticCells[idx] : NULL;
+    }
+
+    static bool acousticPointIsAir(const vec &p, float clearance)
+    {
+        if(!insideworld(p)) return false;
+        static const vec dirs[6] =
         {
-            vec normal = hitsurface;
-            if(!normal.iszero())
+            vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1), vec(0, 0, -1)
+        };
+        loopi(6) if(raycube(p, dirs[i], clearance, RAY_CLIPMAT|RAY_POLY) >= clearance*0.95f) return true;
+        return false;
+    }
+
+    static void scoreAcousticCell(AcousticCell &cell, float hits, float skyOpen, float ceilingDist, float horizontalHitRatio, float horizontalNearRatio,
+        float horizontalFarRatio, float horizontalFarHitRatio, float horizontalOpenRatio, float medianHorizontalDistance, float horizontalVariance,
+        float nearPercentile, float medianHitDistance, float farPercentile, float corridorScore, float downOpenRatio, float range)
+    {
+        float varianceScore = clamp(sqrtf(horizontalVariance)/max(metersToUnits(medianHorizontalDistance), 1.0f), 0.0f, 1.0f),
+              percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
+              irregularityScore = clamp(varianceScore*0.65f + percentileSpread*0.35f, 0.0f, 1.0f),
+              outdoorRaw = smoothramp(skyOpen, 0.35f, 0.70f),
+              indoorRaw = 1.0f - outdoorRaw,
+              ceilingOpen = skyOpen,
+              ceilingBlocked = 1.0f - ceilingOpen,
+              fill = clamp(horizontalNearRatio + horizontalHitRatio - horizontalFarHitRatio, 0.0f, 1.0f),
+              roomSizeScore = 1.0f - smoothramp(medianHorizontalDistance, 6.0f, 24.0f);
+
+        cell.presetScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*0.80f;
+        cell.presetScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.75f)*(1.0f - irregularityScore*0.35f)*1.05f;
+        cell.presetScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.55f;
+        cell.presetScores[AP_CAVE] = indoorRaw*(0.25f + hits*0.50f)*smoothramp(irregularityScore, 0.35f, 0.85f)*(0.25f + horizontalFarHitRatio*0.45f)*(0.35f + ceilingBlocked*0.35f)*(1.0f - corridorScore*0.70f)*0.85f;
+        cell.presetScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f);
+        cell.presetScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f);
+        cell.presetScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*corridorScore;
+        cell.presetScores[AP_CANYON] = outdoorRaw*skyOpen*(0.25f + horizontalFarHitRatio*0.75f)*(0.35f + irregularityScore*0.65f)*(0.70f + downOpenRatio*0.30f);
+
+        if(indoorRaw > 0.2f && cell.presetScores[AP_SMALLROOM] + cell.presetScores[AP_HALL] + cell.presetScores[AP_CORRIDOR] + cell.presetScores[AP_CAVE] <= 1e-4f)
+            cell.presetScores[medianHorizontalDistance < 10.0f ? AP_SMALLROOM : AP_HALL] = indoorRaw;
+        if(outdoorRaw > 0.2f && cell.presetScores[AP_OPENOUTDOOR] + cell.presetScores[AP_COURTYARD] + cell.presetScores[AP_STREET] + cell.presetScores[AP_CANYON] <= 1e-4f)
+            cell.presetScores[AP_OPENOUTDOOR] = outdoorRaw;
+
+        cell.indoorChoice = chooseAcousticPresets(cell.presetScores, false, AP_HALL);
+        cell.outdoorChoice = chooseAcousticPresets(cell.presetScores, true, AP_OPENOUTDOOR);
+
+        EFXEAXREVERBPROPERTIES indoorShape = blendEfx(acousticPresets[cell.indoorChoice.first].efx, acousticPresets[cell.indoorChoice.second].efx, cell.indoorChoice.secondWeight),
+                                outdoorShape = blendEfx(acousticPresets[cell.outdoorChoice.first].efx, acousticPresets[cell.outdoorChoice.second].efx, cell.outdoorChoice.secondWeight);
+        cell.reverbShape = blendEfx(indoorShape, outdoorShape, outdoorRaw);
+
+        float best = -1.0f, next = -1.0f;
+        cell.primaryPreset = AP_OPENOUTDOOR;
+        cell.secondaryPreset = AP_OPENOUTDOOR;
+        loopi(AP_NUM)
+        {
+            float score = cell.presetScores[i];
+            if(score > best)
             {
-                normal.normalize();
-                vec reflected = vec(ray.dir).sub(vec(normal).mul(2.0f*ray.dir.dot(normal)));
-                if(!reflected.iszero())
-                {
-                    reflected.normalize();
-                    vec bounceorigin = vec(ray.hit).add(vec(normal).mul(0.5f));
-                    float bdist = raycube(bounceorigin, reflected, range - dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
-                    ray.open = clamp((dist + 0.35f*bdist)/range, 0.0f, 1.0f);
-                }
+                next = best;
+                cell.secondaryPreset = cell.primaryPreset;
+                best = score;
+                cell.primaryPreset = i;
+            }
+            else if(score > next)
+            {
+                next = score;
+                cell.secondaryPreset = i;
             }
         }
+        float total = max(best + max(next, 0.0f), 1e-4f);
+        cell.presetBlend = clamp(max(next, 0.0f)/total, 0.0f, 1.0f);
+
+        float indoorStrength = (1.0f - outdoorRaw)*clamp(0.25f + hits*0.35f + horizontalFarHitRatio*0.25f + fill*0.15f, 0.0f, 1.0f),
+              outdoorStrength = outdoorRaw*clamp(0.07f + horizontalNearRatio*0.35f + horizontalFarHitRatio*0.30f + corridorScore*0.25f, 0.04f, 0.75f),
+              indoorMuffleOpen = clamp(smoothramp(medianHorizontalDistance, 6.0f, 36.0f)*0.70f + horizontalOpenRatio*0.30f, 0.0f, 1.0f),
+              outdoorMuffleOpen = clamp(skyOpen*0.55f + horizontalOpenRatio*0.35f + smoothramp(medianHorizontalDistance, 24.0f, 96.0f)*0.10f, 0.0f, 1.0f);
+
+        cell.skyOpenness = skyOpen;
+        cell.hitRatio = hits;
+        cell.nearWallRatio = horizontalNearRatio;
+        cell.farWallRatio = horizontalFarRatio;
+        cell.nearDistance = nearPercentile;
+        cell.medianDistance = medianHitDistance;
+        cell.farDistance = farPercentile;
+        cell.distanceVariance = horizontalVariance;
+        cell.corridorScore = corridorScore;
+        cell.verticalOpenness = clamp(skyOpen*0.7f + downOpenRatio*0.3f, 0.0f, 1.0f);
+        cell.clutterScore = fill;
+        cell.irregularityScore = irregularityScore;
+        cell.outdoorConnectivity = outdoorRaw;
+        cell.outdoorRatio = outdoorRaw;
+        cell.openness = clamp(1.0f - hits, 0.0f, 1.0f);
+        cell.reverbGain = clamp(indoorStrength + outdoorStrength, 0.0f, 1.0f);
+        cell.reverbDecay = cell.reverbShape.flDecayTime;
+        cell.reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f);
+        cell.muffleOpen = clamp(indoorMuffleOpen*(1.0f - outdoorRaw) + outdoorMuffleOpen*outdoorRaw, 0.0f, 1.0f);
+        cell.confidence = clamp(cell.airOccupancy*(1.0f - cell.boundary*0.35f)*(0.45f + hits*0.30f + min(range, ceilingDist + metersToUnits(medianHitDistance))/max(range, 1.0f)*0.25f), 0.05f, 1.0f);
     }
 
-    static void updateAcousticStats(int elapsed, float range)
+    static void bakeAcousticCellRays(AcousticCell &cell, int rays, float range)
     {
-        if(acousticProbe.rays.empty()) return;
-        float nearDist = metersToUnits(6.0f),
-              farDist = metersToUnits(24.0f),
-              maxHitDist = range*0.98f,
-              open = 0, walldist = 0, hits = 0,
-              skyOpen = 1.0f, ceilingDist = 0,
+        rays = clamp(rays, 16, 256);
+        const float golden = PI*(3.0f - sqrtf(5.0f)),
+                    nearDist = metersToUnits(6.0f),
+                    farDist = metersToUnits(24.0f),
+                    maxHitDist = range*0.98f;
+        float open = 0, hits = 0, skyOpen = 1.0f, ceilingDist = 0,
               skyCount = 0, skyOpenCount = 0, ceilingHits = 0,
               skyDiagCount = 0, skyDiagOpen = 0,
               horizontalCount = 0, horizontalHits = 0, horizontalNear = 0, horizontalFar = 0, horizontalFarHits = 0, horizontalDist = 0, horizontalDist2 = 0,
@@ -1557,72 +1669,74 @@ namespace sound
         struct AcousticSector
         {
             int count, hits;
-            float dist, nearHits, farHits;
+            float dist, nearHits;
 
-            AcousticSector() : count(0), hits(0), dist(0), nearHits(0), farHits(0) {}
+            AcousticSector() : count(0), hits(0), dist(0), nearHits(0) {}
         } sectors[8];
 
-        loopv(acousticProbe.rays)
+        loopi(rays)
         {
-            const AcousticRay &ray = acousticProbe.rays[i];
-            bool hit = ray.dist < maxHitDist;
-            open += ray.open;
-            walldist += ray.dist;
+            float z = 1.0f - (2.0f*(i + 0.5f))/rays,
+                  r = sqrtf(max(0.0f, 1.0f - z*z)),
+                  a = golden*i;
+            vec dir(cosf(a)*r, sinf(a)*r, z);
+            float dist = raycube(cell.origin, dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+            dist = clamp(dist, 0.0f, range);
+            bool hit = dist < maxHitDist;
+            open += dist/range;
             if(hit)
             {
                 hits += 1.0f;
-                hitDistances.add(unitsToMeters(ray.dist));
+                hitDistances.add(unitsToMeters(dist));
             }
-            if(ray.dir.z > 0.25f)
+            if(dir.z > 0.25f)
             {
                 skyDiagCount += 1.0f;
-                skyDiagOpen += hit ? smoothramp(ray.open, 0.78f, 0.98f) : 1.0f;
+                skyDiagOpen += hit ? smoothramp(dist/range, 0.78f, 0.98f) : 1.0f;
             }
-            if(ray.dir.z > 0.65f)
+            if(dir.z > 0.65f)
             {
                 skyCount += 1.0f;
                 if(!hit) skyOpenCount += 1.0f;
                 else
                 {
                     ceilingHits += 1.0f;
-                    ceilingDist += ray.dist;
+                    ceilingDist += dist;
                 }
             }
-            else if(fabs(ray.dir.z) < 0.30f)
+            else if(fabs(dir.z) < 0.30f)
             {
                 horizontalCount += 1.0f;
-                horizontalDist += ray.dist;
-                horizontalDist2 += ray.dist*ray.dist;
-                horizontalDistances.add(unitsToMeters(ray.dist));
+                horizontalDist += dist;
+                horizontalDist2 += dist*dist;
+                horizontalDistances.add(unitsToMeters(dist));
                 if(hit)
                 {
                     horizontalHits += 1.0f;
-                    if(ray.dist <= nearDist) horizontalNear += 1.0f;
-                    if(ray.dist >= farDist) horizontalFarHits += 1.0f;
+                    if(dist <= nearDist) horizontalNear += 1.0f;
+                    if(dist >= farDist) horizontalFarHits += 1.0f;
                 }
-                if(ray.dist >= farDist) horizontalFar += 1.0f;
+                if(dist >= farDist) horizontalFar += 1.0f;
 
-                float yaw = atan2f(ray.dir.y, ray.dir.x);
+                float yaw = atan2f(dir.y, dir.x);
                 int sector = clamp(int(floorf((yaw + PI)*(8.0f/(2.0f*PI)))), 0, 7);
                 sectors[sector].count++;
-                sectors[sector].dist += ray.dist;
+                sectors[sector].dist += dist;
                 if(hit)
                 {
                     sectors[sector].hits++;
-                    if(ray.dist <= nearDist) sectors[sector].nearHits += 1.0f;
-                    if(ray.dist >= farDist) sectors[sector].farHits += 1.0f;
+                    if(dist <= nearDist) sectors[sector].nearHits += 1.0f;
                 }
             }
-            else if(ray.dir.z < -0.35f)
+            else if(dir.z < -0.35f)
             {
                 downCount += 1.0f;
                 if(!hit) downOpen += 1.0f;
             }
         }
-        float invrays = 1.0f/acousticProbe.rays.length();
-        open *= invrays;
-        walldist *= invrays;
-        hits *= invrays;
+
+        open /= rays;
+        hits /= rays;
         if(skyCount > 0) skyOpen = skyOpenCount/skyCount;
         float verticalSkyOpen = skyOpen,
               diagonalSkyOpen = skyDiagCount > 0 ? skyDiagOpen/skyDiagCount : verticalSkyOpen;
@@ -1634,7 +1748,7 @@ namespace sound
               horizontalFarRatio = horizontalCount > 0 ? horizontalFar/horizontalCount : open,
               horizontalFarHitRatio = horizontalCount > 0 ? horizontalFarHits/horizontalCount : 0.0f,
               horizontalOpenRatio = max(horizontalFarRatio - horizontalFarHitRatio, 0.0f),
-              horizontalAvgDist = horizontalCount > 0 ? horizontalDist/horizontalCount : walldist,
+              horizontalAvgDist = horizontalCount > 0 ? horizontalDist/horizontalCount : open*range,
               horizontalVariance = 0.0f,
               downOpenRatio = downCount > 0 ? downOpen/downCount : 0.0f;
         if(horizontalCount > 1)
@@ -1643,16 +1757,13 @@ namespace sound
             horizontalVariance = max(horizontalDist2/horizontalCount - mean*mean, 0.0f);
         }
 
-        float avgHitDistance = hitDistances.empty() ? unitsToMeters(walldist) : 0.0f;
+        float avgHitDistance = hitDistances.empty() ? unitsToMeters(horizontalAvgDist) : 0.0f;
         loopv(hitDistances) avgHitDistance += hitDistances[i];
         if(!hitDistances.empty()) avgHitDistance /= hitDistances.length();
         float nearPercentile = acousticPercentile(hitDistances, 0.25f, avgHitDistance),
               medianHitDistance = acousticPercentile(hitDistances, 0.50f, avgHitDistance),
               farPercentile = acousticPercentile(hitDistances, 0.75f, avgHitDistance),
-              medianHorizontalDistance = acousticPercentile(horizontalDistances, 0.50f, unitsToMeters(horizontalAvgDist)),
-              varianceScore = clamp(sqrtf(horizontalVariance)/max(horizontalAvgDist, 1.0f), 0.0f, 1.0f),
-              percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
-              irregularityScore = clamp(varianceScore*0.65f + percentileSpread*0.35f, 0.0f, 1.0f);
+              medianHorizontalDistance = acousticPercentile(horizontalDistances, 0.50f, unitsToMeters(horizontalAvgDist));
 
         float sectorOpen[8], sectorNear[8];
         loopi(8)
@@ -1669,83 +1780,254 @@ namespace sound
                   sideNear = 0.5f*(sectorNear[side1] + sectorNear[side2]);
             sectorCorridor = max(sectorCorridor, clamp(alongFar*(sideClosed*0.55f + sideNear*0.45f), 0.0f, 1.0f));
         }
+        float varianceScore = clamp(sqrtf(horizontalVariance)/max(horizontalAvgDist, 1.0f), 0.0f, 1.0f),
+              corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), smoothramp(sectorCorridor, 0.06f, 0.36f)), 0.0f, 1.0f);
 
-        float corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), smoothramp(sectorCorridor, 0.06f, 0.36f)), 0.0f, 1.0f),
-              outdoorRaw = smoothramp(skyOpen, 0.35f, 0.70f),
-              indoorRaw = 1.0f - outdoorRaw,
-              ceilingOpen = skyOpen,
-              ceilingBlocked = 1.0f - ceilingOpen,
-              fill = clamp(horizontalNearRatio + horizontalHitRatio - horizontalFarHitRatio, 0.0f, 1.0f),
-              roomSizeScore = 1.0f - smoothramp(medianHorizontalDistance, 6.0f, 24.0f);
+        scoreAcousticCell(cell, hits, skyOpen, ceilingDist, horizontalHitRatio, horizontalNearRatio, horizontalFarRatio, horizontalFarHitRatio,
+            horizontalOpenRatio, medianHorizontalDistance, horizontalVariance, nearPercentile, medianHitDistance, farPercentile, corridorScore, downOpenRatio, range);
+    }
 
-        float rawScores[AP_NUM];
-        rawScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*0.80f;
-        rawScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.75f)*(1.0f - irregularityScore*0.35f)*1.05f;
-        rawScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.55f;
-        rawScores[AP_CAVE] = indoorRaw*(0.25f + hits*0.50f)*smoothramp(irregularityScore, 0.35f, 0.85f)*(0.25f + horizontalFarHitRatio*0.45f)*(0.35f + ceilingBlocked*0.35f)*(1.0f - corridorScore*0.70f)*0.85f;
-        rawScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f);
-        rawScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f);
-        rawScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*corridorScore;
-        rawScores[AP_CANYON] = outdoorRaw*skyOpen*(0.25f + horizontalFarHitRatio*0.75f)*(0.35f + irregularityScore*0.65f)*(0.70f + downOpenRatio*0.30f);
+    static bool bakeAcousticCell(AcousticCell &cell, const ivec &coord, int rays, float range)
+    {
+        int cellsize = max(soundacousticcellsize, 16);
+        float half = cellsize*0.5f,
+              sampleHalf = half*0.92f,
+              clearance = clamp(cellsize*0.08f, 1.5f, 4.0f);
+        vec center = acousticCellCenter(coord), centroid(0, 0, 0), nearest(center);
+        float nearestdist = 1e16f;
+        int samples = 0, air = 0;
 
-        if(indoorRaw > 0.2f && rawScores[AP_SMALLROOM] + rawScores[AP_HALL] + rawScores[AP_CORRIDOR] + rawScores[AP_CAVE] <= 1e-4f)
-            rawScores[medianHorizontalDistance < 10.0f ? AP_SMALLROOM : AP_HALL] = indoorRaw;
-        if(outdoorRaw > 0.2f && rawScores[AP_OPENOUTDOOR] + rawScores[AP_COURTYARD] + rawScores[AP_STREET] + rawScores[AP_CANYON] <= 1e-4f)
-            rawScores[AP_OPENOUTDOOR] = outdoorRaw;
-
-        float k = acousticProbe.walldist <= 0 ? 1.0f : smoothstepfactor(elapsed);
-        loopi(AP_NUM)
+        loopi(8)
         {
-            float scorek = k;
-            if(rawScores[i] > acousticProbe.scores[i])
-                scorek = acousticPresets[i].outdoor ? max(k, clamp(elapsed/120.0f, 0.0f, 1.0f)) : k*0.70f;
-            acousticProbe.scores[i] += (rawScores[i] - acousticProbe.scores[i])*scorek;
+            vec p(center.x + (i&1 ? sampleHalf : -sampleHalf), center.y + (i&2 ? sampleHalf : -sampleHalf), center.z + (i&4 ? sampleHalf : -sampleHalf));
+            samples++;
+            if(acousticPointIsAir(p, clearance))
+            {
+                air++;
+                centroid.add(p);
+                float dist = p.squaredist(center);
+                if(dist < nearestdist) { nearestdist = dist; nearest = p; }
+            }
         }
 
-        float ratiok = outdoorRaw > acousticProbe.outdoorRatio ? max(k, clamp(elapsed/120.0f, 0.0f, 1.0f)) : k;
-        acousticProbe.outdoorRatio += (outdoorRaw - acousticProbe.outdoorRatio)*ratiok;
-        acousticProbe.indoorChoice = chooseAcousticPresets(acousticProbe.scores, false, AP_HALL);
-        acousticProbe.outdoorChoice = chooseAcousticPresets(acousticProbe.scores, true, AP_OPENOUTDOOR);
+        static const vec faces[6] =
+        {
+            vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1), vec(0, 0, -1)
+        };
+        samples++;
+        if(acousticPointIsAir(center, clearance))
+        {
+            air++;
+            centroid.add(center);
+            nearest = center;
+            nearestdist = 0;
+        }
+        loopi(6)
+        {
+            vec p = vec(faces[i]).mul(sampleHalf).add(center);
+            samples++;
+            if(acousticPointIsAir(p, clearance))
+            {
+                air++;
+                centroid.add(p);
+                float dist = p.squaredist(center);
+                if(dist < nearestdist) { nearestdist = dist; nearest = p; }
+            }
+        }
 
-        EFXEAXREVERBPROPERTIES indoorShape = blendEfx(acousticPresets[acousticProbe.indoorChoice.first].efx, acousticPresets[acousticProbe.indoorChoice.second].efx, acousticProbe.indoorChoice.secondWeight),
-                                outdoorShape = blendEfx(acousticPresets[acousticProbe.outdoorChoice.first].efx, acousticPresets[acousticProbe.outdoorChoice.second].efx, acousticProbe.outdoorChoice.secondWeight),
-                                finalShape = blendEfx(indoorShape, outdoorShape, acousticProbe.outdoorRatio);
+        if(!air) return false;
 
-        float indoorStrength = (1.0f - acousticProbe.outdoorRatio)*clamp(0.25f + hits*0.35f + horizontalFarHitRatio*0.25f + fill*0.15f, 0.0f, 1.0f),
-              outdoorStrength = acousticProbe.outdoorRatio*clamp(0.07f + horizontalNearRatio*0.35f + horizontalFarHitRatio*0.30f + corridorScore*0.25f, 0.04f, 0.75f),
-              reverb = clamp(indoorStrength + outdoorStrength, 0.0f, 1.0f),
-              decay = finalShape.flDecayTime,
-              reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f),
-              indoorMuffleOpen = clamp(smoothramp(medianHorizontalDistance, 6.0f, 36.0f)*0.70f + horizontalOpenRatio*0.30f, 0.0f, 1.0f),
-              outdoorMuffleOpen = clamp(skyOpen*0.55f + horizontalOpenRatio*0.35f + smoothramp(medianHorizontalDistance, 24.0f, 96.0f)*0.10f, 0.0f, 1.0f),
-              muffleOpen = clamp(indoorMuffleOpen*(1.0f - acousticProbe.outdoorRatio) + outdoorMuffleOpen*acousticProbe.outdoorRatio, 0.0f, 1.0f);
-        acousticProbe.openness += (open - acousticProbe.openness)*k;
-        acousticProbe.walldist += (walldist - acousticProbe.walldist)*k;
-        acousticProbe.reverbGain += (reverb - acousticProbe.reverbGain)*k;
-        acousticProbe.reverbDecay += (decay - acousticProbe.reverbDecay)*k;
-        acousticProbe.reflection += (reflection - acousticProbe.reflection)*k;
-        acousticProbe.muffleOpen += (muffleOpen - acousticProbe.muffleOpen)*k;
-        acousticProbe.reverbShape = finalShape;
+        cell = AcousticCell();
+        cell.coord = coord;
+        cell.airOccupancy = air/float(samples);
+        cell.boundary = air < samples;
+        cell.origin = air > 1 ? centroid.div(float(air)) : nearest;
+        cell.valid = true;
+        bakeAcousticCellRays(cell, rays, range);
+        return true;
+    }
+
+    static bool acousticCellsCompatible(const AcousticCell &a, const AcousticCell &b)
+    {
+        if(!a.valid || !b.valid) return false;
+        if(a.primaryPreset == b.primaryPreset) return true;
+        if(fabs(a.outdoorRatio - b.outdoorRatio) > 0.35f) return false;
+        return max(a.presetScores[b.primaryPreset], b.presetScores[a.primaryPreset]) > 0.20f;
+    }
+
+    static void finalizeAcousticGrid()
+    {
+        static const ivec dirs[6] =
+        {
+            ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0), ivec(0, 0, 1), ivec(0, 0, -1)
+        };
+
+        loopv(acousticCells)
+        {
+            AcousticCell &cell = acousticCells[i];
+            if(!cell.valid) continue;
+            cell.connections = 0;
+            loopj(6)
+            {
+                int idx = acousticCellIndex(ivec(cell.coord).add(dirs[j]));
+                if(acousticCells.inrange(idx) && acousticCells[idx].valid) cell.connections++;
+            }
+            if(!cell.connections && cell.airOccupancy <= 0.0f) cell.valid = false;
+            if(cell.boundary) cell.confidence *= 0.80f;
+        }
+
+        acousticRegions.setsize(0);
+        acousticPortals.setsize(0);
+        vector<int> pending;
+        loopv(acousticCells) acousticCells[i].region = -1;
+        loopv(acousticCells)
+        {
+            AcousticCell &start = acousticCells[i];
+            if(!start.valid || start.region >= 0) continue;
+            AcousticRegion &region = acousticRegions.add();
+            region.id = acousticRegions.length() - 1;
+            region.firstCell = i;
+            region.primaryPreset = start.primaryPreset;
+            region.secondaryPreset = start.secondaryPreset;
+            pending.add(i);
+            start.region = region.id;
+            while(!pending.empty())
+            {
+                int curidx = pending.pop();
+                AcousticCell &cur = acousticCells[curidx];
+                region.cellCount++;
+                region.center.add(cur.origin);
+                region.confidence += cur.confidence;
+                region.outdoorRatio += cur.outdoorRatio;
+                loopj(6)
+                {
+                    int nextidx = acousticCellIndex(ivec(cur.coord).add(dirs[j]));
+                    if(!acousticCells.inrange(nextidx)) continue;
+                    AcousticCell &next = acousticCells[nextidx];
+                    if(!next.valid || next.region >= 0 || !acousticCellsCompatible(start, next)) continue;
+                    next.region = region.id;
+                    pending.add(nextidx);
+                }
+            }
+            if(region.cellCount > 0)
+            {
+                region.center.div(float(region.cellCount));
+                region.confidence = clamp(region.confidence/region.cellCount, 0.0f, 1.0f);
+                region.outdoorRatio = clamp(region.outdoorRatio/region.cellCount, 0.0f, 1.0f);
+            }
+        }
+
+        loopv(acousticCells)
+        {
+            AcousticCell &cell = acousticCells[i];
+            if(!cell.valid || cell.region < 0) continue;
+            loopj(6)
+            {
+                int nextidx = acousticCellIndex(ivec(cell.coord).add(dirs[j]));
+                if(!acousticCells.inrange(nextidx)) continue;
+                AcousticCell &next = acousticCells[nextidx];
+                if(!next.valid || next.region <= cell.region) continue;
+                AcousticPortal &portal = acousticPortals.add();
+                portal.regionA = cell.region;
+                portal.regionB = next.region;
+                portal.center = vec(cell.origin).add(next.origin).mul(0.5f);
+                portal.normal = vec(next.origin).sub(cell.origin);
+                if(!portal.normal.iszero()) portal.normal.normalize();
+                portal.apertureSize = max(soundacousticcellsize, 16)*min(cell.airOccupancy, next.airOccupancy);
+                portal.openingStrength = clamp((cell.airOccupancy + next.airOccupancy)*0.5f, 0.0f, 1.0f);
+                portal.acousticCost = 1.0f - portal.openingStrength;
+                portal.highFrequencyLoss = clamp((cell.boundary || next.boundary ? 0.35f : 0.10f) + portal.acousticCost*0.40f, 0.0f, 1.0f);
+                portal.diffractionCost = clamp((1.0f - portal.openingStrength)*0.75f + max(cell.nearWallRatio, next.nearWallRatio)*0.25f, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    void clearAcousticGrid()
+    {
+        acousticCells.setsize(0);
+        acousticRegions.setsize(0);
+        acousticPortals.setsize(0);
+        acousticCellLookup.clear();
+        acousticProbe.baked = false;
+        acousticProbe.cell = -1;
+    }
+
+    int numAcousticCells() { return acousticCells.length(); }
+    int numAcousticRegions() { return acousticRegions.length(); }
+    int numAcousticPortals() { return acousticPortals.length(); }
+
+    void bakeAcousticGrid(int cellsize, int rays)
+    {
+        if(worldsize <= 0)
+        {
+            conoutf(CON_WARN, "sound acoustics: no world for acoustic bake");
+            return;
+        }
+        if(cellsize > 0) soundacousticcellsize = clamp(cellsize, 16, 128);
+        rays = clamp(rays > 0 ? rays : soundacousticbakerays, 16, 256);
+        soundacousticbakerays = rays;
+
+        clearAcousticGrid();
+        int csize = max(soundacousticcellsize, 16),
+            cellsperaxis = (worldsize + csize - 1)/csize;
+        float range = metersToUnits(soundacousticrange);
+        loop(x, cellsperaxis) loop(y, cellsperaxis) loop(z, cellsperaxis)
+        {
+            ivec coord(x, y, z);
+            AcousticCell cell;
+            if(!bakeAcousticCell(cell, coord, rays, range)) continue;
+            int idx = acousticCells.length();
+            acousticCells.add(cell);
+            acousticCellLookup[coord] = idx;
+        }
+        finalizeAcousticGrid();
+        conoutf(CON_DEBUG, "sound acoustics: baked whole map: %d cells, %d regions, %d portals (%d unit cells, %d rays)",
+            acousticCells.length(), acousticRegions.length(), acousticPortals.length(), csize, rays);
+    }
+
+    static float smoothstepfactor(int elapsed)
+    {
+        if(soundacousticsmooth <= 0) return 1.0f;
+        return clamp(elapsed/float(soundacousticsmooth), 0.0f, 1.0f);
+    }
+
+    static void applyAcousticCell(const AcousticCell &cell, int elapsed)
+    {
+        float k = acousticProbe.walldist <= 0 ? 1.0f : smoothstepfactor(elapsed);
+        acousticProbe.baked = true;
+        acousticProbe.cell = acousticCellIndex(cell.coord);
+        loopi(AP_NUM) acousticProbe.scores[i] += (cell.presetScores[i] - acousticProbe.scores[i])*k;
+        acousticProbe.indoorChoice = cell.indoorChoice;
+        acousticProbe.outdoorChoice = cell.outdoorChoice;
+        acousticProbe.outdoorRatio += (cell.outdoorRatio - acousticProbe.outdoorRatio)*k;
+        acousticProbe.openness += (cell.openness - acousticProbe.openness)*k;
+        acousticProbe.walldist += (metersToUnits(cell.medianDistance) - acousticProbe.walldist)*k;
+        acousticProbe.reverbGain += (cell.reverbGain - acousticProbe.reverbGain)*k;
+        acousticProbe.reverbDecay += (cell.reverbDecay - acousticProbe.reverbDecay)*k;
+        acousticProbe.reflection += (cell.reflection - acousticProbe.reflection)*k;
+        acousticProbe.muffleOpen += (cell.muffleOpen - acousticProbe.muffleOpen)*k;
+        acousticProbe.reverbShape = cell.reverbShape;
 
         if(debugsoundacoustics && totalmillis - acousticProbe.lastDebugMillis >= 1000)
         {
             acousticProbe.lastDebugMillis = totalmillis;
-            conoutf(CON_DEBUG, "sound acoustics: indoor %s %d%% / %s %d%%, outdoor %s %d%% / %s %d%%, outdoor ratio %d%%, sky %d%%, ceiling %.1fm, median %.1fm, irregular %d%%, corridor %d%%, muffle open %d%%",
-                acousticPresets[acousticProbe.indoorChoice.first].name, int(acousticProbe.indoorChoice.firstWeight*100.0f + 0.5f),
-                acousticPresets[acousticProbe.indoorChoice.second].name, int(acousticProbe.indoorChoice.secondWeight*100.0f + 0.5f),
-                acousticPresets[acousticProbe.outdoorChoice.first].name, int(acousticProbe.outdoorChoice.firstWeight*100.0f + 0.5f),
-                acousticPresets[acousticProbe.outdoorChoice.second].name, int(acousticProbe.outdoorChoice.secondWeight*100.0f + 0.5f),
-                int(acousticProbe.outdoorRatio*100.0f + 0.5f), int(skyOpen*100.0f + 0.5f), unitsToMeters(ceilingDist), medianHitDistance, int(irregularityScore*100.0f + 0.5f), int(corridorScore*100.0f + 0.5f), int(acousticProbe.muffleOpen*100.0f + 0.5f));
+            conoutf(CON_DEBUG, "sound acoustics baked: region %d, %s %d%% / %s %d%%, occupancy %d%%, confidence %d%%, sky %d%%, median %.1fm, irregular %d%%, corridor %d%%",
+                cell.region, acousticPresets[cell.primaryPreset].name, int((1.0f - cell.presetBlend)*100.0f + 0.5f),
+                acousticPresets[cell.secondaryPreset].name, int(cell.presetBlend*100.0f + 0.5f),
+                int(cell.airOccupancy*100.0f + 0.5f), int(cell.confidence*100.0f + 0.5f), int(cell.skyOpenness*100.0f + 0.5f),
+                cell.medianDistance, int(cell.irregularityScore*100.0f + 0.5f), int(cell.corridorScore*100.0f + 0.5f));
         }
     }
 
     static void updateEfxReverb()
     {
         if(!efxReverb || !efxReverbEffect || !efxReverbSlot) return;
-        const EFXEAXREVERBPROPERTIES &shape = acousticProbe.reverbShape;
-        float gain = soundacoustics ? clamp(shape.flGain*acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : clamp(0.65f*sounddistancereverb, 0.0f, 1.0f),
-              decay = clamp(acousticProbe.reverbDecay, 0.12f, 4.0f),
-              reflection = clamp(shape.flReflectionsGain*(0.35f + acousticProbe.reflection*0.65f), 0.0f, 3.16f),
+        bool usebaked = soundacoustics && acousticProbe.baked;
+        EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
+        const EFXEAXREVERBPROPERTIES &shape = usebaked ? acousticProbe.reverbShape : generic;
+        float gain = usebaked ? clamp(shape.flGain*acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f) : clamp(0.65f*sounddistancereverb, 0.0f, 1.0f),
+              decay = clamp(usebaked ? acousticProbe.reverbDecay : shape.flDecayTime, 0.12f, 4.0f),
+              reflection = clamp(shape.flReflectionsGain*(usebaked ? 0.35f + acousticProbe.reflection*0.65f : 1.0f), 0.0f, 3.16f),
               density = clamp(shape.flDensity, 0.0f, 1.0f),
               gainhf = clamp(shape.flGainHF, 0.0f, 1.0f),
               lateGain = clamp(shape.flLateReverbGain, 0.0f, 10.0f);
@@ -1779,6 +2061,8 @@ namespace sound
     {
         if(!soundacoustics || !camera1)
         {
+            acousticProbe.baked = false;
+            acousticProbe.cell = -1;
             updateEfxReverb();
             return;
         }
@@ -1788,57 +2072,29 @@ namespace sound
         int elapsed = max(now - acousticProbe.lastmillis, 1);
         acousticProbe.lastmillis = now;
         acousticProbe.origin = camera1->o;
-        resizeAcousticProbe(soundacousticrays);
-        float range = metersToUnits(soundacousticrange);
-
-        acousticProbe.budget += acousticProbe.rays.length()*elapsed/float(max(soundacousticinterval, 1));
-        int work = clamp(int(acousticProbe.budget), 0, soundacousticmaxrays);
-        if(work <= 0 && acousticProbe.walldist <= 0) work = min(soundacousticmaxrays, acousticProbe.rays.length());
-        loopi(work)
+        AcousticCell *cell = findAcousticCell(acousticProbe.origin);
+        if(cell)
         {
-            AcousticRay &ray = acousticProbe.rays[acousticProbe.nextRay];
-            castAcousticRay(ray, acousticProbe.origin, range);
-            acousticProbe.nextRay = (acousticProbe.nextRay + 1)%acousticProbe.rays.length();
+            applyAcousticCell(*cell, elapsed);
+            updateEfxReverb();
+            return;
         }
-        acousticProbe.budget = max(acousticProbe.budget - work, 0.0f);
 
-        updateAcousticStats(elapsed, range);
+        acousticProbe.baked = false;
+        acousticProbe.cell = -1;
         updateEfxReverb();
-    }
-
-    static void resetAcousticInfluence()
-    {
-        loopv(acousticProbe.rays) acousticProbe.rays[i].influence = 0.0f;
     }
 
     static void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend)
     {
-        if(!soundacoustics || acousticProbe.rays.empty() || dist <= 1.0f) return;
+        if(!soundacoustics || !acousticProbe.baked || dist <= 1.0f) return;
         vec dir = vec(loc).sub(acousticProbe.origin);
         if(dir.iszero()) return;
         dir.normalize();
-
-        float mindot = cosf(clamp(soundacousticcone, 8.0f, 85.0f)*RAD),
-              weights = 0, blocked = 0, pathOpen = 0;
-        loopv(acousticProbe.rays)
-        {
-            AcousticRay &ray = acousticProbe.rays[i];
-            float dot = ray.dir.dot(dir);
-            if(dot <= mindot) continue;
-            float w = (dot - mindot)/(1.0f - mindot);
-            w *= w;
-            float rayOpenToSource = ray.dist + 2.0f < dist ? clamp(ray.dist/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f,
-                  b = 1.0f - rayOpenToSource;
-            weights += w;
-            blocked += b*w;
-            pathOpen += rayOpenToSource*w;
-            ray.influence = max(ray.influence, b*w);
-        }
-        if(weights <= 0) return;
-
-        float occlusion = clamp(powf(blocked/weights, 0.75f)*soundacousticocclusion, 0.0f, 1.0f);
-        float directionalOpen = clamp(pathOpen/weights, 0.0f, 1.0f),
-              muffleOpen = clamp(directionalOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f),
+        float clear = raycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
+              pathOpen = clear + 2.0f < dist ? clamp(clear/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f,
+              occlusion = clamp(powf(1.0f - pathOpen, 0.75f)*soundacousticocclusion, 0.0f, 1.0f),
+              muffleOpen = clamp(pathOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f),
               closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
               openGainHF = max(closedGainHF, 0.5f),
               effectiveMuffleGainHF = closedGainHF + (openGainHF - closedGainHF)*muffleOpen;
@@ -1849,36 +2105,77 @@ namespace sound
 
     static void acousticHudSource(float &reverbSend)
     {
-        if(!soundacoustics || acousticProbe.rays.empty()) return;
+        if(!soundacoustics || !acousticProbe.baked) return;
         reverbSend = max(reverbSend, clamp(acousticProbe.reverbGain*soundacousticreverb, 0.0f, 1.0f));
     }
 
-    static bvec acousticDebugColor(float t)
+    static bvec acousticCellDebugColor(const AcousticCell &cell)
     {
-        t = clamp(t, 0.0f, 1.0f);
-        int r = int(255.0f*t + 0.5f),
-            g = int(255.0f*(1.0f - max(t - 0.5f, 0.0f)*2.0f) + 0.5f);
-        return bvec(r, g, 0);
+        int r = int((cell.boundary ? 255.0f : 80.0f) + cell.nearWallRatio*80.0f),
+            g = int(90.0f + cell.outdoorRatio*150.0f),
+            b = int(220.0f - cell.outdoorRatio*130.0f);
+        return bvec(clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
+    }
+
+    static void drawAcousticCellLine(const vec *v, int a, int b, const bvec &color, uchar alpha)
+    {
+        gle::attrib(v[a]); gle::attrib(color, alpha);
+        gle::attrib(v[b]); gle::attrib(color, alpha);
     }
 
     static void drawAcousticsDebug()
     {
-        if(!soundacoustics || !debugsoundacoustics || acousticProbe.rays.empty()) return;
+        if(!soundacoustics || !debugsoundacoustics || acousticCells.empty()) return;
         ldrnotextureshader->set();
         GLboolean cull = glIsEnabled(GL_CULL_FACE);
         glDisable(GL_CULL_FACE);
         glDepthMask(GL_FALSE);
         gle::defvertex();
         gle::defcolor(4, GL_UNSIGNED_BYTE);
-        gle::begin(GL_LINES, acousticProbe.rays.length()*2);
-        loopv(acousticProbe.rays)
+
+        if(camera1 && soundacousticgrid && !acousticCells.empty())
         {
-            const AcousticRay &ray = acousticProbe.rays[i];
-            bvec color = acousticDebugColor(ray.influence);
-            gle::attrib(acousticProbe.origin); gle::attrib(color, 180);
-            gle::attrib(ray.hit);              gle::attrib(color, 255);
+            int visible = 0,
+                maxradius = min(soundacousticgridradius, 256);
+            loopv(acousticCells) if(acousticCells[i].valid && acousticCells[i].origin.dist(camera1->o) <= maxradius) visible++;
+            if(visible > 0)
+            {
+                float half = max(soundacousticcellsize, 16)*0.5f;
+                gle::begin(GL_LINES, visible*24);
+                loopv(acousticCells)
+                {
+                    const AcousticCell &cell = acousticCells[i];
+                    if(!cell.valid || cell.origin.dist(camera1->o) > maxradius) continue;
+                    vec c = acousticCellCenter(cell.coord),
+                        v[8] =
+                        {
+                            vec(c.x - half, c.y - half, c.z - half),
+                            vec(c.x + half, c.y - half, c.z - half),
+                            vec(c.x + half, c.y + half, c.z - half),
+                            vec(c.x - half, c.y + half, c.z - half),
+                            vec(c.x - half, c.y - half, c.z + half),
+                            vec(c.x + half, c.y - half, c.z + half),
+                            vec(c.x + half, c.y + half, c.z + half),
+                            vec(c.x - half, c.y + half, c.z + half)
+                        };
+                    bvec color = acousticCellDebugColor(cell);
+                    uchar alpha = uchar(clamp(45 + int(cell.confidence*150.0f), 45, 195));
+                    drawAcousticCellLine(v, 0, 1, color, alpha);
+                    drawAcousticCellLine(v, 1, 2, color, alpha);
+                    drawAcousticCellLine(v, 2, 3, color, alpha);
+                    drawAcousticCellLine(v, 3, 0, color, alpha);
+                    drawAcousticCellLine(v, 4, 5, color, alpha);
+                    drawAcousticCellLine(v, 5, 6, color, alpha);
+                    drawAcousticCellLine(v, 6, 7, color, alpha);
+                    drawAcousticCellLine(v, 7, 4, color, alpha);
+                    drawAcousticCellLine(v, 0, 4, color, alpha);
+                    drawAcousticCellLine(v, 1, 5, color, alpha);
+                    drawAcousticCellLine(v, 2, 6, color, alpha);
+                    drawAcousticCellLine(v, 3, 7, color, alpha);
+                }
+                xtraverts += gle::end();
+            }
         }
-        xtraverts += gle::end();
         glDepthMask(GL_TRUE);
         if(cull) glEnable(GL_CULL_FACE);
     }
@@ -2001,7 +2298,6 @@ namespace sound
             if(mainmenu) stopMapSounds();
             else checkMapSounds();
             updateAcoustics();
-            resetAcousticInfluence();
             syncChannels();
         }
         music.update();
@@ -2236,6 +2532,15 @@ COMMAND(altmapsound, "si");
 
 ICOMMAND(numsounds, "", (), intret(sound::numSounds()));
 ICOMMAND(nummapsounds, "", (), intret(sound::numMapSounds()));
+ICOMMAND(soundacousticcells, "", (), intret(sound::numAcousticCells()));
+ICOMMAND(soundacousticregions, "", (), intret(sound::numAcousticRegions()));
+ICOMMAND(soundacousticportals, "", (), intret(sound::numAcousticPortals()));
+
+void bakesoundacoustics(int *cellsize, int *rays) { sound::bakeAcousticGrid(*cellsize, *rays); }
+COMMAND(bakesoundacoustics, "ii");
+
+void clearsoundacousticgrid() { sound::clearAcousticGrid(); }
+COMMAND(clearsoundacousticgrid, "");
 
 void soundreset() { sound::soundReset(); }
 COMMAND(soundreset, "");
