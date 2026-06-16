@@ -1,6 +1,7 @@
 // worldio.cpp: loading & saving of maps and savegames
 
 #include "engine.h"
+#include "acoustics.h"
 
 static const char *const tesscompatvar = "__sauerract_mapversion";
 
@@ -1151,6 +1152,7 @@ void finishload(const char *mname, const char *cname, Texture *mapshot) // sauer
     flushpreloadedmodels();
 
     preloadmapsounds();
+    acoustics::loadAcousticGrid(mname);
 
     entitiesinoctanodes();
 

@@ -16,9 +16,9 @@ namespace acoustics
     FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
 
     VARP(soundacousticgrid, 0, 1, 1);
-    VARP(soundacousticcellsize, 16, 32, 128);
-    VARP(soundacousticbakerays, 16, 64, 256);
-    VARP(soundacousticthreads, 0, 0, 16);
+    VAR(soundacousticcellsize, 16, 32, 128);
+    VAR(soundacousticbakerays, 16, 128, 256);
+    VAR(soundacousticthreads, 0, 0, 16);
 
     VARP(soundacousticastarrange, 0, 512, 4096);
     VARP(soundacousticastarbudget, 0, 1024, 100000);
@@ -402,6 +402,7 @@ namespace acoustics
     static int acousticBakeTotal = 0, acousticBakeProcessed = 0, acousticBakeValidCells = 0;
     static vec acousticBakeBounds[2];
     static bool acousticBakeBoundsSet[2] = { false, false };
+    static const int AcousticFileVersion = 2;
 
     static Uint32 acousticBakeTimer(Uint32 interval, void *param)
     {
@@ -416,6 +417,156 @@ namespace acoustics
         renderprogress(bar, text);
         if(interceptkey(SDLK_ESCAPE)) acousticBakeCanceled = true;
         checkAcousticBakeProgress = false;
+    }
+
+    static bool getAcousticFile(const char *mname, char *acgname)
+    {
+        if(!mname || !*mname) mname = game::getclientmap();
+        if(!mname || !*mname) return false;
+
+        string pakname, mapname, cfgname;
+        getmapfilenames(mname, NULL, pakname, mapname, cfgname);
+        nformatstring(acgname, MAXSTRLEN, "packages/map/%s.acg", mapname);
+        path(acgname);
+        return true;
+    }
+
+    static void putVec(stream *f, const vec &v)
+    {
+        f->putlil<float>(v.x);
+        f->putlil<float>(v.y);
+        f->putlil<float>(v.z);
+    }
+
+    template<class T>
+    static bool readLil(stream *f, T &v)
+    {
+        if(f->read(&v, sizeof(T)) != sizeof(T)) return false;
+        v = lilswap(v);
+        return true;
+    }
+
+    static bool readByte(stream *f, int &v)
+    {
+        v = f->getchar();
+        return v >= 0;
+    }
+
+    static bool getVec(stream *f, vec &v)
+    {
+        return readLil(f, v.x) && readLil(f, v.y) && readLil(f, v.z);
+    }
+
+    static void putIvec(stream *f, const ivec &v)
+    {
+        f->putlil<int>(v.x);
+        f->putlil<int>(v.y);
+        f->putlil<int>(v.z);
+    }
+
+    static bool getIvec(stream *f, ivec &v)
+    {
+        return readLil(f, v.x) && readLil(f, v.y) && readLil(f, v.z);
+    }
+
+    static void writeAcousticCell(stream *f, const AcousticCell &cell)
+    {
+        putIvec(f, cell.coord);
+        putVec(f, cell.origin);
+        f->putlil<float>(cell.airOccupancy);
+        f->putlil<float>(cell.skyOpenness);
+        f->putlil<float>(cell.openness);
+        f->putlil<float>(cell.hitRatio);
+        f->putlil<float>(cell.nearWallRatio);
+        f->putlil<float>(cell.farWallRatio);
+        f->putlil<float>(cell.nearDistance);
+        f->putlil<float>(cell.medianDistance);
+        f->putlil<float>(cell.farDistance);
+        f->putlil<float>(cell.distanceVariance);
+        f->putlil<float>(cell.horizontalHitRatio);
+        f->putlil<float>(cell.horizontalOpenRatio);
+        f->putlil<float>(cell.horizontalFarHitRatio);
+        f->putlil<float>(cell.medianHorizontalDistance);
+        f->putlil<float>(cell.downOpenness);
+        f->putlil<float>(cell.ceilingDistance);
+        f->putlil<float>(cell.corridorScore);
+        f->putlil<float>(cell.sectorCorridorScore);
+        f->putlil<float>(cell.cornerScore);
+        f->putlil<float>(cell.courtyardScore);
+        f->putlil<float>(cell.openPlainScore);
+        f->putlil<float>(cell.boxRoomScore);
+        f->putlil<float>(cell.pcaAnisotropy);
+        f->putlil<float>(cell.pcaFlatness);
+        f->putlil<float>(cell.pcaVerticality);
+        f->putlil<float>(cell.verticalOpenness);
+        f->putlil<float>(cell.clutterScore);
+        f->putlil<float>(cell.irregularityScore);
+        f->putlil<float>(cell.outdoorConnectivity);
+        f->putlil<float>(cell.confidence);
+        f->putlil<float>(cell.reverbGain);
+        f->putlil<float>(cell.reverbDecay);
+        f->putlil<float>(cell.reflection);
+        f->putlil<float>(cell.muffleOpen);
+        f->putlil<float>(cell.outdoorRatio);
+        f->putlil<float>(cell.presetBlend);
+        f->putlil<int>(cell.primaryPreset);
+        f->putlil<int>(cell.secondaryPreset);
+        f->putlil<int>(cell.region);
+        f->putlil<int>(cell.connections);
+        f->putchar(cell.valid ? 1 : 0);
+        f->putchar(cell.boundary ? 1 : 0);
+        loopi(AP_NUM) f->putlil<float>(cell.presetScores[i]);
+        loopi(AS_NUM)
+        {
+            f->putlil<float>(cell.sectorDistance[i]);
+            f->putlil<float>(cell.sectorOpenness[i]);
+            f->putlil<float>(cell.sectorNearRatio[i]);
+        }
+    }
+
+    static bool readAcousticCell(stream *f, AcousticCell &cell, int version)
+    {
+        cell = AcousticCell();
+        if(!getIvec(f, cell.coord) || !getVec(f, cell.origin) || !readLil(f, cell.airOccupancy)) return false;
+        if(version >= 2)
+        {
+            if(!readLil(f, cell.skyOpenness) || !readLil(f, cell.openness) || !readLil(f, cell.hitRatio) ||
+               !readLil(f, cell.nearWallRatio) || !readLil(f, cell.farWallRatio) || !readLil(f, cell.nearDistance) ||
+               !readLil(f, cell.medianDistance) || !readLil(f, cell.farDistance) || !readLil(f, cell.distanceVariance) ||
+               !readLil(f, cell.horizontalHitRatio) || !readLil(f, cell.horizontalOpenRatio) || !readLil(f, cell.horizontalFarHitRatio) ||
+               !readLil(f, cell.medianHorizontalDistance) || !readLil(f, cell.downOpenness) || !readLil(f, cell.ceilingDistance) ||
+               !readLil(f, cell.corridorScore) || !readLil(f, cell.sectorCorridorScore) || !readLil(f, cell.cornerScore) ||
+               !readLil(f, cell.courtyardScore) || !readLil(f, cell.openPlainScore) || !readLil(f, cell.boxRoomScore) ||
+               !readLil(f, cell.pcaAnisotropy) || !readLil(f, cell.pcaFlatness) || !readLil(f, cell.pcaVerticality) ||
+               !readLil(f, cell.verticalOpenness) || !readLil(f, cell.clutterScore) || !readLil(f, cell.irregularityScore) ||
+               !readLil(f, cell.outdoorConnectivity)) return false;
+        }
+        else
+        {
+            if(!readLil(f, cell.nearWallRatio) || !readLil(f, cell.medianDistance) ||
+               !readLil(f, cell.corridorScore) || !readLil(f, cell.irregularityScore)) return false;
+        }
+        int primary = 0, secondary = 0, valid = 0, boundary = 0;
+        if(!readLil(f, cell.confidence) || !readLil(f, cell.reverbGain) || !readLil(f, cell.reverbDecay) ||
+           !readLil(f, cell.reflection) || !readLil(f, cell.muffleOpen) || !readLil(f, cell.outdoorRatio) ||
+           !readLil(f, cell.presetBlend) || !readLil(f, primary) || !readLil(f, secondary) ||
+           !readLil(f, cell.region) || !readLil(f, cell.connections) || !readByte(f, valid) || !readByte(f, boundary)) return false;
+        cell.primaryPreset = clamp(primary, 0, AP_NUM - 1);
+        cell.secondaryPreset = clamp(secondary, 0, AP_NUM - 1);
+        cell.valid = valid != 0;
+        cell.boundary = boundary != 0;
+        cell.presetBlend = clamp(cell.presetBlend, 0.0f, 1.0f);
+        cell.reverbShape = blendEfx(acousticPresets[cell.primaryPreset].efx, acousticPresets[cell.secondaryPreset].efx, cell.presetBlend);
+        cell.reverbDecay = cell.reverbShape.flDecayTime;
+        if(version >= 2)
+        {
+            loopi(AP_NUM) if(!readLil(f, cell.presetScores[i])) return false;
+            loopi(AS_NUM)
+            {
+                if(!readLil(f, cell.sectorDistance[i]) || !readLil(f, cell.sectorOpenness[i]) || !readLil(f, cell.sectorNearRatio[i])) return false;
+            }
+        }
+        return true;
     }
 
     static float acousticRaycube(const vec &o, const vec &ray, float radius, int mode)
@@ -442,6 +593,11 @@ namespace acoustics
     static bool acousticBakeBoundsEnabled()
     {
         return acousticBakeBoundsSet[0] && acousticBakeBoundsSet[1];
+    }
+
+    static void clearAcousticBakeBounds()
+    {
+        acousticBakeBoundsSet[0] = acousticBakeBoundsSet[1] = false;
     }
 
     static void acousticBakeBoundsMinMax(vec &bbmin, vec &bbmax)
@@ -515,9 +671,11 @@ namespace acoustics
         float varianceScore = clamp(sqrtf(horizontalVariance)/max(metersToUnits(medianHorizontalDistance), 1.0f), 0.0f, 1.0f),
               percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
               irregularityScore = clamp(varianceScore*0.50f + percentileSpread*0.30f + cell.cornerScore*0.10f + cell.pcaAnisotropy*0.10f, 0.0f, 1.0f),
-              skyOutdoor = smoothramp(skyOpen, 0.35f, 0.70f),
+              skyOutdoor = smoothramp(skyOpen, 0.15f, 0.65f),
+              openSkyOutdoor = smoothramp(skyOpen, 0.15f, 0.85f),
               floodOutdoor = clamp(cell.outdoorConnectivity, 0.0f, 1.0f),
-              outdoorRaw = clamp(skyOutdoor*(0.35f + floodOutdoor*0.65f) + floodOutdoor*smoothramp(skyOpen, 0.15f, 0.45f)*0.25f, 0.0f, 1.0f),
+              skyOnlyOutdoor = openSkyOutdoor*clamp(0.35f + skyOpen*0.50f + horizontalOpenRatio*0.10f + downOpenRatio*0.05f, 0.25f, 0.95f),
+              outdoorRaw = clamp(max(skyOutdoor*(0.35f + floodOutdoor*0.65f) + floodOutdoor*smoothramp(skyOpen, 0.15f, 0.45f)*0.25f, skyOnlyOutdoor), 0.0f, 1.0f),
               indoorRaw = 1.0f - outdoorRaw,
               ceilingOpen = skyOpen,
               fill = clamp(horizontalNearRatio + horizontalHitRatio - horizontalFarHitRatio, 0.0f, 1.0f),
@@ -682,6 +840,7 @@ namespace acoustics
               diagonalSkyOpen = skyDiagCount > 0 ? skyDiagOpen/skyDiagCount : verticalSkyOpen;
         skyOpen = clamp(max(verticalSkyOpen*0.65f + diagonalSkyOpen*0.35f, diagonalSkyOpen*0.55f), 0.0f, 1.0f);
         if(ceilingHits > 0) ceilingDist /= ceilingHits;
+        else ceilingDist = range;
 
         float horizontalHitRatio = horizontalCount > 0 ? horizontalHits/horizontalCount : hits,
               horizontalNearRatio = horizontalCount > 0 ? horizontalNear/horizontalCount : 0.0f,
@@ -1019,6 +1178,12 @@ namespace acoustics
 
         loopv(acousticCells) if(acousticCells[i].valid)
         {
+            float openSky = smoothramp(acousticCells[i].skyOpenness, 0.15f, 0.85f);
+            acousticCells[i].outdoorConnectivity = max(acousticCells[i].outdoorConnectivity, openSky*0.85f);
+        }
+
+        loopv(acousticCells) if(acousticCells[i].valid)
+        {
             scoreAcousticCell(acousticCells[i], range);
             if(acousticCells[i].boundary) acousticCells[i].confidence *= 0.80f;
         }
@@ -1233,6 +1398,132 @@ namespace acoustics
         conoutf(CON_DEBUG, "sound acoustics bake corner %d set to %.1f %.1f %.1f", corner + 1, pos.x, pos.y, pos.z);
     }
 
+    bool saveAcousticGrid(const char *mname)
+    {
+        if(acousticCells.empty()) return false;
+
+        string acgname;
+        if(!getAcousticFile(mname, acgname)) return false;
+        stream *f = opengzfile(acgname, "wb");
+        if(!f) return false;
+
+        f->write("OSND", 4);
+        f->putlil<ushort>(AcousticFileVersion);
+        f->putlil<int>(worldsize);
+        f->putlil<int>(max(soundacousticcellsize, 16));
+        f->putlil<int>(acousticCells.length());
+        f->putlil<int>(acousticRegions.length());
+        f->putlil<int>(acousticPortals.length());
+        vec savedbounds[2] = { vec(0, 0, 0), vec(0, 0, 0) };
+        int boundsmask = acousticBakeBoundsEnabled() ? 3 : 0;
+        if(boundsmask) acousticBakeBoundsMinMax(savedbounds[0], savedbounds[1]);
+        f->putchar(boundsmask);
+        putVec(f, savedbounds[0]);
+        putVec(f, savedbounds[1]);
+        loopv(acousticCells) writeAcousticCell(f, acousticCells[i]);
+
+        delete f;
+        conoutf("saved %d sound acoustic cells to %s", acousticCells.length(), acgname);
+        return true;
+    }
+
+    bool loadAcousticGrid(const char *mname)
+    {
+        string acgname;
+        if(!getAcousticFile(mname, acgname))
+        {
+            clearAcousticGrid();
+            clearAcousticBakeBounds();
+            return false;
+        }
+
+        stream *f = opengzfile(acgname, "rb");
+        if(!f)
+        {
+            clearAcousticGrid();
+            clearAcousticBakeBounds();
+            return false;
+        }
+
+        char magic[4];
+        ushort version = 0;
+        int savedworld = -1, savedcellsize = -1, numcells = -1, numregions = 0, numportals = 0, boundsmask = -1;
+        vec savedbounds[2] = { vec(0, 0, 0), vec(0, 0, 0) };
+        bool ok = f->read(magic, 4) == 4 && !memcmp(magic, "OSND", 4) &&
+                  readLil(f, version) &&
+                  readLil(f, savedworld) &&
+                  readLil(f, savedcellsize) &&
+                  readLil(f, numcells) &&
+                  readLil(f, numregions) &&
+                  readLil(f, numportals) &&
+                  readByte(f, boundsmask) &&
+                  getVec(f, savedbounds[0]) &&
+                  getVec(f, savedbounds[1]);
+
+        int cellsperaxis = savedcellsize > 0 ? (worldsize + savedcellsize - 1)/savedcellsize : 0,
+            maxcells = cellsperaxis*cellsperaxis*cellsperaxis;
+        ok = ok && version >= 1 && version <= AcousticFileVersion && savedworld == worldsize && savedcellsize >= 16 && savedcellsize <= 128 &&
+             numcells >= 0 && numcells <= maxcells && numregions >= 0 && numregions <= numcells &&
+             numportals >= 0 && numportals <= max(numcells*6, 0) && (boundsmask == 0 || boundsmask == 3);
+        if(ok && boundsmask == 3)
+        {
+            vec bbmin, bbmax;
+            loopi(3)
+            {
+                bbmin[i] = min(savedbounds[0][i], savedbounds[1][i]);
+                bbmax[i] = max(savedbounds[0][i], savedbounds[1][i]);
+                if(bbmax[i] <= bbmin[i]) ok = false;
+            }
+            savedbounds[0] = bbmin;
+            savedbounds[1] = bbmax;
+        }
+
+        clearAcousticGrid();
+        if(ok)
+        {
+            soundacousticcellsize = savedcellsize;
+            acousticBakeBoundsSet[0] = acousticBakeBoundsSet[1] = boundsmask == 3;
+            acousticBakeBounds[0] = savedbounds[0];
+            acousticBakeBounds[1] = savedbounds[1];
+            loopi(numcells)
+            {
+                AcousticCell cell;
+                if(!readAcousticCell(f, cell, version)) { ok = false; break; }
+                if(cell.coord.x < 0 || cell.coord.y < 0 || cell.coord.z < 0 ||
+                   cell.coord.x >= cellsperaxis || cell.coord.y >= cellsperaxis || cell.coord.z >= cellsperaxis ||
+                   acousticCellLookup.access(cell.coord))
+                {
+                    ok = false;
+                    break;
+                }
+                int idx = acousticCells.length();
+                acousticCells.add(cell);
+                acousticCellLookup[cell.coord] = idx;
+            }
+        }
+
+        if(ok)
+        {
+            if(version >= 2) finalizeAcousticGrid();
+            else
+            {
+                acousticRegions.setsize(numregions);
+                acousticPortals.setsize(numportals);
+            }
+        }
+
+        delete f;
+        if(!ok)
+        {
+            clearAcousticGrid();
+            clearAcousticBakeBounds();
+            conoutf(CON_WARN, "sound acoustics: failed to load %s", acgname);
+            return false;
+        }
+        conoutf("loaded %d sound acoustic cells from %s", acousticCells.length(), acgname);
+        return true;
+    }
+
     void bakeAcousticGrid(int cellsize, int rays)
     {
         if(worldsize <= 0)
@@ -1340,6 +1631,7 @@ namespace acoustics
         conoutf(CON_DEBUG, "sound acoustics: baked whole map: %d cells, %d regions, %d portals (%d unit cells, %d rays)",
             acousticCells.length(), acousticRegions.length(), acousticPortals.length(), csize, rays);
         conoutf("baked sound acoustics in %.1f seconds", (end - start)/1000.0f);
+        saveAcousticGrid();
     }
 
     static float smoothstepfactor(int elapsed)
