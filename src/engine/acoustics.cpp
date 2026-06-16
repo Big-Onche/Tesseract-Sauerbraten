@@ -56,6 +56,19 @@ namespace acoustics
         AP_NUM
     };
 
+    enum
+    {
+        AS_NORTH = 0,
+        AS_NORTHEAST,
+        AS_EAST,
+        AS_SOUTHEAST,
+        AS_SOUTH,
+        AS_SOUTHWEST,
+        AS_WEST,
+        AS_NORTHWEST,
+        AS_NUM
+    };
+
     struct AcousticPreset
     {
         const char *name;
@@ -88,20 +101,27 @@ namespace acoustics
         ivec coord;
         vec origin;
         float airOccupancy, skyOpenness, openness, hitRatio, nearWallRatio, farWallRatio, nearDistance, medianDistance, farDistance, distanceVariance,
-              corridorScore, verticalOpenness, clutterScore, irregularityScore, outdoorConnectivity, presetScores[AP_NUM], presetBlend, confidence,
+              horizontalHitRatio, horizontalOpenRatio, horizontalFarHitRatio, medianHorizontalDistance, downOpenness, ceilingDistance,
+              corridorScore, sectorCorridorScore, cornerScore, courtyardScore, openPlainScore, boxRoomScore,
+              pcaAnisotropy, pcaFlatness, pcaVerticality,
+              verticalOpenness, clutterScore, irregularityScore, outdoorConnectivity, presetScores[AP_NUM], presetBlend, confidence,
               reverbGain, reverbDecay, reflection, muffleOpen, outdoorRatio;
+        float sectorDistance[AS_NUM], sectorOpenness[AS_NUM], sectorNearRatio[AS_NUM];
         int primaryPreset, secondaryPreset, region, connections;
         bool valid, boundary;
         EFXEAXREVERBPROPERTIES reverbShape;
         AcousticChoice indoorChoice, outdoorChoice;
 
         AcousticCell() : coord(0, 0, 0), origin(0, 0, 0), airOccupancy(0), skyOpenness(0), openness(0), hitRatio(0), nearWallRatio(0), farWallRatio(0),
-            nearDistance(0), medianDistance(0), farDistance(0), distanceVariance(0), corridorScore(0), verticalOpenness(0), clutterScore(0),
-            irregularityScore(0), outdoorConnectivity(0), presetBlend(0), confidence(0), reverbGain(0), reverbDecay(0.3f), reflection(0),
+            nearDistance(0), medianDistance(0), farDistance(0), distanceVariance(0), horizontalHitRatio(0), horizontalOpenRatio(0), horizontalFarHitRatio(0),
+            medianHorizontalDistance(0), downOpenness(0), ceilingDistance(0), corridorScore(0), sectorCorridorScore(0), cornerScore(0),
+            courtyardScore(0), openPlainScore(0), boxRoomScore(0), pcaAnisotropy(0), pcaFlatness(0), pcaVerticality(0),
+            verticalOpenness(0), clutterScore(0), irregularityScore(0), outdoorConnectivity(0), presetBlend(0), confidence(0), reverbGain(0), reverbDecay(0.3f), reflection(0),
             muffleOpen(1), outdoorRatio(1), primaryPreset(AP_OPENOUTDOOR), secondaryPreset(AP_OPENOUTDOOR), region(-1), connections(0),
             valid(false), boundary(false)
         {
             loopi(AP_NUM) presetScores[i] = 0.0f;
+            loopi(AS_NUM) sectorDistance[i] = sectorOpenness[i] = sectorNearRatio[i] = 0.0f;
             EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
             reverbShape = generic;
             indoorChoice.first = indoorChoice.second = AP_HALL;
@@ -323,28 +343,42 @@ namespace acoustics
         return false;
     }
 
-    static void scoreAcousticCell(AcousticCell &cell, float hits, float skyOpen, float ceilingDist, float horizontalHitRatio, float horizontalNearRatio,
-        float horizontalFarRatio, float horizontalFarHitRatio, float horizontalOpenRatio, float medianHorizontalDistance, float horizontalVariance,
-        float nearPercentile, float medianHitDistance, float farPercentile, float corridorScore, float downOpenRatio, float range)
+    static void scoreAcousticCell(AcousticCell &cell, float range)
     {
+        float hits = cell.hitRatio,
+              skyOpen = cell.skyOpenness,
+              ceilingDist = cell.ceilingDistance,
+              horizontalHitRatio = cell.horizontalHitRatio,
+              horizontalNearRatio = cell.nearWallRatio,
+              horizontalFarHitRatio = cell.horizontalFarHitRatio,
+              horizontalOpenRatio = cell.horizontalOpenRatio,
+              medianHorizontalDistance = cell.medianHorizontalDistance,
+              horizontalVariance = cell.distanceVariance,
+              nearPercentile = cell.nearDistance,
+              medianHitDistance = cell.medianDistance,
+              farPercentile = cell.farDistance,
+              corridorScore = cell.corridorScore,
+              downOpenRatio = cell.downOpenness;
         float varianceScore = clamp(sqrtf(horizontalVariance)/max(metersToUnits(medianHorizontalDistance), 1.0f), 0.0f, 1.0f),
               percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
-              irregularityScore = clamp(varianceScore*0.65f + percentileSpread*0.35f, 0.0f, 1.0f),
-              outdoorRaw = smoothramp(skyOpen, 0.35f, 0.70f),
+              irregularityScore = clamp(varianceScore*0.50f + percentileSpread*0.30f + cell.cornerScore*0.10f + cell.pcaAnisotropy*0.10f, 0.0f, 1.0f),
+              skyOutdoor = smoothramp(skyOpen, 0.35f, 0.70f),
+              floodOutdoor = clamp(cell.outdoorConnectivity, 0.0f, 1.0f),
+              outdoorRaw = clamp(skyOutdoor*(0.35f + floodOutdoor*0.65f) + floodOutdoor*smoothramp(skyOpen, 0.15f, 0.45f)*0.25f, 0.0f, 1.0f),
               indoorRaw = 1.0f - outdoorRaw,
               ceilingOpen = skyOpen,
               ceilingBlocked = 1.0f - ceilingOpen,
               fill = clamp(horizontalNearRatio + horizontalHitRatio - horizontalFarHitRatio, 0.0f, 1.0f),
               roomSizeScore = 1.0f - smoothramp(medianHorizontalDistance, 6.0f, 24.0f);
 
-        cell.presetScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*0.80f;
-        cell.presetScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.75f)*(1.0f - irregularityScore*0.35f)*1.05f;
-        cell.presetScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.55f;
-        cell.presetScores[AP_CAVE] = indoorRaw*(0.25f + hits*0.50f)*smoothramp(irregularityScore, 0.35f, 0.85f)*(0.25f + horizontalFarHitRatio*0.45f)*(0.35f + ceilingBlocked*0.35f)*(1.0f - corridorScore*0.70f)*0.85f;
-        cell.presetScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f);
-        cell.presetScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f);
-        cell.presetScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*corridorScore;
-        cell.presetScores[AP_CANYON] = outdoorRaw*skyOpen*(0.25f + horizontalFarHitRatio*0.75f)*(0.35f + irregularityScore*0.65f)*(0.70f + downOpenRatio*0.30f);
+        cell.presetScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*(0.75f + cell.boxRoomScore*0.35f);
+        cell.presetScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.75f)*(1.0f - irregularityScore*0.35f)*(0.90f + cell.boxRoomScore*0.20f);
+        cell.presetScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*(1.10f + cell.pcaAnisotropy*0.50f);
+        cell.presetScores[AP_CAVE] = indoorRaw*(0.25f + hits*0.50f)*smoothramp(irregularityScore, 0.35f, 0.85f)*(0.25f + horizontalFarHitRatio*0.45f)*(0.35f + ceilingBlocked*0.35f)*(1.0f - corridorScore*0.55f)*(0.85f + cell.pcaVerticality*0.25f);
+        cell.presetScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f)*(0.75f + cell.openPlainScore*0.45f);
+        cell.presetScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f)*(0.70f + cell.courtyardScore*0.60f);
+        cell.presetScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*max(corridorScore, cell.sectorCorridorScore)*(0.85f + cell.pcaAnisotropy*0.35f);
+        cell.presetScores[AP_CANYON] = outdoorRaw*skyOpen*(0.25f + horizontalFarHitRatio*0.75f)*(0.35f + irregularityScore*0.65f)*(0.55f + max(corridorScore, cell.pcaAnisotropy)*0.45f)*(0.70f + downOpenRatio*0.30f);
 
         if(indoorRaw > 0.2f && cell.presetScores[AP_SMALLROOM] + cell.presetScores[AP_HALL] + cell.presetScores[AP_CORRIDOR] + cell.presetScores[AP_CAVE] <= 1e-4f)
             cell.presetScores[medianHorizontalDistance < 10.0f ? AP_SMALLROOM : AP_HALL] = indoorRaw;
@@ -385,19 +419,9 @@ namespace acoustics
               indoorMuffleOpen = clamp(smoothramp(medianHorizontalDistance, 6.0f, 36.0f)*0.70f + horizontalOpenRatio*0.30f, 0.0f, 1.0f),
               outdoorMuffleOpen = clamp(skyOpen*0.55f + horizontalOpenRatio*0.35f + smoothramp(medianHorizontalDistance, 24.0f, 96.0f)*0.10f, 0.0f, 1.0f);
 
-        cell.skyOpenness = skyOpen;
-        cell.hitRatio = hits;
-        cell.nearWallRatio = horizontalNearRatio;
-        cell.farWallRatio = horizontalFarRatio;
-        cell.nearDistance = nearPercentile;
-        cell.medianDistance = medianHitDistance;
-        cell.farDistance = farPercentile;
-        cell.distanceVariance = horizontalVariance;
-        cell.corridorScore = corridorScore;
         cell.verticalOpenness = clamp(skyOpen*0.7f + downOpenRatio*0.3f, 0.0f, 1.0f);
         cell.clutterScore = fill;
         cell.irregularityScore = irregularityScore;
-        cell.outdoorConnectivity = outdoorRaw;
         cell.outdoorRatio = outdoorRaw;
         cell.openness = clamp(1.0f - hits, 0.0f, 1.0f);
         cell.reverbGain = clamp(indoorStrength + outdoorStrength, 0.0f, 1.0f);
@@ -405,6 +429,14 @@ namespace acoustics
         cell.reflection = clamp(horizontalNearRatio*0.35f + horizontalFarHitRatio*0.25f + corridorScore*0.30f + hits*0.15f, 0.0f, 1.0f);
         cell.muffleOpen = clamp(indoorMuffleOpen*(1.0f - outdoorRaw) + outdoorMuffleOpen*outdoorRaw, 0.0f, 1.0f);
         cell.confidence = clamp(cell.airOccupancy*(1.0f - cell.boundary*0.35f)*(0.45f + hits*0.30f + min(range, ceilingDist + metersToUnits(medianHitDistance))/max(range, 1.0f)*0.25f), 0.05f, 1.0f);
+    }
+
+    static int acousticHorizontalSector(const vec &dir)
+    {
+        float angle = PI/2.0f - atan2f(dir.y, dir.x);
+        if(angle < 0.0f) angle += 2.0f*PI;
+        else if(angle >= 2.0f*PI) angle -= 2.0f*PI;
+        return clamp(int(floorf((angle + PI/8.0f)*(AS_NUM/(2.0f*PI))))&7, 0, AS_NUM - 1);
     }
 
     static void bakeAcousticCellRays(AcousticCell &cell, int rays, float range)
@@ -418,7 +450,9 @@ namespace acoustics
               skyCount = 0, skyOpenCount = 0, ceilingHits = 0,
               skyDiagCount = 0, skyDiagOpen = 0,
               horizontalCount = 0, horizontalHits = 0, horizontalNear = 0, horizontalFar = 0, horizontalFarHits = 0, horizontalDist = 0, horizontalDist2 = 0,
-              downCount = 0, downOpen = 0;
+              downCount = 0, downOpen = 0,
+              pcaCount = 0, pcaSumX = 0, pcaSumY = 0, pcaSumZ = 0,
+              pcaXX = 0, pcaXY = 0, pcaYY = 0, pcaZZ = 0;
         vector<float> hitDistances, horizontalDistances;
 
         struct AcousticSector
@@ -427,7 +461,7 @@ namespace acoustics
             float dist, nearHits;
 
             AcousticSector() : count(0), hits(0), dist(0), nearHits(0) {}
-        } sectors[8];
+        } sectors[AS_NUM];
 
         loopi(rays)
         {
@@ -438,6 +472,15 @@ namespace acoustics
             float dist = acousticRaycube(cell.origin, dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
             dist = clamp(dist, 0.0f, range);
             bool hit = dist < maxHitDist;
+            vec sample = vec(dir).mul(dist);
+            pcaCount += 1.0f;
+            pcaSumX += sample.x;
+            pcaSumY += sample.y;
+            pcaSumZ += sample.z;
+            pcaXX += sample.x*sample.x;
+            pcaXY += sample.x*sample.y;
+            pcaYY += sample.y*sample.y;
+            pcaZZ += sample.z*sample.z;
             open += dist/range;
             if(hit)
             {
@@ -473,8 +516,7 @@ namespace acoustics
                 }
                 if(dist >= farDist) horizontalFar += 1.0f;
 
-                float yaw = atan2f(dir.y, dir.x);
-                int sector = clamp(int(floorf((yaw + PI)*(8.0f/(2.0f*PI)))), 0, 7);
+                int sector = acousticHorizontalSector(dir);
                 sectors[sector].count++;
                 sectors[sector].dist += dist;
                 if(hit)
@@ -520,11 +562,14 @@ namespace acoustics
               farPercentile = acousticPercentile(hitDistances, 0.75f, avgHitDistance),
               medianHorizontalDistance = acousticPercentile(horizontalDistances, 0.50f, unitsToMeters(horizontalAvgDist));
 
-        float sectorOpen[8], sectorNear[8];
-        loopi(8)
+        float sectorOpen[AS_NUM], sectorNear[AS_NUM];
+        loopi(AS_NUM)
         {
             sectorOpen[i] = sectors[i].count ? clamp(sectors[i].dist/(sectors[i].count*range), 0.0f, 1.0f) : open;
             sectorNear[i] = sectors[i].count ? clamp(sectors[i].nearHits/sectors[i].count, 0.0f, 1.0f) : horizontalNearRatio;
+            cell.sectorDistance[i] = sectors[i].count ? unitsToMeters(sectors[i].dist/sectors[i].count) : unitsToMeters(horizontalAvgDist);
+            cell.sectorOpenness[i] = sectorOpen[i];
+            cell.sectorNearRatio[i] = sectorNear[i];
         }
         float sectorCorridor = 0.0f;
         loopi(4)
@@ -535,11 +580,67 @@ namespace acoustics
                   sideNear = 0.5f*(sectorNear[side1] + sectorNear[side2]);
             sectorCorridor = max(sectorCorridor, clamp(alongFar*(sideClosed*0.55f + sideNear*0.45f), 0.0f, 1.0f));
         }
+        float sectorMean = 0.0f, sectorVar = 0.0f;
+        loopi(AS_NUM)
+        {
+            sectorMean += sectorOpen[i];
+        }
+        sectorMean /= AS_NUM;
+        loopi(AS_NUM) sectorVar += (sectorOpen[i] - sectorMean)*(sectorOpen[i] - sectorMean);
+        sectorVar /= AS_NUM;
+        float cornerScore = 0.0f;
+        loopi(AS_NUM)
+        {
+            int next = (i + 1)&7, away = (i + 4)&7, awaynext = (i + 5)&7;
+            cornerScore = max(cornerScore, min(sectorNear[i], sectorNear[next])*max(sectorOpen[away], sectorOpen[awaynext]));
+        }
+        float pcaAnisotropy = 0.0f, pcaFlatness = 0.0f, pcaVerticality = 0.0f;
+        if(pcaCount > 1.0f)
+        {
+            float inv = 1.0f/pcaCount,
+                  meanX = pcaSumX*inv, meanY = pcaSumY*inv, meanZ = pcaSumZ*inv,
+                  cxx = max(pcaXX*inv - meanX*meanX, 0.0f),
+                  cxy = pcaXY*inv - meanX*meanY,
+                  cyy = max(pcaYY*inv - meanY*meanY, 0.0f),
+                  czz = max(pcaZZ*inv - meanZ*meanZ, 0.0f),
+                  trace = cxx + cyy,
+                  delta = sqrtf(max((cxx - cyy)*(cxx - cyy) + 4.0f*cxy*cxy, 0.0f)),
+                  major = max(0.5f*(trace + delta), 0.0f),
+                  minor = max(0.5f*(trace - delta), 0.0f),
+                  total = max(major + minor + czz, 1.0f);
+            pcaAnisotropy = clamp((major - minor)/max(major + minor, 1.0f), 0.0f, 1.0f);
+            pcaFlatness = clamp((major + minor - czz)/total, 0.0f, 1.0f);
+            pcaVerticality = clamp(czz/total, 0.0f, 1.0f);
+        }
         float varianceScore = clamp(sqrtf(horizontalVariance)/max(horizontalAvgDist, 1.0f), 0.0f, 1.0f),
-              corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), smoothramp(sectorCorridor, 0.06f, 0.36f)), 0.0f, 1.0f);
+              corridorScore = clamp(max(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), smoothramp(sectorCorridor, 0.06f, 0.36f)), pcaAnisotropy*(0.25f + horizontalNearRatio*0.55f)), 0.0f, 1.0f),
+              balancedSectors = 1.0f - clamp(sqrtf(sectorVar)*2.5f, 0.0f, 1.0f);
 
-        scoreAcousticCell(cell, hits, skyOpen, ceilingDist, horizontalHitRatio, horizontalNearRatio, horizontalFarRatio, horizontalFarHitRatio,
-            horizontalOpenRatio, medianHorizontalDistance, horizontalVariance, nearPercentile, medianHitDistance, farPercentile, corridorScore, downOpenRatio, range);
+        cell.skyOpenness = skyOpen;
+        cell.hitRatio = hits;
+        cell.nearWallRatio = horizontalNearRatio;
+        cell.farWallRatio = horizontalFarRatio;
+        cell.horizontalHitRatio = horizontalHitRatio;
+        cell.horizontalOpenRatio = horizontalOpenRatio;
+        cell.horizontalFarHitRatio = horizontalFarHitRatio;
+        cell.nearDistance = nearPercentile;
+        cell.medianDistance = medianHitDistance;
+        cell.farDistance = farPercentile;
+        cell.medianHorizontalDistance = medianHorizontalDistance;
+        cell.distanceVariance = horizontalVariance;
+        cell.downOpenness = downOpenRatio;
+        cell.ceilingDistance = ceilingDist;
+        cell.sectorCorridorScore = smoothramp(sectorCorridor, 0.06f, 0.36f);
+        cell.cornerScore = clamp(cornerScore, 0.0f, 1.0f);
+        cell.courtyardScore = clamp(skyOpen*horizontalHitRatio*balancedSectors*(0.45f + horizontalNearRatio*0.55f), 0.0f, 1.0f);
+        cell.openPlainScore = clamp(skyOpen*horizontalOpenRatio*(1.0f - horizontalNearRatio)*(1.0f - pcaAnisotropy*0.65f), 0.0f, 1.0f);
+        cell.boxRoomScore = clamp((1.0f - skyOpen)*horizontalHitRatio*balancedSectors*(1.0f - varianceScore)*(1.0f - horizontalOpenRatio*0.45f), 0.0f, 1.0f);
+        cell.pcaAnisotropy = pcaAnisotropy;
+        cell.pcaFlatness = pcaFlatness;
+        cell.pcaVerticality = pcaVerticality;
+        cell.corridorScore = corridorScore;
+
+        scoreAcousticCell(cell, range);
     }
 
     static bool bakeAcousticCell(AcousticCell &cell, const ivec &coord, int rays, float range)
@@ -650,6 +751,53 @@ namespace acoustics
         return max(a.presetScores[b.primaryPreset], b.presetScores[a.primaryPreset]) > 0.20f;
     }
 
+    static void floodFillOutdoorAcousticCells(float range)
+    {
+        static const ivec dirs[6] =
+        {
+            ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0), ivec(0, 0, 1), ivec(0, 0, -1)
+        };
+
+        int csize = max(soundacousticcellsize, 16),
+            cellsperaxis = (worldsize + csize - 1)/csize;
+        vector<int> pending;
+        loopv(acousticCells)
+        {
+            AcousticCell &cell = acousticCells[i];
+            cell.outdoorConnectivity = 0.0f;
+            if(!cell.valid) continue;
+            bool boundaryAir = cell.coord.x <= 0 || cell.coord.y <= 0 || cell.coord.z <= 0 ||
+                               cell.coord.x >= cellsperaxis - 1 || cell.coord.y >= cellsperaxis - 1 || cell.coord.z >= cellsperaxis - 1,
+                 topAir = cell.coord.z >= cellsperaxis - 1 || cell.origin.z >= worldsize - csize;
+            if(boundaryAir || topAir)
+            {
+                cell.outdoorConnectivity = 1.0f;
+                pending.add(i);
+            }
+        }
+
+        while(!pending.empty())
+        {
+            int curidx = pending.pop();
+            AcousticCell &cur = acousticCells[curidx];
+            loopi(6)
+            {
+                int nextidx = acousticCellIndex(ivec(cur.coord).add(dirs[i]));
+                if(!acousticCells.inrange(nextidx)) continue;
+                AcousticCell &next = acousticCells[nextidx];
+                if(!next.valid || next.outdoorConnectivity > 0.0f) continue;
+                next.outdoorConnectivity = 1.0f;
+                pending.add(nextidx);
+            }
+        }
+
+        loopv(acousticCells) if(acousticCells[i].valid)
+        {
+            scoreAcousticCell(acousticCells[i], range);
+            if(acousticCells[i].boundary) acousticCells[i].confidence *= 0.80f;
+        }
+    }
+
     static void finalizeAcousticGrid()
     {
         static const ivec dirs[6] =
@@ -670,6 +818,8 @@ namespace acoustics
             if(!cell.connections && cell.airOccupancy <= 0.0f) cell.valid = false;
             if(cell.boundary) cell.confidence *= 0.80f;
         }
+
+        floodFillOutdoorAcousticCells(metersToUnits(soundacousticrange));
 
         acousticRegions.setsize(0);
         acousticPortals.setsize(0);
@@ -872,11 +1022,12 @@ namespace acoustics
         if(debugsoundacoustics && totalmillis - acousticProbe.lastDebugMillis >= 1000)
         {
             acousticProbe.lastDebugMillis = totalmillis;
-            conoutf(CON_DEBUG, "sound acoustics baked: region %d, %s %d%% / %s %d%%, occupancy %d%%, confidence %d%%, sky %d%%, median %.1fm, irregular %d%%, corridor %d%%",
+            conoutf(CON_DEBUG, "sound acoustics baked: region %d, %s %d%% / %s %d%%, occupancy %d%%, confidence %d%%, sky %d%%, exterior %d%%, median %.1fm, irregular %d%%, corridor %d%%, pca %d%%",
                 cell.region, acousticPresets[cell.primaryPreset].name, int((1.0f - cell.presetBlend)*100.0f + 0.5f),
                 acousticPresets[cell.secondaryPreset].name, int(cell.presetBlend*100.0f + 0.5f),
                 int(cell.airOccupancy*100.0f + 0.5f), int(cell.confidence*100.0f + 0.5f), int(cell.skyOpenness*100.0f + 0.5f),
-                cell.medianDistance, int(cell.irregularityScore*100.0f + 0.5f), int(cell.corridorScore*100.0f + 0.5f));
+                int(cell.outdoorConnectivity*100.0f + 0.5f), cell.medianDistance, int(cell.irregularityScore*100.0f + 0.5f),
+                int(cell.corridorScore*100.0f + 0.5f), int(cell.pcaAnisotropy*100.0f + 0.5f));
         }
     }
 
