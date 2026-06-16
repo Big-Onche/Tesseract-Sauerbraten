@@ -168,6 +168,27 @@ namespace acoustics
         AcousticPath() : acousticDistance(0), pathCost(0), diffractionAmount(0), occlusionAmount(0), bestPortal(-1) {}
     };
 
+    struct AcousticFieldNode
+    {
+        int prevRegion, prevPortal, hops;
+        float cost, diffractionAmount, occlusionAmount, pathReverbGain, pathReverbDecay, pathReflection, pathWeight;
+        bool reached;
+
+        AcousticFieldNode() : prevRegion(-1), prevPortal(-1), hops(0), cost(1e16f), diffractionAmount(0), occlusionAmount(0),
+            pathReverbGain(0), pathReverbDecay(0.3f), pathReflection(0), pathWeight(0), reached(false) {}
+    };
+
+    struct AcousticQueueNode
+    {
+        int region;
+        float cost;
+
+        AcousticQueueNode() {}
+        AcousticQueueNode(int region, float cost) : region(region), cost(cost) {}
+    };
+
+    static inline float heapscore(const AcousticQueueNode &node) { return node.cost; }
+
     static float acousticPercentile(vector<float> &values, float p, float fallback)
     {
         if(values.empty()) return fallback;
@@ -329,13 +350,13 @@ namespace acoustics
     struct AcousticProbe
     {
         vec origin;
-        int lastmillis, lastDebugMillis, cell;
+        int lastmillis, lastDebugMillis, cell, region;
         float openness, walldist, reverbGain, reverbDecay, reflection, outdoorRatio, muffleOpen, scores[AP_NUM];
         bool baked;
         EFXEAXREVERBPROPERTIES reverbShape;
         AcousticChoice indoorChoice, outdoorChoice;
 
-        AcousticProbe() : origin(0, 0, 0), lastmillis(0), lastDebugMillis(0), cell(-1), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1), muffleOpen(1), baked(false)
+        AcousticProbe() : origin(0, 0, 0), lastmillis(0), lastDebugMillis(0), cell(-1), region(-1), openness(1), walldist(0), reverbGain(0), reverbDecay(0.3f), reflection(0), outdoorRatio(1), muffleOpen(1), baked(false)
         {
             loopi(AP_NUM) scores[i] = 0.0f;
             EFXEAXREVERBPROPERTIES generic = EFX_REVERB_PRESET_GENERIC;
@@ -350,7 +371,9 @@ namespace acoustics
     static vector<AcousticRegion> acousticRegions;
     static vector<AcousticPortal> acousticPortals;
     static vector<int> acousticRegionPortalEdges;
+    static vector<AcousticFieldNode> acousticListenerField;
     static hashtable<ivec, int> acousticCellLookup(1<<12);
+    static int acousticListenerFieldRegion = -1, acousticGraphVersion = 0, acousticListenerFieldVersion = -1;
 
     struct AcousticBakeRequest
     {
@@ -1126,8 +1149,93 @@ namespace acoustics
         }
     }
 
+    static void invalidateAcousticListenerField()
+    {
+        acousticListenerField.setsize(0);
+        acousticListenerFieldRegion = -1;
+        acousticListenerFieldVersion = -1;
+        acousticGraphVersion++;
+    }
+
+    static void rebuildAcousticListenerField(int listenerRegion)
+    {
+        acousticListenerField.setsize(0);
+        loopv(acousticRegions) acousticListenerField.add(AcousticFieldNode());
+        acousticListenerFieldRegion = -1;
+        acousticListenerFieldVersion = acousticGraphVersion;
+        if(!acousticRegions.inrange(listenerRegion)) return;
+
+        AcousticRegion &start = acousticRegions[listenerRegion];
+        AcousticFieldNode &startNode = acousticListenerField[listenerRegion];
+        startNode.reached = true;
+        startNode.cost = 0.0f;
+        startNode.prevRegion = startNode.prevPortal = -1;
+        startNode.hops = 0;
+        startNode.pathReverbGain = start.reverbGain;
+        startNode.pathReverbDecay = start.reverbDecay;
+        startNode.pathReflection = start.reflection;
+        startNode.pathWeight = 1.0f;
+
+        vector<AcousticQueueNode> queue;
+        queue.addheap(AcousticQueueNode(listenerRegion, 0.0f));
+        float range = max(metersToUnits(soundacousticrange), 1.0f);
+        while(!queue.empty())
+        {
+            AcousticQueueNode cur = queue.removeheap();
+            if(!acousticListenerField.inrange(cur.region)) continue;
+            AcousticFieldNode &curNode = acousticListenerField[cur.region];
+            if(cur.cost > curNode.cost + 1e-4f || !acousticRegions.inrange(cur.region)) continue;
+
+            const AcousticRegion &region = acousticRegions[cur.region];
+            loopi(region.portalCount)
+            {
+                int portalidx = acousticRegionPortalEdges[region.firstPortal + i];
+                if(!acousticPortals.inrange(portalidx)) continue;
+                const AcousticPortal &portal = acousticPortals[portalidx];
+                int nextRegion = portal.regionA == cur.region ? portal.regionB : portal.regionA;
+                if(!acousticRegions.inrange(nextRegion) || !acousticListenerField.inrange(nextRegion)) continue;
+
+                const AcousticRegion &next = acousticRegions[nextRegion];
+                float regionDistance = region.center.dist(next.center)/range,
+                      edgeCost = max(portal.acousticCost + regionDistance*0.15f, 0.001f),
+                      nextCost = curNode.cost + edgeCost;
+                AcousticFieldNode &nextNode = acousticListenerField[nextRegion];
+                if(nextNode.reached && nextCost >= nextNode.cost - 1e-4f) continue;
+
+                float edgeWeight = max(edgeCost, 0.10f),
+                      totalWeight = max(curNode.pathWeight + edgeWeight, edgeWeight);
+                nextNode.reached = true;
+                nextNode.cost = nextCost;
+                nextNode.prevRegion = cur.region;
+                nextNode.prevPortal = portalidx;
+                nextNode.hops = curNode.hops + 1;
+                nextNode.diffractionAmount = clamp(curNode.diffractionAmount + portal.diffractionCost*(1.0f - curNode.diffractionAmount), 0.0f, 1.0f);
+                nextNode.occlusionAmount = clamp(curNode.occlusionAmount + (portal.highFrequencyLoss*0.85f + portal.diffractionCost*0.15f)*(1.0f - curNode.occlusionAmount), 0.0f, 1.0f);
+                nextNode.pathReverbGain = clamp((curNode.pathReverbGain*curNode.pathWeight + next.reverbGain*edgeWeight)/totalWeight, 0.0f, 1.0f);
+                nextNode.pathReverbDecay = (curNode.pathReverbDecay*curNode.pathWeight + next.reverbDecay*edgeWeight)/totalWeight;
+                nextNode.pathReflection = clamp((curNode.pathReflection*curNode.pathWeight + next.reflection*edgeWeight)/totalWeight, 0.0f, 1.0f);
+                nextNode.pathWeight = totalWeight;
+                queue.addheap(AcousticQueueNode(nextRegion, nextCost));
+            }
+        }
+        acousticListenerFieldRegion = listenerRegion;
+    }
+
+    static void updateAcousticListenerField()
+    {
+        if(!acousticProbe.baked || !acousticRegions.inrange(acousticProbe.region))
+        {
+            acousticListenerFieldRegion = -1;
+            return;
+        }
+        if(acousticListenerFieldRegion != acousticProbe.region || acousticListenerFieldVersion != acousticGraphVersion ||
+           acousticListenerField.length() != acousticRegions.length())
+            rebuildAcousticListenerField(acousticProbe.region);
+    }
+
     void clearAcousticGrid()
     {
+        invalidateAcousticListenerField();
         acousticCells.setsize(0);
         acousticRegions.setsize(0);
         acousticPortals.setsize(0);
@@ -1135,6 +1243,7 @@ namespace acoustics
         acousticCellLookup.clear();
         acousticProbe.baked = false;
         acousticProbe.cell = -1;
+        acousticProbe.region = -1;
     }
 
     int numAcousticCells() { return acousticCells.length(); }
@@ -1247,6 +1356,7 @@ namespace acoustics
         float k = acousticProbe.walldist <= 0 ? 1.0f : smoothstepfactor(elapsed);
         acousticProbe.baked = true;
         acousticProbe.cell = acousticCellIndex(cell.coord);
+        acousticProbe.region = cell.region;
         loopi(AP_NUM) acousticProbe.scores[i] += (cell.presetScores[i] - acousticProbe.scores[i])*k;
         acousticProbe.indoorChoice = cell.indoorChoice;
         acousticProbe.outdoorChoice = cell.outdoorChoice;
@@ -1284,6 +1394,8 @@ namespace acoustics
         {
             acousticProbe.baked = false;
             acousticProbe.cell = -1;
+            acousticProbe.region = -1;
+            acousticListenerFieldRegion = -1;
             updateEfxReverb();
             return;
         }
@@ -1297,31 +1409,82 @@ namespace acoustics
         if(cell)
         {
             applyAcousticCell(*cell, elapsed);
+            updateAcousticListenerField();
             updateEfxReverb();
             return;
         }
 
         acousticProbe.baked = false;
         acousticProbe.cell = -1;
+        acousticProbe.region = -1;
+        acousticListenerFieldRegion = -1;
         updateEfxReverb();
+    }
+
+    static bool queryAcousticListenerField(const AcousticCell &sourceCell, float &occlusion, float &muffleOpen, float &pathReverbGain, float &pathComplexity, float &diffraction)
+    {
+        if(!acousticRegions.inrange(sourceCell.region) || !acousticListenerField.inrange(sourceCell.region) ||
+           acousticListenerFieldRegion != acousticProbe.region || sourceCell.region == acousticProbe.region)
+            return false;
+        const AcousticFieldNode &node = acousticListenerField[sourceCell.region];
+        if(!node.reached) return false;
+
+        const AcousticRegion &sourceRegion = acousticRegions[sourceCell.region];
+        float costOcclusion = smoothramp(node.cost, 0.15f, 1.75f);
+        diffraction = node.diffractionAmount;
+        occlusion = clamp((node.occlusionAmount*0.70f + costOcclusion*0.30f)*soundacousticocclusion, 0.0f, 1.0f);
+        pathComplexity = clamp(float(node.hops)*0.22f + node.cost*0.35f + diffraction*0.25f, 0.0f, 1.0f);
+        muffleOpen = clamp(acousticProbe.muffleOpen*0.35f + sourceRegion.muffleOpen*0.35f + (1.0f - node.occlusionAmount)*0.30f - diffraction*0.15f, 0.0f, 1.0f);
+        pathReverbGain = clamp(node.pathReverbGain, 0.0f, 1.0f);
+        return true;
+    }
+
+    static float acousticTravelReverbSend(float sourceReverbGain, float listenerReverbGain, float pathReverbGain, float occlusion, float pathComplexity, float diffraction)
+    {
+        float directness = clamp(1.0f - occlusion*0.75f - diffraction*0.35f - pathComplexity*0.25f, 0.0f, 1.0f),
+              sourceWeight = clamp(0.45f + directness*0.20f - occlusion*0.25f, 0.15f, 0.65f),
+              listenerWeight = clamp(0.30f + listenerReverbGain*0.25f + occlusion*0.30f, 0.20f, 0.75f),
+              pathWeight = clamp(0.10f + pathComplexity*0.35f + diffraction*0.25f, 0.05f, 0.55f),
+              totalWeight = max(sourceWeight + listenerWeight + pathWeight, 1e-4f),
+              mixedReverb = (sourceReverbGain*sourceWeight + listenerReverbGain*listenerWeight + pathReverbGain*pathWeight)/totalWeight,
+              travelWetness = clamp(0.30f + occlusion*0.45f + pathComplexity*0.25f + diffraction*0.15f, 0.0f, 1.0f);
+        return clamp(mixedReverb*travelWetness*soundacousticreverb, 0.0f, 1.0f);
     }
 
     void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend)
     {
         if(!soundacoustics || !acousticProbe.baked || dist <= 1.0f) return;
-        vec dir = vec(loc).sub(acousticProbe.origin);
-        if(dir.iszero()) return;
-        dir.normalize();
-        float clear = acousticRaycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
-              pathOpen = clear + 2.0f < dist ? clamp(clear/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f,
-              occlusion = clamp(powf(1.0f - pathOpen, 0.75f)*soundacousticocclusion, 0.0f, 1.0f),
-              muffleOpen = clamp(pathOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f),
-              closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
+        AcousticCell *sourceCell = findAcousticCell(loc);
+        float occlusion = 0.0f, pathComplexity = 0.0f, diffraction = 0.0f,
+              muffleOpen = acousticProbe.muffleOpen,
+              sourceReverbGain = acousticProbe.reverbGain,
+              pathReverbGain = acousticProbe.reverbGain;
+        bool useField = false;
+        if(sourceCell)
+        {
+            if(acousticRegions.inrange(sourceCell->region)) sourceReverbGain = acousticRegions[sourceCell->region].reverbGain;
+            else sourceReverbGain = sourceCell->reverbGain;
+            useField = queryAcousticListenerField(*sourceCell, occlusion, muffleOpen, pathReverbGain, pathComplexity, diffraction);
+        }
+        if(!useField)
+        {
+            vec dir = vec(loc).sub(acousticProbe.origin);
+            if(dir.iszero()) return;
+            dir.normalize();
+            float clear = acousticRaycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
+                  pathOpen = clear + 2.0f < dist ? clamp(clear/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f;
+            occlusion = clamp(powf(1.0f - pathOpen, 0.75f)*soundacousticocclusion, 0.0f, 1.0f);
+            pathComplexity = 1.0f - pathOpen;
+            muffleOpen = clamp(pathOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f);
+            pathReverbGain = clamp((sourceReverbGain + acousticProbe.reverbGain)*0.5f, 0.0f, 1.0f);
+        }
+
+        float closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
               openGainHF = max(closedGainHF, 0.5f),
               effectiveMuffleGainHF = closedGainHF + (openGainHF - closedGainHF)*muffleOpen;
         volf *= 1.0f - occlusion*(1.0f - soundacousticblockgain);
         gainhf *= 1.0f - occlusion*(1.0f - effectiveMuffleGainHF);
-        reverbSend = max(reverbSend, clamp((acousticProbe.reverbGain*(0.35f + 0.65f*occlusion))*soundacousticreverb, 0.0f, 1.0f));
+        reverbSend = max(reverbSend, acousticTravelReverbSend(sourceReverbGain, acousticProbe.reverbGain, pathReverbGain, occlusion, pathComplexity, diffraction));
     }
 
     void acousticHudSource(float &reverbSend)
@@ -1342,6 +1505,58 @@ namespace acoustics
     {
         gle::attrib(v[a]); gle::attrib(color, alpha);
         gle::attrib(v[b]); gle::attrib(color, alpha);
+    }
+
+    static void drawAcousticFieldLine(const vec &a, const vec &b, uchar alpha)
+    {
+        bvec white(255, 255, 255);
+        gle::attrib(a); gle::attrib(white, alpha);
+        gle::attrib(b); gle::attrib(white, alpha);
+    }
+
+    static void drawAcousticListenerFieldDebug(int maxradius)
+    {
+        if(acousticListenerFieldRegion < 0 || !acousticRegions.inrange(acousticListenerFieldRegion) ||
+           acousticListenerField.length() != acousticRegions.length() || !camera1)
+            return;
+
+        int lines = 3;
+        loopv(acousticListenerField)
+        {
+            const AcousticFieldNode &node = acousticListenerField[i];
+            if(i == acousticListenerFieldRegion || !node.reached || !acousticRegions.inrange(i) || !acousticRegions.inrange(node.prevRegion) ||
+               !acousticPortals.inrange(node.prevPortal) || acousticRegions[i].center.dist(camera1->o) > maxradius)
+                continue;
+            lines += 2;
+        }
+        if(lines <= 0) return;
+
+        GLfloat oldwidth = 1.0f;
+        glGetFloatv(GL_LINE_WIDTH, &oldwidth);
+        glLineWidth(3.0f);
+        gle::begin(GL_LINES, lines*2);
+
+        const AcousticRegion &listener = acousticRegions[acousticListenerFieldRegion];
+        float marker = max(soundacousticcellsize, 16)*0.35f;
+        drawAcousticFieldLine(vec(listener.center.x - marker, listener.center.y, listener.center.z), vec(listener.center.x + marker, listener.center.y, listener.center.z), 255);
+        drawAcousticFieldLine(vec(listener.center.x, listener.center.y - marker, listener.center.z), vec(listener.center.x, listener.center.y + marker, listener.center.z), 255);
+        drawAcousticFieldLine(vec(listener.center.x, listener.center.y, listener.center.z - marker), vec(listener.center.x, listener.center.y, listener.center.z + marker), 255);
+
+        loopv(acousticListenerField)
+        {
+            const AcousticFieldNode &node = acousticListenerField[i];
+            if(i == acousticListenerFieldRegion || !node.reached || !acousticRegions.inrange(i) || !acousticRegions.inrange(node.prevRegion) ||
+               !acousticPortals.inrange(node.prevPortal) || acousticRegions[i].center.dist(camera1->o) > maxradius)
+                continue;
+            const AcousticRegion &region = acousticRegions[i], &prev = acousticRegions[node.prevRegion];
+            const AcousticPortal &portal = acousticPortals[node.prevPortal];
+            uchar alpha = uchar(clamp(235 - int(node.cost*55.0f), 90, 235));
+            drawAcousticFieldLine(region.center, portal.center, alpha);
+            drawAcousticFieldLine(portal.center, prev.center, alpha);
+        }
+
+        xtraverts += gle::end();
+        glLineWidth(oldwidth);
     }
 
     void drawAcousticsDebug()
@@ -1397,6 +1612,7 @@ namespace acoustics
                 xtraverts += gle::end();
             }
         }
+        drawAcousticListenerFieldDebug(min(max(soundacousticgridradius, 32), 256));
         glDepthMask(GL_TRUE);
         if(cull) glEnable(GL_CULL_FACE);
     }
