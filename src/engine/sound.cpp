@@ -459,9 +459,14 @@ namespace sound
 
     extern int soundacousticdualvoice;
 
+    static bool acousticGameSound(const SoundChannel &chan)
+    {
+        return chan.hasLoc() && !chan.ent && !(chan.flags&(SND_MAP|SND_HUD));
+    }
+
     static bool acousticDualVoiceImportant(const SoundChannel &chan)
     {
-        return soundacousticdualvoice && chan.hasLoc() && !(chan.flags&(SND_MAP|SND_HUD));
+        return soundacousticdualvoice && acousticGameSound(chan);
     }
 
     static void syncAcousticVoice(SoundChannel &chan, int volume)
@@ -1206,16 +1211,31 @@ namespace sound
         mapSounds.clear();
     }
 
-    void stopMapSound(extentity *e)
+    void stopMapSound(extentity *e, int fade = 0)
     {
         loopv(channels)
         {
             SoundChannel &chan = channels[i];
-            if(chan.inuse && chan.ent == e) haltChannel(i);
+            if(chan.inuse && chan.ent == e)
+            {
+                if(fade > 0 && !chan.stopping)
+                {
+                    chan.fadeStart = totalmillis;
+                    chan.fadeEnd = totalmillis + fade;
+                    chan.fadeFrom = effectiveVolume(chan);
+                    chan.targetVolume = 0;
+                    chan.stopping = true;
+                    chan.dirty = true;
+                    syncChannel(chan);
+                }
+                else if(fade <= 0) haltChannel(i);
+            }
         }
     }
 
     static float metersToUnits(float meters);
+    static float mapSoundFadeDistance(float radius);
+    static int mapSoundFadeMillis(float radius);
     extern int soundairattenuation;
     extern float maxsounddistance;
 
@@ -1244,13 +1264,14 @@ namespace sound
             else if(mapradius > 0.0f) maxdist = mapradius;
             else if(globalradius > 0.0f) maxdist = globalradius;
 
-            bool inrange = maxdist <= 0.0f || dist < maxdist;
+            float fadedist = mapSoundFadeDistance(maxdist);
+            bool inrange = maxdist <= 0.0f || dist < maxdist + fadedist;
 
             if(inrange)
             {
-                if(!(e.flags&EF_SOUND)) play(e.attr1, NULL, &e, SND_MAP, -1);
+                play(e.attr1, NULL, &e, SND_MAP, -1, mapSoundFadeMillis(maxdist), -1, 0, -1);
             }
-            else if(e.flags&EF_SOUND) stopMapSound(&e);
+            else if(e.flags&EF_SOUND) stopMapSound(&e, mapSoundFadeMillis(maxdist));
         }
     }
 
@@ -1349,6 +1370,34 @@ namespace sound
     {
         float t = rampfactor(x, low, high);
         return t*t*(3.0f - 2.0f*t);
+    }
+
+    static float mapSoundFadeDistance(float radius)
+    {
+        return radius > 0.0f ? min(max(radius*0.25f, 8.0f), 128.0f) : 0.0f;
+    }
+
+    static int mapSoundFadeMillis(float radius)
+    {
+        if(radius <= 0.0f) return 350;
+        return clamp(int(300.0f + sqrtf(radius)*20.0f + 0.5f), 250, 900);
+    }
+
+    static float mapSoundRadiusGain(float dist, float radius, float inner)
+    {
+        if(radius <= 0.0f) return 1.0f;
+        inner = clamp(inner, 0.0f, max(radius - 1.0f, 0.0f));
+        if(dist <= inner) return 1.0f;
+
+        float edge = mapSoundFadeDistance(radius),
+              audible = radius + edge;
+        if(dist >= audible) return 0.0f;
+
+        float edgegain = 0.18f,
+              body = 1.0f - (1.0f - edgegain)*smoothramp(dist, inner, radius);
+        if(dist <= radius) return body;
+
+        return edgegain*(1.0f - smoothramp(dist, radius, audible));
     }
 
     static float airAbsorptionDbPerMeter(float frequency)
@@ -1483,31 +1532,33 @@ namespace sound
         if(chan.hasLoc())
         {
             vec v;
-            float dist = chan.loc.dist(camera1->o, v);
+            float dist = chan.loc.dist(camera1->o, v), attenDist = dist;
             int rad = 0;
+            float inner = 0.0f;
             if(chan.ent)
             {
                 rad = chan.ent->attr2;
                 if(chan.ent->attr3)
                 {
-                    rad -= chan.ent->attr3;
-                    dist -= chan.ent->attr3;
+                    inner = max(float(chan.ent->attr3), 0.0f);
+                    attenDist = max(dist - inner, 0.0f);
                 }
             }
             else if(chan.radius > 0) rad = chan.radius;
             if(soundairattenuation)
             {
-                float distanceEffect = soundDistanceEffect(dist),
+                float distanceEffect = soundDistanceEffect(attenDist),
                       distanceReverb = soundDistanceReverbSend(distanceEffect);
-                volf *= soundDistanceGain(dist);
-                gainhf = soundMuffleGainHF(dist);
+                volf *= soundDistanceGain(attenDist);
+                gainhf = soundMuffleGainHF(attenDist);
                 gainlf = soundDistanceBassGain(distanceEffect);
                 reverbSend = max(reverbSend, distanceReverb);
                 distanceReverbSend = distanceReverb;
             }
-            else if(rad > 0) volf -= clamp(dist/rad, 0.0f, 1.0f);
+            if((chan.flags&SND_MAP) && rad > 0) volf *= mapSoundRadiusGain(dist, float(rad), inner);
+            else if(!soundairattenuation && rad > 0) volf -= clamp(attenDist/rad, 0.0f, 1.0f);
             acoustics::AcousticSourceInfo acousticInfo;
-            acoustics::acousticSource(chan.loc, dist, volf, gainhf, reverbSend, &acousticInfo);
+            if(acousticGameSound(chan)) acoustics::acousticSource(chan.loc, attenDist, volf, gainhf, reverbSend, &acousticInfo);
             if(stereo && (v.x != 0 || v.y != 0) && dist>0)
             {
                 v.rotate_around_z(-camera1->yaw*RAD);
@@ -1705,7 +1756,7 @@ namespace sound
             freeChannel(chanid);
             return -1;
         }
-        bool useAcousticVoice = soundacousticdualvoice && loc && !(flags&(SND_MAP|SND_HUD)) && chan.ensureAcousticSource();
+        bool useAcousticVoice = acousticDualVoiceImportant(chan) && chan.ensureAcousticSource();
 
         updateChannel(chan);
         chan.expire = expire >= 0 ? totalmillis + expire : -1;
