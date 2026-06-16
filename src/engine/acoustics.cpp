@@ -18,6 +18,7 @@ namespace acoustics
     VARP(soundacousticcellsize, 16, 32, 128);
     VARP(soundacousticbakerays, 16, 64, 256);
     VARP(soundacousticgridradius, 32, 256, 256);
+    VARP(soundacousticthreads, 0, 0, 16);
 
     static const float SoundUnitsPerMeter = 5.0f;
 
@@ -247,6 +248,45 @@ namespace acoustics
     static vector<AcousticPortal> acousticPortals;
     static hashtable<ivec, int> acousticCellLookup(1<<12);
 
+    struct AcousticBakeRequest
+    {
+        ivec coord;
+
+        AcousticBakeRequest() {}
+        AcousticBakeRequest(const ivec &coord) : coord(coord) {}
+    };
+
+    static SDL_mutex *acousticBakeMutex = NULL;
+    static SDL_mutex *acousticRayMutex = NULL;
+    static vector<AcousticBakeRequest> acousticBakeRequests;
+    static vector<AcousticCell> acousticBakeCells;
+    static volatile bool acousticBakeCanceled = false, checkAcousticBakeProgress = false;
+    static int acousticBakeTotal = 0, acousticBakeProcessed = 0, acousticBakeValidCells = 0;
+
+    static Uint32 acousticBakeTimer(Uint32 interval, void *param)
+    {
+        checkAcousticBakeProgress = true;
+        return interval;
+    }
+
+    static void showAcousticBakeProgress(int processed = acousticBakeProcessed, int valid = acousticBakeValidCells)
+    {
+        float bar = float(processed)/float(acousticBakeTotal > 0 ? acousticBakeTotal : 1);
+        defformatstring(text, "%d%% - %d of %d acoustic grid cells (%d valid)", int(bar*100), processed, acousticBakeTotal, valid);
+        renderprogress(bar, text);
+        if(interceptkey(SDLK_ESCAPE)) acousticBakeCanceled = true;
+        checkAcousticBakeProgress = false;
+    }
+
+    static float acousticRaycube(const vec &o, const vec &ray, float radius, int mode)
+    {
+        if(!acousticRayMutex) acousticRayMutex = SDL_CreateMutex();
+        if(acousticRayMutex) SDL_LockMutex(acousticRayMutex);
+        float dist = raycube(o, ray, radius, mode);
+        if(acousticRayMutex) SDL_UnlockMutex(acousticRayMutex);
+        return dist;
+    }
+
     static ivec acousticCellCoord(const vec &o)
     {
         int size = max(soundacousticcellsize, 16);
@@ -279,7 +319,7 @@ namespace acoustics
         {
             vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1), vec(0, 0, -1)
         };
-        loopi(6) if(raycube(p, dirs[i], clearance, RAY_CLIPMAT|RAY_POLY) >= clearance*0.95f) return true;
+        loopi(6) if(acousticRaycube(p, dirs[i], clearance, RAY_CLIPMAT|RAY_POLY) >= clearance*0.95f) return true;
         return false;
     }
 
@@ -395,7 +435,7 @@ namespace acoustics
                   r = sqrtf(max(0.0f, 1.0f - z*z)),
                   a = golden*i;
             vec dir(cosf(a)*r, sinf(a)*r, z);
-            float dist = raycube(cell.origin, dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
+            float dist = acousticRaycube(cell.origin, dir, range, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
             dist = clamp(dist, 0.0f, range);
             bool hit = dist < maxHitDist;
             open += dist/range;
@@ -562,6 +602,46 @@ namespace acoustics
         return true;
     }
 
+    struct AcousticBakeWorker
+    {
+        SDL_Thread *thread;
+        int rays;
+        float range;
+
+        AcousticBakeWorker(int rays, float range) : thread(NULL), rays(rays), range(range) {}
+
+        bool bakeNext()
+        {
+            SDL_LockMutex(acousticBakeMutex);
+            if(acousticBakeCanceled || acousticBakeRequests.empty())
+            {
+                SDL_UnlockMutex(acousticBakeMutex);
+                return false;
+            }
+            AcousticBakeRequest req = acousticBakeRequests.pop();
+            SDL_UnlockMutex(acousticBakeMutex);
+
+            AcousticCell cell;
+            bool valid = bakeAcousticCell(cell, req.coord, rays, range);
+            SDL_LockMutex(acousticBakeMutex);
+            if(valid)
+            {
+                acousticBakeCells.add(cell);
+                acousticBakeValidCells++;
+            }
+            acousticBakeProcessed++;
+            SDL_UnlockMutex(acousticBakeMutex);
+            return true;
+        }
+
+        static int run(void *data)
+        {
+            AcousticBakeWorker *w = (AcousticBakeWorker *)data;
+            while(w->bakeNext());
+            return 0;
+        }
+    };
+
     static bool acousticCellsCompatible(const AcousticCell &a, const AcousticCell &b)
     {
         if(!a.valid || !b.valid) return false;
@@ -678,26 +758,92 @@ namespace acoustics
             conoutf(CON_WARN, "sound acoustics: no world for acoustic bake");
             return;
         }
+        renderbackground("baking sound acoustics (esc to abort)");
         if(cellsize > 0) soundacousticcellsize = clamp(cellsize, 16, 128);
         rays = clamp(rays > 0 ? rays : soundacousticbakerays, 16, 256);
         soundacousticbakerays = rays;
 
         clearAcousticGrid();
+        renderprogress(0, "finding acoustic grid cells");
+        Uint32 start = SDL_GetTicks();
         int csize = max(soundacousticcellsize, 16),
             cellsperaxis = (worldsize + csize - 1)/csize;
         float range = metersToUnits(soundacousticrange);
+
+        acousticBakeRequests.setsize(0);
+        acousticBakeCells.setsize(0);
+        acousticBakeTotal = cellsperaxis*cellsperaxis*cellsperaxis;
+        acousticBakeProcessed = acousticBakeValidCells = 0;
+        acousticBakeCanceled = false;
+        checkAcousticBakeProgress = false;
         loop(x, cellsperaxis) loop(y, cellsperaxis) loop(z, cellsperaxis)
         {
             ivec coord(x, y, z);
-            AcousticCell cell;
-            if(!bakeAcousticCell(cell, coord, rays, range)) continue;
-            int idx = acousticCells.length();
-            acousticCells.add(cell);
-            acousticCellLookup[coord] = idx;
+            acousticBakeRequests.add(AcousticBakeRequest(coord));
         }
+
+        if(!acousticBakeMutex) acousticBakeMutex = SDL_CreateMutex();
+        if(!acousticRayMutex) acousticRayMutex = SDL_CreateMutex();
+        int numthreads = soundacousticthreads > 0 ? soundacousticthreads : numcpus;
+        SDL_TimerID timer = SDL_AddTimer(500, acousticBakeTimer, NULL);
+        if(numthreads <= 1)
+        {
+            AcousticBakeWorker worker(rays, range);
+            while(!acousticBakeCanceled && worker.bakeNext())
+            {
+                if(checkAcousticBakeProgress) showAcousticBakeProgress();
+            }
+        }
+        else
+        {
+            vector<AcousticBakeWorker *> workers;
+            renderprogress(0, "creating acoustic bake threads");
+            loopi(numthreads)
+            {
+                AcousticBakeWorker *w = workers.add(new AcousticBakeWorker(rays, range));
+                w->thread = SDL_CreateThread(AcousticBakeWorker::run, "acoustic bake", w);
+            }
+            showAcousticBakeProgress(0, 0);
+            while(!acousticBakeCanceled)
+            {
+                SDL_Delay(500);
+                SDL_LockMutex(acousticBakeMutex);
+                int processed = acousticBakeProcessed, valid = acousticBakeValidCells, remaining = acousticBakeRequests.length();
+                SDL_UnlockMutex(acousticBakeMutex);
+                showAcousticBakeProgress(processed, valid);
+                if(!remaining && processed >= acousticBakeTotal) break;
+            }
+            SDL_LockMutex(acousticBakeMutex);
+            acousticBakeRequests.setsize(0);
+            SDL_UnlockMutex(acousticBakeMutex);
+            loopv(workers) SDL_WaitThread(workers[i]->thread, NULL);
+            workers.deletecontents();
+        }
+        if(timer) SDL_RemoveTimer(timer);
+
+        if(acousticBakeCanceled)
+        {
+            acousticBakeRequests.setsize(0);
+            acousticBakeCells.setsize(0);
+            clearAcousticGrid();
+            conoutf("sound acoustics bake aborted");
+            return;
+        }
+
+        loopv(acousticBakeCells)
+        {
+            int idx = acousticCells.length();
+            acousticCells.add(acousticBakeCells[i]);
+            acousticCellLookup[acousticCells[idx].coord] = idx;
+        }
+        acousticBakeRequests.setsize(0);
+        acousticBakeCells.setsize(0);
+        renderprogress(1, "finalizing acoustic grid");
         finalizeAcousticGrid();
+        Uint32 end = SDL_GetTicks();
         conoutf(CON_DEBUG, "sound acoustics: baked whole map: %d cells, %d regions, %d portals (%d unit cells, %d rays)",
             acousticCells.length(), acousticRegions.length(), acousticPortals.length(), csize, rays);
+        conoutf("baked sound acoustics in %.1f seconds", (end - start)/1000.0f);
     }
 
     static float smoothstepfactor(int elapsed)
@@ -775,7 +921,7 @@ namespace acoustics
         vec dir = vec(loc).sub(acousticProbe.origin);
         if(dir.iszero()) return;
         dir.normalize();
-        float clear = raycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
+        float clear = acousticRaycube(acousticProbe.origin, dir, dist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST),
               pathOpen = clear + 2.0f < dist ? clamp(clear/max(dist, 1.0f), 0.0f, 1.0f) : 1.0f,
               occlusion = clamp(powf(1.0f - pathOpen, 0.75f)*soundacousticocclusion, 0.0f, 1.0f),
               muffleOpen = clamp(pathOpen*0.65f + acousticProbe.muffleOpen*0.35f, 0.0f, 1.0f),
