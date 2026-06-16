@@ -430,6 +430,7 @@ namespace sound
     extern void preloadMap(int n);
     extern bool stop(int n, int chanid, int fade = 0);
     extern void stopAll();
+    extern void clearEntities();
     extern void init();
     extern void reset();
     extern void cleanup();
@@ -441,6 +442,7 @@ extern void preloadsound(int n);
 extern void preloadmapsound(int n);
 extern bool stopsound(int n, int chanid, int fade = 0);
 extern void stopsounds();
+extern void clearsoundentities();
 extern void initsound();
 
 // rendermodel

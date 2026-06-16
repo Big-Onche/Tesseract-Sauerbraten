@@ -907,6 +907,7 @@ namespace game
         gamepaused = false;
         gamespeed = 100;
         clearclients(false);
+        resetsoundentityids();
         if(cleanup)
         {
             nextmode = gamemode = INT_MAX;

@@ -732,6 +732,8 @@ namespace game
     extern const char *teamcolor(const char *name, const char *team, const char *alt = NULL);
     extern void teamsound(bool sameteam, int n, const vec *loc = NULL);
     extern void teamsound(fpsent *d, int n, const vec *loc = NULL);
+    extern int allocsoundentityid();
+    extern void resetsoundentityids();
     extern fpsent *pointatplayer();
     extern fpsent *hudplayer();
     extern fpsent *followingplayer(fpsent *fallback = NULL);
@@ -817,6 +819,8 @@ namespace game
     extern void removeprojectiles(fpsent *owner);
     extern void renderprojectiles();
     extern void preloadbouncers();
+    extern int findweaponsoundentityid(const vec *loc);
+    extern bool getweaponsoundentitypos(int id, vec &pos);
     extern void removeweapons(fpsent *owner);
     extern void updateweapons(int curtime);
     extern void gunselect(int gun, fpsent *d);

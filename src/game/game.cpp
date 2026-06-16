@@ -12,6 +12,7 @@ namespace game
     fpsent *player1 = NULL;         // our client
     vector<fpsent *> players;       // other clients
     int savedammo[NUMGUNS];
+    static int nextsoundentityid = 1;
 
     bool clientoption(const char *arg) { return false; }
 
@@ -546,6 +547,41 @@ namespace game
 
     vector<fpsent *> clients;
 
+    int allocsoundentityid()
+    {
+        if(nextsoundentityid <= 0) nextsoundentityid = 1;
+        return nextsoundentityid++;
+    }
+
+    void resetsoundentityids()
+    {
+        clearsoundentities();
+        nextsoundentityid = 1;
+        loopv(players) if(players[i]) players[i]->soundentityid = allocsoundentityid();
+    }
+
+    int getsoundentityid(const vec *loc)
+    {
+        if(!loc) return 0;
+        loopv(players) if(players[i] && &players[i]->o == loc)
+        {
+            if(!players[i]->soundentityid) players[i]->soundentityid = allocsoundentityid();
+            return players[i]->soundentityid;
+        }
+        return findweaponsoundentityid(loc);
+    }
+
+    bool getsoundentitypos(int id, vec &pos)
+    {
+        if(id <= 0) return false;
+        loopv(players) if(players[i] && players[i]->soundentityid == id)
+        {
+            pos = players[i]->o;
+            return true;
+        }
+        return getweaponsoundentitypos(id, pos);
+    }
+
     fpsent *newclient(int cn)   // ensure valid entity
     {
         if(cn < 0 || cn > max(0xFF, MAXCLIENTS + MAXBOTS))
@@ -561,6 +597,7 @@ namespace game
         {
             fpsent *d = new fpsent;
             d->clientnum = cn;
+            d->soundentityid = allocsoundentityid();
             clients[cn] = d;
             players.add(d);
         }
@@ -602,6 +639,7 @@ namespace game
     void initclient()
     {
         player1 = spawnstate(new fpsent);
+        player1->soundentityid = allocsoundentityid();
         filtertext(player1->name, "unnamed", false, false, MAXNAMELEN);
         players.add(player1);
     }
@@ -616,6 +654,7 @@ namespace game
         clearprojectiles();
         clearbouncers();
         clearragdolls();
+        resetsoundentityids();
 
         clearteaminfo();
 

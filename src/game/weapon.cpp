@@ -188,6 +188,7 @@ namespace game
         bnc.local = local;
         bnc.owner = owner;
         bnc.bouncetype = type;
+        bnc.soundentityid = allocsoundentityid();
         bnc.id = local ? lastmillis : id;
 
         switch(type)
@@ -287,7 +288,7 @@ namespace game
         int gun;
         bool local;
         int offsetmillis;
-        int id;
+        int id, soundentityid;
     };
     vector<projectile> projs;
 
@@ -307,6 +308,7 @@ namespace game
         p.gun = gun;
         p.offsetmillis = OFFSETMILLIS;
         p.id = local ? lastmillis : id;
+        p.soundentityid = allocsoundentityid();
     }
 
     void removeprojectiles(fpsent *owner)
@@ -314,6 +316,30 @@ namespace game
         // can't use loopv here due to strange GCC optimizer bug
         int len = projs.length();
         loopi(len) if(projs[i].owner==owner) { projs.remove(i--); len--; }
+    }
+
+    int findweaponsoundentityid(const vec *loc)
+    {
+        if(!loc) return 0;
+        loopv(bouncers) if(&bouncers[i]->o == loc) return bouncers[i]->soundentityid;
+        loopv(projs) if(&projs[i].o == loc) return projs[i].soundentityid;
+        return 0;
+    }
+
+    bool getweaponsoundentitypos(int id, vec &pos)
+    {
+        if(id <= 0) return false;
+        loopv(bouncers) if(bouncers[i]->soundentityid == id)
+        {
+            pos = bouncers[i]->offsetpos();
+            return true;
+        }
+        loopv(projs) if(projs[i].soundentityid == id)
+        {
+            pos = projs[i].o;
+            return true;
+        }
+        return false;
     }
 
     VARP(blood, 0, 1, 1);

@@ -196,7 +196,7 @@ namespace sound
         vec loc;
         SoundSlot *slot;
         extentity *ent;
-        int radius, volume, targetVolume, pan, flags, expire;
+        int radius, volume, targetVolume, pan, flags, expire, soundentity;
         int fadeStart, fadeEnd, fadeFrom;
         float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend;
         bool dirty, stopping;
@@ -218,6 +218,7 @@ namespace sound
             pan = -1;
             flags = 0;
             expire = -1;
+            soundentity = 0;
             fadeStart = fadeEnd = fadeFrom = 0;
             pitch = 1.0f;
             gainhf = -1.0f;
@@ -307,7 +308,7 @@ namespace sound
 
     static vector<SoundChannel> channels;
 
-    static SoundChannel &newChannel(int n, SoundSlot *slot, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int radius = 0)
+    static SoundChannel &newChannel(int n, SoundSlot *slot, const vec *loc = NULL, extentity *ent = NULL, int flags = 0, int radius = 0, int soundentity = 0)
     {
         if(ent)
         {
@@ -331,6 +332,7 @@ namespace sound
         chan.ent = ent;
         chan.flags = flags;
         chan.radius = radius;
+        chan.soundentity = soundentity;
         return chan;
     }
 
@@ -1178,6 +1180,7 @@ namespace sound
 
     VAR(stereo, 0, 1, 1);
     VAR(maxsoundradius, 1, 340, 0);
+    VARP(soundfollowentities, 0, 1, 1);
     VARP(soundpitchrandom, 0, 0, 1);
     FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
     VARP(soundairattenuation, 0, 0, 1);
@@ -1226,6 +1229,19 @@ namespace sound
         if(!soundpitchrandom || soundpitchrandomamount <= 0.0f || ent || (flags&SND_MAP) || (!loc && !(flags&SND_HUD))) return 1.0f;
         float amount = min(soundpitchrandomamount, 0.99f);
         return clamp(1.0f + rndscale(2.0f*amount) - amount, 0.01f, 4.0f);
+    }
+
+    static int soundEntityId(const vec *loc, const extentity *ent, int flags)
+    {
+        return soundfollowentities && loc && !ent && !(flags&SND_MAP) ? game::getsoundentityid(loc) : 0;
+    }
+
+    static void updateSoundEntity(SoundChannel &chan)
+    {
+        if(!soundfollowentities || chan.soundentity <= 0) return;
+        vec pos;
+        if(game::getsoundentitypos(chan.soundentity, pos)) chan.loc = pos;
+        else chan.soundentity = 0;
     }
 
     enum
@@ -1486,6 +1502,14 @@ namespace sound
             AcousticRay &ray = acousticProbe.rays.add();
             ray.dir = vec(cosf(a)*r, sinf(a)*r, z);
         }
+        int skyDiagRays = rays >= 16 ? min(rays/4, 8) : max(rays/4, 1);
+        loopi(skyDiagRays)
+        {
+            float a = (2.0f*PI*i)/skyDiagRays,
+                  z = 0.45f,
+                  r = sqrtf(max(0.0f, 1.0f - z*z));
+            acousticProbe.rays[i].dir = vec(cosf(a)*r, sinf(a)*r, z);
+        }
         acousticProbe.nextRay = 0;
         acousticProbe.budget = 0;
     }
@@ -1525,6 +1549,7 @@ namespace sound
               open = 0, walldist = 0, hits = 0,
               skyOpen = 1.0f, ceilingDist = 0,
               skyCount = 0, skyOpenCount = 0, ceilingHits = 0,
+              skyDiagCount = 0, skyDiagOpen = 0,
               horizontalCount = 0, horizontalHits = 0, horizontalNear = 0, horizontalFar = 0, horizontalFarHits = 0, horizontalDist = 0, horizontalDist2 = 0,
               downCount = 0, downOpen = 0;
         vector<float> hitDistances, horizontalDistances;
@@ -1547,6 +1572,11 @@ namespace sound
             {
                 hits += 1.0f;
                 hitDistances.add(unitsToMeters(ray.dist));
+            }
+            if(ray.dir.z > 0.25f)
+            {
+                skyDiagCount += 1.0f;
+                skyDiagOpen += hit ? smoothramp(ray.open, 0.78f, 0.98f) : 1.0f;
             }
             if(ray.dir.z > 0.65f)
             {
@@ -1594,6 +1624,9 @@ namespace sound
         walldist *= invrays;
         hits *= invrays;
         if(skyCount > 0) skyOpen = skyOpenCount/skyCount;
+        float verticalSkyOpen = skyOpen,
+              diagonalSkyOpen = skyDiagCount > 0 ? skyDiagOpen/skyDiagCount : verticalSkyOpen;
+        skyOpen = clamp(max(verticalSkyOpen*0.65f + diagonalSkyOpen*0.35f, diagonalSkyOpen*0.55f), 0.0f, 1.0f);
         if(ceilingHits > 0) ceilingDist /= ceilingHits;
 
         float horizontalHitRatio = horizontalCount > 0 ? horizontalHits/horizontalCount : hits,
@@ -1621,18 +1654,23 @@ namespace sound
               percentileSpread = clamp((farPercentile - nearPercentile)/max(farPercentile, 1.0f), 0.0f, 1.0f),
               irregularityScore = clamp(varianceScore*0.65f + percentileSpread*0.35f, 0.0f, 1.0f);
 
-        float sectorOpen[8];
-        loopi(8) sectorOpen[i] = sectors[i].count ? clamp(sectors[i].dist/(sectors[i].count*range), 0.0f, 1.0f) : open;
+        float sectorOpen[8], sectorNear[8];
+        loopi(8)
+        {
+            sectorOpen[i] = sectors[i].count ? clamp(sectors[i].dist/(sectors[i].count*range), 0.0f, 1.0f) : open;
+            sectorNear[i] = sectors[i].count ? clamp(sectors[i].nearHits/sectors[i].count, 0.0f, 1.0f) : horizontalNearRatio;
+        }
         float sectorCorridor = 0.0f;
         loopi(4)
         {
             int a = i, b = i + 4, side1 = (i + 2)&7, side2 = (i + 6)&7;
             float alongFar = min(sectorOpen[a], sectorOpen[b]),
-                  sideNear = 1.0f - 0.5f*(sectorOpen[side1] + sectorOpen[side2]);
-            sectorCorridor = max(sectorCorridor, clamp(alongFar*sideNear, 0.0f, 1.0f));
+                  sideClosed = 1.0f - 0.5f*(sectorOpen[side1] + sectorOpen[side2]),
+                  sideNear = 0.5f*(sectorNear[side1] + sectorNear[side2]);
+            sectorCorridor = max(sectorCorridor, clamp(alongFar*(sideClosed*0.55f + sideNear*0.45f), 0.0f, 1.0f));
         }
 
-        float corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), sectorCorridor), 0.0f, 1.0f),
+        float corridorScore = clamp(max(min(horizontalNearRatio, horizontalFarRatio)*max(varianceScore, 0.25f), smoothramp(sectorCorridor, 0.06f, 0.36f)), 0.0f, 1.0f),
               outdoorRaw = smoothramp(skyOpen, 0.35f, 0.70f),
               indoorRaw = 1.0f - outdoorRaw,
               ceilingOpen = skyOpen,
@@ -1642,9 +1680,9 @@ namespace sound
 
         float rawScores[AP_NUM];
         rawScores[AP_SMALLROOM] = indoorRaw*(0.35f + horizontalHitRatio*0.65f)*roomSizeScore*(1.0f - irregularityScore*0.45f)*(1.0f - horizontalFarHitRatio*0.35f)*0.80f;
-        rawScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.55f)*(1.0f - irregularityScore*0.35f)*1.10f;
-        rawScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.20f;
-        rawScores[AP_CAVE] = indoorRaw*(0.30f + hits*0.70f)*(0.30f + irregularityScore*0.90f)*(0.35f + horizontalFarHitRatio*0.65f)*(0.45f + ceilingBlocked*0.55f)*1.25f;
+        rawScores[AP_HALL] = indoorRaw*(0.30f + horizontalHitRatio*0.70f)*smoothramp(medianHorizontalDistance, 8.0f, 28.0f)*(0.40f + horizontalFarHitRatio*0.60f)*(1.0f - corridorScore*0.75f)*(1.0f - irregularityScore*0.35f)*1.05f;
+        rawScores[AP_CORRIDOR] = indoorRaw*(0.25f + horizontalHitRatio*0.75f)*corridorScore*(0.60f + fill*0.40f)*1.55f;
+        rawScores[AP_CAVE] = indoorRaw*(0.25f + hits*0.50f)*smoothramp(irregularityScore, 0.35f, 0.85f)*(0.25f + horizontalFarHitRatio*0.45f)*(0.35f + ceilingBlocked*0.35f)*(1.0f - corridorScore*0.70f)*0.85f;
         rawScores[AP_OPENOUTDOOR] = outdoorRaw*skyOpen*(0.45f + horizontalOpenRatio*0.55f)*(1.0f - horizontalNearRatio)*(1.0f - corridorScore*0.50f);
         rawScores[AP_COURTYARD] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*(0.25f + horizontalHitRatio*0.75f)*(1.0f - corridorScore*0.40f);
         rawScores[AP_STREET] = outdoorRaw*skyOpen*(0.25f + horizontalNearRatio*0.75f)*corridorScore;
@@ -1859,6 +1897,7 @@ namespace sound
     {
         if(!chan.slot) return false;
         float volf = 1.0f, panf = 0.5f, gainhf = 1.0f, gainlf = 1.0f, reverbSend = 0.0f, distanceReverbSend = 0.0f;
+        updateSoundEntity(chan);
         if(chan.hasLoc())
         {
             vec v;
@@ -2035,6 +2074,7 @@ namespace sound
             SoundChannel &chan = channels[chanid];
             if(sounds.playing(chan, config))
             {
+                chan.soundentity = soundEntityId(loc, ent, flags);
                 if(loc) chan.loc = *loc;
                 else if(chan.hasLoc()) chan.clearLoc();
                 chan.flags = flags;
@@ -2055,7 +2095,7 @@ namespace sound
         if(chanid < 0) loopv(channels) if(!channels[i].targetVolume) { haltChannel(i); chanid = i; break; }
         if(chanid < 0) return -1;
 
-        SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius);
+        SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundEntityId(loc, ent, flags));
         chan.pitch = randomPitchOffset(loc, flags, ent);
         if(!chan.ensureSource())
         {
@@ -2090,6 +2130,11 @@ namespace sound
     void stopAll()
     {
         loopv(channels) if(channels[i].inuse) haltChannel(i);
+    }
+
+    void clearEntities()
+    {
+        loopv(channels) channels[i].soundentity = 0;
     }
 
     bool stop(int n, int chanid, int fade)
@@ -2206,6 +2251,7 @@ void rendersounddebug() { sound::drawAcousticsDebug(); }
 void preloadsound(int n) { sound::preload(n); }
 void preloadmapsound(int n) { sound::preloadMap(n); }
 void preloadmapsounds() { sound::preloadMapSounds(); }
+void clearsoundentities() { sound::clearEntities(); }
 int playsound(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire) { return sound::play(n, loc, ent, flags, loops, fade, chanid, radius, expire); }
 void stopsounds() { sound::stopAll(); }
 bool stopsound(int n, int chanid, int fade) { return sound::stop(n, chanid, fade); }
