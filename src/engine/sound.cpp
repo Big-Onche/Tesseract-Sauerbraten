@@ -198,7 +198,7 @@ namespace sound
         extentity *ent;
         int radius, volume, targetVolume, pan, flags, expire;
         int fadeStart, fadeEnd, fadeFrom;
-        float gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend;
+        float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend;
         bool dirty, stopping;
 
         SoundChannel(int id) : id(id), source(0), filter(0), sendFilter(0), distanceSendFilter(0) { reset(); }
@@ -219,6 +219,7 @@ namespace sound
             flags = 0;
             expire = -1;
             fadeStart = fadeEnd = fadeFrom = 0;
+            pitch = 1.0f;
             gainhf = -1.0f;
             targetGainHF = 1.0f;
             gainlf = -1.0f;
@@ -1177,6 +1178,8 @@ namespace sound
 
     VAR(stereo, 0, 1, 1);
     VAR(maxsoundradius, 1, 340, 0);
+    VARP(soundpitchrandom, 0, 0, 1);
+    FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
     VARP(soundairattenuation, 0, 0, 1);
     FVARP(maxsounddistance, 0.0f, 1024.0f, 4096.0f);
     FVARP(sounddistanceattenuationfactor, 0.0f, 2.0f, 4.0f);
@@ -1216,6 +1219,13 @@ namespace sound
     static float metersToUnits(float meters)
     {
         return max(meters, 0.0f)*SoundUnitsPerMeter;
+    }
+
+    static float randomPitchOffset(const vec *loc, int flags, const extentity *ent)
+    {
+        if(!soundpitchrandom || soundpitchrandomamount <= 0.0f || ent || (flags&SND_MAP) || (!loc && !(flags&SND_HUD))) return 1.0f;
+        float amount = min(soundpitchrandomamount, 0.99f);
+        return clamp(1.0f + rndscale(2.0f*amount) - amount, 0.01f, 4.0f);
     }
 
     enum
@@ -2046,6 +2056,7 @@ namespace sound
         if(chanid < 0) return -1;
 
         SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius);
+        chan.pitch = randomPitchOffset(loc, flags, ent);
         if(!chan.ensureSource())
         {
             freeChannel(chanid);
@@ -2065,6 +2076,7 @@ namespace sound
         alSourcei(chan.source, AL_BUFFER, 0);
         alSourcei(chan.source, AL_BUFFER, slot.sample->buffer);
         alSourcei(chan.source, AL_LOOPING, loops ? AL_TRUE : AL_FALSE);
+        alSourcef(chan.source, AL_PITCH, chan.pitch);
         syncChannel(chan);
         alSourcePlay(chan.source);
         if(!checkAl("alSourcePlay"))
