@@ -81,6 +81,7 @@ CLIENT_OBJS= \
 	shared/tools.o \
 	shared/zip.o \
 	engine/aa.o \
+	engine/acoustics.o \
 	engine/bih.o \
 	engine/blend.o \
 	engine/client.o	\
@@ -417,10 +418,17 @@ engine/shader.o: shared/ents.h shared/command.h shared/glexts.h
 engine/shader.o: shared/glemu.h shared/iengine.h shared/igame.h
 engine/shader.o: engine/world.h engine/octa.h engine/light.h engine/texture.h
 engine/shader.o: engine/bih.h engine/model.h
+engine/acoustics.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
+engine/acoustics.o: shared/ents.h shared/command.h shared/glexts.h
+engine/acoustics.o: shared/glemu.h shared/iengine.h shared/igame.h
+engine/acoustics.o: engine/world.h engine/octa.h engine/light.h
+engine/acoustics.o: engine/texture.h engine/bih.h engine/model.h
+engine/acoustics.o: engine/acoustics.h
 engine/sound.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/sound.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 engine/sound.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h
 engine/sound.o: engine/light.h engine/texture.h engine/bih.h engine/model.h
+engine/sound.o: engine/acoustics.h
 engine/stain.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/stain.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 engine/stain.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h

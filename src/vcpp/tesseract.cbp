@@ -38,7 +38,8 @@
 					<Add option="-mwindows" />
 					<Add library="SDL2" />
 					<Add library="SDL2_image" />
-					<Add library="SDL2_mixer" />
+					<Add library="OpenAL32" />
+					<Add library="sndfile" />
 					<Add library="zlib1" />
 					<Add library="opengl32" />
 					<Add library="enet" />
@@ -83,7 +84,8 @@
 					<Add option="-mwindows" />
 					<Add library="SDL2" />
 					<Add library="SDL2_image" />
-					<Add library="SDL2_mixer" />
+					<Add library="OpenAL32" />
+					<Add library="sndfile" />
 					<Add library="zlib1" />
 					<Add library="opengl32" />
 					<Add library="enet" />
@@ -102,6 +104,8 @@
 		</VirtualTargets>
 		<Unit filename="../engine/aa.cpp" />
 		<Unit filename="../engine/animmodel.h" />
+		<Unit filename="../engine/acoustics.cpp" />
+		<Unit filename="../engine/acoustics.h" />
 		<Unit filename="../engine/bih.cpp" />
 		<Unit filename="../engine/bih.h" />
 		<Unit filename="../engine/blend.cpp" />
@@ -115,6 +119,7 @@
 		</Unit>
 		<Unit filename="../engine/explosion.h" />
 		<Unit filename="../engine/grass.cpp" />
+		<Unit filename="../engine/heathaze.cpp" />
 		<Unit filename="../engine/hitzone.h" />
 		<Unit filename="../engine/iqm.h" />
 		<Unit filename="../engine/lensflare.h" />
