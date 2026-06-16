@@ -1913,6 +1913,33 @@ ICOMMAND(soundacousticportals, "", (), intret(acoustics::numAcousticPortals()));
 void bakesoundacoustics(int *cellsize, int *rays) { acoustics::bakeAcousticGrid(*cellsize, *rays); }
 COMMAND(bakesoundacoustics, "ii");
 
+void soundacousticbakecorner(int *corner, float *x, float *y, float *z)
+{
+    if(*corner < 1 || *corner > 2)
+    {
+        conoutf(CON_WARN, "soundacousticbakecorner: corner must be 1 or 2");
+        return;
+    }
+    acoustics::setAcousticBakeCorner(*corner - 1, vec(*x, *y, *z));
+}
+COMMAND(soundacousticbakecorner, "ifff");
+
+void getacousticbounds(int *corner)
+{
+    if(*corner < 1 || *corner > 2)
+    {
+        conoutf(CON_WARN, "getacousticbounds: corner must be 1 or 2");
+        return;
+    }
+    if(!camera1)
+    {
+        conoutf(CON_WARN, "getacousticbounds: no camera");
+        return;
+    }
+    acoustics::setAcousticBakeCorner(*corner - 1, camera1->o);
+}
+COMMAND(getacousticbounds, "i");
+
 void clearsoundacousticgrid() { acoustics::clearAcousticGrid(); }
 COMMAND(clearsoundacousticgrid, "");
 

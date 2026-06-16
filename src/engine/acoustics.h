@@ -21,6 +21,7 @@ namespace acoustics
 
     void clearAcousticGrid();
     void bakeAcousticGrid(int cellsize, int rays);
+    void setAcousticBakeCorner(int corner, const vec &pos);
     int numAcousticCells();
     int numAcousticRegions();
     int numAcousticPortals();

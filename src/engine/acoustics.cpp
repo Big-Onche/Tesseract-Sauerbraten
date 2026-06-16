@@ -400,6 +400,8 @@ namespace acoustics
     static vector<AcousticCell> acousticBakeCells;
     static volatile bool acousticBakeCanceled = false, checkAcousticBakeProgress = false;
     static int acousticBakeTotal = 0, acousticBakeProcessed = 0, acousticBakeValidCells = 0;
+    static vec acousticBakeBounds[2];
+    static bool acousticBakeBoundsSet[2] = { false, false };
 
     static Uint32 acousticBakeTimer(Uint32 interval, void *param)
     {
@@ -435,6 +437,39 @@ namespace acoustics
     {
         float size = max(soundacousticcellsize, 16);
         return vec((coord.x + 0.5f)*size, (coord.y + 0.5f)*size, (coord.z + 0.5f)*size);
+    }
+
+    static bool acousticBakeBoundsEnabled()
+    {
+        return acousticBakeBoundsSet[0] && acousticBakeBoundsSet[1];
+    }
+
+    static void acousticBakeBoundsMinMax(vec &bbmin, vec &bbmax)
+    {
+        loopi(3)
+        {
+            bbmin[i] = min(acousticBakeBounds[0][i], acousticBakeBounds[1][i]);
+            bbmax[i] = max(acousticBakeBounds[0][i], acousticBakeBounds[1][i]);
+        }
+    }
+
+    static bool acousticBakeCellBounds(int csize, int cellsperaxis, ivec &mincoord, ivec &maxcoord)
+    {
+        mincoord = ivec(0, 0, 0);
+        maxcoord = ivec(cellsperaxis - 1, cellsperaxis - 1, cellsperaxis - 1);
+        if(!acousticBakeBoundsEnabled()) return true;
+
+        vec bbmin, bbmax;
+        acousticBakeBoundsMinMax(bbmin, bbmax);
+        loopi(3)
+        {
+            float lo = clamp(bbmin[i], 0.0f, float(worldsize)),
+                  hi = clamp(bbmax[i], 0.0f, float(worldsize));
+            if(hi <= lo) return false;
+            mincoord[i] = clamp(int(floorf(lo/csize)), 0, cellsperaxis - 1);
+            maxcoord[i] = clamp(int(ceilf(hi/csize)) - 1, 0, cellsperaxis - 1);
+        }
+        return mincoord.x <= maxcoord.x && mincoord.y <= maxcoord.y && mincoord.z <= maxcoord.z;
     }
 
     static int acousticCellIndex(const ivec &coord)
@@ -1190,6 +1225,14 @@ namespace acoustics
     int numAcousticRegions() { return acousticRegions.length(); }
     int numAcousticPortals() { return acousticPortals.length(); }
 
+    void setAcousticBakeCorner(int corner, const vec &pos)
+    {
+        if(corner < 0 || corner > 1) return;
+        acousticBakeBounds[corner] = pos;
+        acousticBakeBoundsSet[corner] = true;
+        conoutf(CON_DEBUG, "sound acoustics bake corner %d set to %.1f %.1f %.1f", corner + 1, pos.x, pos.y, pos.z);
+    }
+
     void bakeAcousticGrid(int cellsize, int rays)
     {
         if(worldsize <= 0)
@@ -1208,17 +1251,31 @@ namespace acoustics
         int csize = max(soundacousticcellsize, 16),
             cellsperaxis = (worldsize + csize - 1)/csize;
         float range = metersToUnits(soundacousticrange);
+        ivec mincoord, maxcoord;
+        if(!acousticBakeCellBounds(csize, cellsperaxis, mincoord, maxcoord))
+        {
+            conoutf(CON_WARN, "sound acoustics: invalid acoustic bake bounds");
+            return;
+        }
 
         acousticBakeRequests.setsize(0);
         acousticBakeCells.setsize(0);
-        acousticBakeTotal = cellsperaxis*cellsperaxis*cellsperaxis;
+        acousticBakeTotal = (maxcoord.x - mincoord.x + 1)*(maxcoord.y - mincoord.y + 1)*(maxcoord.z - mincoord.z + 1);
         acousticBakeProcessed = acousticBakeValidCells = 0;
         acousticBakeCanceled = false;
         checkAcousticBakeProgress = false;
-        loop(x, cellsperaxis) loop(y, cellsperaxis) loop(z, cellsperaxis)
+        for(int x = mincoord.x; x <= maxcoord.x; x++) for(int y = mincoord.y; y <= maxcoord.y; y++) for(int z = mincoord.z; z <= maxcoord.z; z++)
         {
             ivec coord(x, y, z);
             acousticBakeRequests.add(AcousticBakeRequest(coord));
+        }
+        if(acousticBakeBoundsEnabled())
+        {
+            vec bbmin, bbmax;
+            acousticBakeBoundsMinMax(bbmin, bbmax);
+            conoutf(CON_DEBUG, "sound acoustics: baking bounded cells %d,%d,%d to %d,%d,%d (%.1f %.1f %.1f -> %.1f %.1f %.1f)",
+                mincoord.x, mincoord.y, mincoord.z, maxcoord.x, maxcoord.y, maxcoord.z,
+                bbmin.x, bbmin.y, bbmin.z, bbmax.x, bbmax.y, bbmax.z);
         }
 
         if(!acousticBakeMutex) acousticBakeMutex = SDL_CreateMutex();
@@ -1492,11 +1549,11 @@ namespace acoustics
         return clamp(mixedReverb*travelWetness*soundacousticreverb, 0.0f, 1.0f);
     }
 
-    static bool acousticDirectLineOfSound(const vec &from, const vec &to)
+    static float acousticDirectOcclusion(const vec &from, const vec &to)
     {
         vec dir = vec(to).sub(from);
         float len = dir.magnitude();
-        if(len <= 1.0f) return true;
+        if(len <= 1.0f) return 0.0f;
 
         dir.div(len);
 
@@ -1506,34 +1563,46 @@ namespace acoustics
 
         vec up(0, 0, 1);
 
-        const float spread = 2.0f;
-        int clear = 0;
+        const float spread = 2.0f,
+                    endpointTolerance = min(max(len*0.02f, 1.0f), 4.0f);
+        int blocked = 0;
 
-        vec starts[3] =
+        vec offsets[4] =
         {
-            from,
-            vec(from).add(vec(side).mul(spread)),
-            vec(from).add(vec(up).mul(spread))
+            vec(0, 0, 0),
+            vec(side).mul(spread),
+            vec(side).mul(-spread),
+            vec(up).mul(spread)
         };
 
-        loopi(3)
+        loopi(sizeof(offsets)/sizeof(offsets[0]))
         {
-            vec ray = vec(to).sub(starts[i]);
+            vec start = vec(from).add(offsets[i]),
+                end = vec(to).add(offsets[i]),
+                ray = vec(end).sub(start);
             float raylen = ray.magnitude();
-            if(raylen <= 1.0f)
-            {
-                clear++;
-                continue;
-            }
+            if(raylen <= 1.0f) continue;
 
             ray.div(raylen);
 
-            float hit = acousticRaycube(starts[i], ray, raylen, RAY_POLY);
+            float hit = acousticRaycube(start, ray, raylen, RAY_POLY);
 
-            if(hit >= raylen * 0.98f) clear++;
+            if(hit < raylen - endpointTolerance) blocked++;
         }
 
-        return clear >= 2;
+        if(blocked <= 1) return 0.0f;
+        return clamp((blocked - 1)/3.0f, 0.0f, 1.0f);
+    }
+
+    static void applySameCellOcclusion(float occlusion, float &volf, float &gainhf)
+    {
+        float occ = clamp(occlusion*soundacousticocclusion, 0.0f, 0.65f),
+              sameCellBlockGain = max(soundacousticblockgain, 0.55f),
+              sameCellMuffleGainHF = max(clamp(soundacousticmufflegainhf, 0.02f, 1.0f), 0.35f),
+              occVol = powf(occ, 0.85f),
+              occHF = powf(occ, 0.60f);
+        volf *= 1.0f - occVol*(1.0f - sameCellBlockGain);
+        gainhf *= 1.0f - occHF*(1.0f - sameCellMuffleGainHF);
     }
 
     void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend, AcousticSourceInfo *info)
@@ -1548,12 +1617,20 @@ namespace acoustics
 
         if(!soundacoustics || !acousticProbe.baked || dist <= 1.0f) return;
 
-        if(acousticDirectLineOfSound(loc, acousticProbe.origin)) return; // Cheap direct test first
+        float directOcclusion = acousticDirectOcclusion(loc, acousticProbe.origin);
+        if(directOcclusion <= 0.0f) return; // Cheap direct test first
 
         AcousticCell *sourceCell = findAcousticCell(loc);
         if(!sourceCell || !acousticCells.inrange(acousticProbe.cell)) return;
         int sourceidx = acousticCellIndex(sourceCell->coord),
             targetidx = acousticProbe.cell;
+        if(sourceidx == targetidx)
+        {
+            applySameCellOcclusion(directOcclusion, volf, gainhf);
+            if(info) info->occlusion = clamp(directOcclusion*soundacousticocclusion, 0.0f, 0.65f);
+            return;
+        }
+
         AcousticAStarResult path;
         if(!findAcousticAStarPath(sourceidx, targetidx, dist, path)) return;
 
@@ -1621,6 +1698,45 @@ namespace acoustics
         gle::attrib(b); gle::attrib(white, alpha);
     }
 
+    static void drawAcousticBakeBounds()
+    {
+        if(!acousticBakeBoundsEnabled()) return;
+
+        vec bbmin, bbmax;
+        acousticBakeBoundsMinMax(bbmin, bbmax);
+        vec v[8] =
+        {
+            vec(bbmin.x, bbmin.y, bbmin.z),
+            vec(bbmax.x, bbmin.y, bbmin.z),
+            vec(bbmax.x, bbmax.y, bbmin.z),
+            vec(bbmin.x, bbmax.y, bbmin.z),
+            vec(bbmin.x, bbmin.y, bbmax.z),
+            vec(bbmax.x, bbmin.y, bbmax.z),
+            vec(bbmax.x, bbmax.y, bbmax.z),
+            vec(bbmin.x, bbmax.y, bbmax.z)
+        };
+        bvec red(255, 0, 0);
+
+        GLfloat oldwidth = 1.0f;
+        glGetFloatv(GL_LINE_WIDTH, &oldwidth);
+        glLineWidth(4.0f);
+        gle::begin(GL_LINES, 24);
+        drawAcousticCellLine(v, 0, 1, red, 255);
+        drawAcousticCellLine(v, 1, 2, red, 255);
+        drawAcousticCellLine(v, 2, 3, red, 255);
+        drawAcousticCellLine(v, 3, 0, red, 255);
+        drawAcousticCellLine(v, 4, 5, red, 255);
+        drawAcousticCellLine(v, 5, 6, red, 255);
+        drawAcousticCellLine(v, 6, 7, red, 255);
+        drawAcousticCellLine(v, 7, 4, red, 255);
+        drawAcousticCellLine(v, 0, 4, red, 255);
+        drawAcousticCellLine(v, 1, 5, red, 255);
+        drawAcousticCellLine(v, 2, 6, red, 255);
+        drawAcousticCellLine(v, 3, 7, red, 255);
+        xtraverts += gle::end();
+        glLineWidth(oldwidth);
+    }
+
     static void drawAcousticAStarDebug(int maxradius)
     {
         if(acousticDebugPath.empty() || !camera1 || totalmillis - acousticDebugPathMillis > 500)
@@ -1659,7 +1775,10 @@ namespace acoustics
 
     void drawAcousticsDebug()
     {
-        if(!soundacoustics || !debugsoundacoustics || acousticCells.empty()) return;
+        if(!debugsoundacoustics) return;
+        bool drawbounds = acousticBakeBoundsEnabled(),
+             drawgrid = soundacoustics && !acousticCells.empty();
+        if(!drawbounds && !drawgrid) return;
         ldrnotextureshader->set();
         GLboolean cull = glIsEnabled(GL_CULL_FACE);
         glDisable(GL_CULL_FACE);
@@ -1667,7 +1786,7 @@ namespace acoustics
         gle::defvertex();
         gle::defcolor(4, GL_UNSIGNED_BYTE);
 
-        if(camera1 && soundacousticgrid && !acousticCells.empty())
+        if(drawgrid && camera1 && soundacousticgrid)
         {
             int visible = 0,
                 maxradius = min(debugsoundacousticsradius, 256);
@@ -1710,7 +1829,8 @@ namespace acoustics
                 xtraverts += gle::end();
             }
         }
-        drawAcousticAStarDebug(min(max(debugsoundacousticsradius, 32), 256));
+        if(drawgrid) drawAcousticAStarDebug(min(max(debugsoundacousticsradius, 32), 256));
+        if(drawbounds) drawAcousticBakeBounds();
         glDepthMask(GL_TRUE);
         if(cull) glEnable(GL_CULL_FACE);
     }
