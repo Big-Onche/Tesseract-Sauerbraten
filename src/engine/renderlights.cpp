@@ -916,7 +916,7 @@ void setupgbuffer()
         sh = max((renderh*gscale + 99)/100, 1);
     }
 
-    if(gw == sw && gh == sh && ((sw >= hudw && sh >= hudh && !scalefbo[0]) || (scalew == hudw && scaleh == hudh))) return;
+    if(gw == sw && gh == sh && ((sw == hudw && sh == hudh && !scalefbo[0]) || (scalew == hudw && scaleh == hudh))) return;
 
     cleanupscale();
     cleanupbloom();
@@ -1025,7 +1025,7 @@ void setupgbuffer()
 
     glBindFramebuffer_(GL_FRAMEBUFFER, 0);
 
-    if(gw < hudw || gh < hudh) setupscale(gw, gh, hudw, hudh);
+    if(gw != hudw || gh != hudh) setupscale(gw, gh, hudw, hudh);
 }
 
 void cleanupgbuffer()

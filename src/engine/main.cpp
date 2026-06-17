@@ -527,8 +527,6 @@ void screenres(int w, int h)
     scr_h = clamp(h, SCR_MINH, SCR_MAXH);
     if(screen)
     {
-        scr_w = min(scr_w, desktopw);
-        scr_h = min(scr_h, desktoph);
         if(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN)
         {
             gl_resize();
@@ -609,8 +607,6 @@ void setupscreen()
 
     if(scr_h < 0) scr_h = SCR_DEFAULTH;
     if(scr_w < 0) scr_w = (scr_h*desktopw)/desktoph;
-    scr_w = min(scr_w, desktopw);
-    scr_h = min(scr_h, desktoph);
 
     int winx = SDL_WINDOWPOS_UNDEFINED, winy = SDL_WINDOWPOS_UNDEFINED, winw = scr_w, winh = scr_h, flags = SDL_WINDOW_RESIZABLE;
     if(fullscreen)
@@ -653,8 +649,8 @@ void setupscreen()
     if(!glcontext) fatal("failed to create OpenGL context: %s", SDL_GetError());
 
     SDL_GetWindowSize(screen, &screenw, &screenh);
-    renderw = min(scr_w, screenw);
-    renderh = min(scr_h, screenh);
+    renderw = scr_w;
+    renderh = scr_h;
     hudw = screenw;
     hudh = screenh;
 }

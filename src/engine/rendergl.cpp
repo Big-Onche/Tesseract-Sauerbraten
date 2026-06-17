@@ -2905,8 +2905,8 @@ int renderw = 0, renderh = 0, hudw = 0, hudh = 0;
 void gl_setupframe(bool force)
 {
     extern int scr_w, scr_h;
-    renderw = min(scr_w, screenw);
-    renderh = min(scr_h, screenh);
+    renderw = scr_w;
+    renderh = scr_h;
     hudw = screenw;
     hudh = screenh;
     if(!force) return;
