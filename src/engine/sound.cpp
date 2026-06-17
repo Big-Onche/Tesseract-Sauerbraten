@@ -1555,16 +1555,6 @@ namespace sound
         checkAl("OpenAL acoustic reverb update");
     }
 
-    static bool soundInRange(const vec &loc)
-    {
-        if(soundairattenuation)
-        {
-            if(maxsounddistance <= 0) return true;
-            return camera1->o.dist(loc) <= metersToUnits(maxsounddistance);
-        }
-        return true;
-    }
-
     static bool acousticLoopCacheMoved(const SoundChannel &chan)
     {
         static const float moveThreshold = 1.0f;
@@ -1799,14 +1789,12 @@ namespace sound
 
         if(loc)
         {
-            bool outofrange = false;
-            if(soundairattenuation) outofrange = !soundInRange(*loc);
-            else
-            {
-                int maxrad = game::maxsoundradius(n);
-                if(radius <= 0 || maxrad < radius) radius = maxrad;
-                outofrange = camera1->o.dist(*loc) > 1.5f*radius;
-            }
+            int maxrad = game::maxsoundradius(n);
+            if(radius <= 0 || maxrad < radius) radius = maxrad;
+            float dist = camera1->o.dist(*loc),
+                  cullradius = soundairattenuation ? float(radius) : 1.5f*radius;
+            bool outofrange = dist > cullradius;
+            if(soundairattenuation && maxsounddistance > 0) outofrange = outofrange || dist > metersToUnits(maxsounddistance);
             if(outofrange)
             {
                 if(channels.inrange(chanid) && sounds.playing(channels[chanid], config)) haltChannel(chanid);

@@ -1,5 +1,7 @@
 #include "game.h"
 
+namespace sound { extern int soundairattenuation; }
+
 namespace game
 {
     bool intermission = false;
@@ -1221,9 +1223,20 @@ namespace game
             case S_ITEMSPAWN:
             case S_NOAMMO:
             case S_PUPOUT:
-                return 340;
+                return sound::soundairattenuation ? 450 : 340;
+
+            case S_RIFLE:
+            case S_SG:
+            case S_CG:
+            case S_RLFIRE:
+            case S_RLHIT:
+            case S_FLAUNCH:
+            case S_FEXPLODE:
+            case S_PISTOL:
+                return sound::soundairattenuation ? 1500 : 500;
+
             default:
-                return 500;
+                return sound::soundairattenuation ? 600 : 500;
         }
     }
 
