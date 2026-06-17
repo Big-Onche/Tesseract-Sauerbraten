@@ -4004,9 +4004,32 @@ void screenshot(char *filename)
         concatstring(buf, imageexts[format]);
     }
 
-    ImageData image(screenw, screenh, 3);
-    glPixelStorei(GL_PACK_ALIGNMENT, texalign(image.data, screenw, 3));
-    glReadPixels(0, 0, screenw, screenh, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+    GLuint fbo = !mainmenu ? shouldscale() : 0;
+    int w = fbo ? gw : screenw, h = fbo ? gh : screenh;
+
+    if(fbo)
+    {
+        int oldhudw = hudw, oldhudh = hudh, oldvieww = vieww, oldviewh = viewh;
+        glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
+        glViewport(0, 0, w, h);
+        hudw = vieww = w;
+        hudh = viewh = h;
+        UI::render();
+        gl_drawhud();
+        hudw = oldhudw;
+        hudh = oldhudh;
+        vieww = oldvieww;
+        viewh = oldviewh;
+    }
+
+    ImageData image(w, h, 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, texalign(image.data, w, 3));
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+    if(fbo)
+    {
+        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, hudw, hudh);
+    }
     saveimage(path(buf), format, image, true);
 }
 
