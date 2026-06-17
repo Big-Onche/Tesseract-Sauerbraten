@@ -1914,7 +1914,7 @@ namespace acoustics
         return false;
     }
 
-    static float acousticDirectOcclusion(const vec &from, const vec &to)
+    static float acousticDirectPointOcclusion(const vec &from, const vec &to)
     {
         vec dir = vec(to).sub(from);
         float len = dir.magnitude();
@@ -1959,6 +1959,38 @@ namespace acoustics
         return clamp((blocked - 1)/3.0f, 0.0f, 1.0f);
     }
 
+    static bool acousticCellCornersOccluded(const vec &from, const vec &to)
+    {
+        if(!soundacousticgrid || acousticCells.empty()) return true;
+
+        int idx = acousticCellIndex(acousticCellCoord(from));
+        if(!acousticCells.inrange(idx) || !acousticCells[idx].valid) return true;
+
+        const AcousticCell &cell = acousticCells[idx];
+        vec center = acousticCellCenter(cell.coord);
+        float half = max(soundacousticcellsize, 16)*0.5f,
+              inset = min(max(half*0.0625f, 0.25f), 1.0f),
+              extent = max(half - inset, 0.0f);
+
+        loopi(8)
+        {
+            vec corner(
+                center.x + (i&1 ? extent : -extent),
+                center.y + (i&2 ? extent : -extent),
+                center.z + (i&4 ? extent : -extent)
+            );
+            if(acousticDirectPointOcclusion(corner, to) <= 0.0f) return false;
+        }
+        return true;
+    }
+
+    static float acousticDirectOcclusion(const vec &from, const vec &to)
+    {
+        float occlusion = acousticDirectPointOcclusion(from, to);
+        if(occlusion <= 0.0f) return 0.0f;
+        return acousticCellCornersOccluded(from, to) ? occlusion : 0.0f;
+    }
+
     static float outdoorSourceNeighborOcclusionScale(const vec &source, const vec &listener)
     {
         AcousticCell *listenerCell = findAcousticCell(listener);
@@ -1983,7 +2015,7 @@ namespace acoustics
             if(!acousticCells.inrange(idx)) continue;
             const AcousticCell &cell = acousticCells[idx];
             if(!cell.valid) continue;
-            if(acousticDirectOcclusion(acousticCellCenter(cell.coord), listener) <= 0.0f) openNeighbors++;
+            if(acousticDirectPointOcclusion(acousticCellCenter(cell.coord), listener) <= 0.0f) openNeighbors++;
         }
         return max(1.0f - openNeighbors*occlusionRelief, 0.0f);
     }
