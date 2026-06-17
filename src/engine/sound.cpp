@@ -202,7 +202,11 @@ namespace sound
         int fadeStart, fadeEnd, fadeFrom;
         float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend,
               acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF;
-        bool dirty, stopping;
+        vec acousticCacheLoc, acousticCacheListener;
+        acoustics::AcousticSourceInfo acousticCacheInfo;
+        int acousticCacheMillis;
+        float acousticCacheVol, acousticCacheGainHF, acousticCacheReverb;
+        bool dirty, stopping, looping, acousticCacheValid;
 
         SoundChannel(int id) : id(id), source(0), filter(0), sendFilter(0), distanceSendFilter(0), acousticSource(0), acousticFilter(0) { reset(); }
         ~SoundChannel() { cleanup(); }
@@ -236,8 +240,15 @@ namespace sound
             targetDistanceReverbSend = 0.0f;
             acousticGain = targetAcousticGain = 0.0f;
             acousticGainHF = targetAcousticGainHF = 1.0f;
+            acousticCacheLoc = acousticCacheListener = vec(0, 0, 0);
+            acousticCacheInfo = acoustics::AcousticSourceInfo();
+            acousticCacheMillis = -1;
+            acousticCacheVol = acousticCacheGainHF = 1.0f;
+            acousticCacheReverb = 0.0f;
             dirty = false;
             stopping = false;
+            looping = false;
+            acousticCacheValid = false;
         }
 
         bool ensureSource()
@@ -459,20 +470,26 @@ namespace sound
 
     extern int soundacousticdualvoice;
 
-    static bool acousticGameSound(const SoundChannel &chan)
+    static bool acousticPropagatedSound(const SoundChannel &chan)
     {
-        return chan.hasLoc() && !chan.ent && !(chan.flags&(SND_MAP|SND_HUD));
+        return chan.hasLoc() && !(chan.flags&SND_HUD) && (!chan.ent || (chan.flags&SND_MAP));
     }
 
     static bool acousticDualVoiceImportant(const SoundChannel &chan)
     {
-        return soundacousticdualvoice && acousticGameSound(chan);
+        return soundacousticdualvoice && acousticPropagatedSound(chan);
     }
 
     static void syncAcousticVoice(SoundChannel &chan, int volume)
     {
         if(!chan.acousticSource) return;
-        float gain = acousticDualVoiceImportant(chan) ? clamp(volume/float(MaxVolume)*chan.targetAcousticGain, 0.0f, 1.0f) : 0.0f,
+        float targetGain = acousticDualVoiceImportant(chan) ? chan.targetAcousticGain : 0.0f;
+        if(chan.acousticGain < 0.0f) chan.acousticGain = targetGain;
+        float fade = curtime > 0 ? min(curtime/120.0f, 1.0f) : 1.0f;
+        chan.acousticGain += (targetGain - chan.acousticGain)*fade;
+        if(fabs(chan.acousticGain - targetGain) < 1e-3f) chan.acousticGain = targetGain;
+
+        float gain = clamp(volume/float(MaxVolume)*chan.acousticGain, 0.0f, 1.0f),
               pan = clamp(chan.targetAcousticPan/127.5f - 1.0f, -1.0f, 1.0f);
         alSourcef(chan.acousticSource, AL_GAIN, gain);
         alSource3f(chan.acousticSource, AL_POSITION, pan, 0.0f, -1.0f);
@@ -490,7 +507,6 @@ namespace sound
             else alSourcei(chan.acousticSource, AL_DIRECT_FILTER, AL_FILTER_NULL);
         }
         else if(efxFilters) alSourcei(chan.acousticSource, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        chan.acousticGain = chan.targetAcousticGain;
         chan.acousticGainHF = chan.targetAcousticGainHF;
         chan.acousticPan = chan.targetAcousticPan;
     }
@@ -1285,6 +1301,7 @@ namespace sound
     VARP(soundpitchrandom, 0, 0, 1);
     FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
     VARP(soundacousticdualvoice, 0, 1, 1);
+    VARP(soundacousticlooprefresh, 0, 100, 5000);
     VARP(soundairattenuation, 0, 0, 1);
     FVARP(maxsounddistance, 0.0f, 1024.0f, 4096.0f);
     FVARP(sounddistanceattenuationfactor, 0.0f, 2.0f, 4.0f);
@@ -1526,6 +1543,46 @@ namespace sound
         return true;
     }
 
+    static bool acousticLoopCacheMoved(const SoundChannel &chan)
+    {
+        static const float moveThreshold = 1.0f;
+        return !chan.acousticCacheValid ||
+               chan.loc.squaredist(chan.acousticCacheLoc) > moveThreshold*moveThreshold ||
+               camera1->o.squaredist(chan.acousticCacheListener) > moveThreshold*moveThreshold;
+    }
+
+    static void acousticSourceForChannel(SoundChannel &chan, float dist, float &volf, float &gainhf, float &reverbSend, acoustics::AcousticSourceInfo &info)
+    {
+        if(!chan.looping)
+        {
+            acoustics::acousticSource(chan.loc, dist, volf, gainhf, reverbSend, &info);
+            return;
+        }
+
+        bool moved = acousticLoopCacheMoved(chan),
+             refresh = soundacousticlooprefresh <= 0 || chan.acousticCacheMillis < 0 || totalmillis - chan.acousticCacheMillis >= soundacousticlooprefresh;
+        if(!chan.acousticCacheValid || (moved && refresh))
+        {
+            float cacheVol = 1.0f, cacheGainHF = 1.0f, cacheReverb = 0.0f;
+            acoustics::AcousticSourceInfo cacheInfo;
+            acoustics::acousticSource(chan.loc, dist, cacheVol, cacheGainHF, cacheReverb, &cacheInfo);
+            chan.acousticCacheLoc = chan.loc;
+            chan.acousticCacheListener = camera1->o;
+            chan.acousticCacheInfo = cacheInfo;
+            chan.acousticCacheMillis = totalmillis;
+            chan.acousticCacheVol = cacheVol;
+            chan.acousticCacheGainHF = cacheGainHF;
+            chan.acousticCacheReverb = cacheReverb;
+            chan.acousticCacheValid = true;
+        }
+
+        if(!chan.acousticCacheValid) return;
+        volf *= chan.acousticCacheVol;
+        gainhf *= chan.acousticCacheGainHF;
+        reverbSend = max(reverbSend, chan.acousticCacheReverb);
+        info = chan.acousticCacheInfo;
+    }
+
     static bool updateChannel(SoundChannel &chan)
     {
         if(!chan.slot) return false;
@@ -1559,10 +1616,16 @@ namespace sound
                 reverbSend = max(reverbSend, distanceReverb);
                 distanceReverbSend = distanceReverb;
             }
+            bool mapSoundInRadius = !(chan.flags&SND_MAP) || rad <= 0 || dist <= rad;
             if((chan.flags&SND_MAP) && rad > 0) volf *= mapSoundRadiusGain(dist, float(rad), inner);
             else if(!soundairattenuation && rad > 0) volf -= clamp(attenDist/rad, 0.0f, 1.0f);
             acoustics::AcousticSourceInfo acousticInfo;
-            if(acousticGameSound(chan)) acoustics::acousticSource(chan.loc, attenDist, volf, gainhf, reverbSend, &acousticInfo);
+            if(acousticPropagatedSound(chan) && mapSoundInRadius) acousticSourceForChannel(chan, dist, volf, gainhf, reverbSend, acousticInfo);
+            if(acousticInfo.path)
+            {
+                acousticGain = acousticInfo.virtualGain;
+                acousticGainHF = acousticInfo.virtualGainHF;
+            }
             if(stereo && (v.x != 0 || v.y != 0) && dist>0)
             {
                 v.rotate_around_z(-camera1->yaw*RAD);
@@ -1577,8 +1640,6 @@ namespace sound
                         acousticPan = clamp(int((0.5f - 0.5f*av.x/av.magnitude2())*255.9f), 0, 255);
                         if(!acousticDualVoiceImportant(chan)) panf = acousticPan/255.9f;
                     }
-                    acousticGain = acousticInfo.virtualGain;
-                    acousticGainHF = acousticInfo.virtualGainHF;
                 }
             }
         }
@@ -1734,6 +1795,8 @@ namespace sound
                 else if(chan.hasLoc()) chan.clearLoc();
                 chan.flags = flags;
                 chan.radius = radius;
+                chan.looping = loops != 0;
+                chan.acousticCacheValid = false;
                 return chanid;
             }
         }
@@ -1755,6 +1818,7 @@ namespace sound
         SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundentity);
         chan.eventseed = eventseed;
         chan.pitch = randomPitchOffset(loc, flags, ent, eventseed);
+        chan.looping = loops != 0;
         if(!chan.ensureSource())
         {
             freeChannel(chanid);
