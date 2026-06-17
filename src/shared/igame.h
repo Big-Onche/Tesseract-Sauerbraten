@@ -94,6 +94,7 @@ namespace game
     extern int getsoundentityid(const vec *loc);
     extern bool getsoundentitypos(int id, vec &pos);
     extern int maxsoundradius(int n);
+    extern bool randompitchsound(int n);
     extern bool needminimap();
 }
 

@@ -1321,7 +1321,7 @@ namespace sound
     VAR(maxsoundradius, 1, 340, 0);
     VARP(soundfollowentities, 0, 1, 1);
     VARP(soundpitchrandom, 0, 0, 1);
-    FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
+    FVAR(soundpitchrandomamount, 0.0f, 0.04f, 1.0f);
     VARP(soundacousticdualvoice, 0, 1, 1);
     VARP(soundacousticlooprefresh, 0, 100, 5000);
     VARP(soundairattenuation, 0, 0, 1);
@@ -1382,9 +1382,24 @@ namespace sound
         return seed;
     }
 
-    static float randomPitchOffset(const vec *loc, int flags, const extentity *ent, uint seed)
+    static uint soundPitchSeed(int n, const vec *loc, const extentity *ent, int soundentity)
     {
-        if(!soundpitchrandom || soundpitchrandomamount <= 0.0f || ent || (flags&SND_MAP) || (!loc && !(flags&SND_HUD))) return 1.0f;
+        uint seed = mixSoundSeed(0xB5297A4DU, uint(n));
+        seed = mixSoundSeed(seed, uint(totalmillis));
+        seed = mixSoundSeed(seed, uint(soundentity));
+        if(ent) seed = mixSoundSeed(seed, uint(size_t(ent)));
+        if(loc)
+        {
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->x));
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->y));
+            seed = mixSoundSeed(seed, quantizeSoundCoord(loc->z));
+        }
+        return seed;
+    }
+
+    static float randomPitchOffset(int n, uint seed)
+    {
+        if(!soundpitchrandom || soundpitchrandomamount <= 0.0f || !game::randompitchsound(n)) return 1.0f;
         float amount = min(soundpitchrandomamount, 0.99f);
         float r = float(detrnd(seed, 0x10000))/float(0xFFFF);
         return clamp(1.0f + r*(2.0f*amount) - amount, 0.01f, 4.0f);
@@ -1848,7 +1863,7 @@ namespace sound
 
         SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundentity);
         chan.eventseed = eventseed;
-        chan.pitch = randomPitchOffset(loc, flags, ent, eventseed);
+        chan.pitch = randomPitchOffset(n, soundPitchSeed(n, loc, ent, soundentity));
         chan.looping = loops != 0;
         if(!chan.ensureSource())
         {

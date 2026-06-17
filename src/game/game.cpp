@@ -1240,6 +1240,32 @@ namespace game
         }
     }
 
+    bool randompitchsound(int n)
+    {
+        switch(n)
+        {
+            case S_NOAMMO:
+            case S_V_BASECAP:
+            case S_V_BASELOST:
+            case S_V_FIGHT:
+            case S_V_BOOST:
+            case S_V_BOOST10:
+            case S_V_QUAD:
+            case S_V_QUAD10:
+            case S_V_RESPAWNPOINT:
+            case S_FLAGPICKUP:
+            case S_FLAGDROP:
+            case S_FLAGRETURN:
+            case S_FLAGSCORE:
+            case S_FLAGRESET:
+            case S_HIT:
+            case S_FLAGFAIL:
+                return false;
+            default:
+                return true;
+        }
+    }
+
     const char *mastermodecolor(int n, const char *unknown)
     {
         return (n>=MM_START && size_t(n-MM_START)<sizeof(mastermodecolors)/sizeof(mastermodecolors[0])) ? mastermodecolors[n-MM_START] : unknown;
