@@ -20,13 +20,14 @@ namespace acoustics
     VAR(soundacousticbakerays, 16, 128, 256);
     VAR(soundacousticthreads, 0, 0, 16);
 
+    VARP(soundacousticastarcellsize, 8, 32, 256);
     VARP(soundacousticastarrange, 0, 512, 4096);
-    VARP(soundacousticastarbudget, 0, 1024, 100000);
+    VARP(soundacousticastarbudget, 0, 256, 100000);
     FVARP(soundacousticsourcereverbmix, 0.0f, 0.55f, 2.0f);
     FVARP(soundacousticlistenerreverbmix, 0.0f, 0.30f, 2.0f);
     FVARP(soundacousticpathreverbmix, 0.0f, 0.15f, 2.0f);
 
-    VAR(debugsoundacoustics, 0, 0, 1);
+    VAR(debugsoundacoustics, 0, 0, 3);
     VARP(debugsoundacousticsradius, 32, 512, 1024);
 
     static const float SoundUnitsPerMeter = 5.0f;
@@ -172,9 +173,10 @@ namespace acoustics
     {
         int prev;
         float g, f;
+        schar passable;
         bool open, closed;
 
-        AcousticAStarNode() : prev(-1), g(1e16f), f(1e16f), open(false), closed(false) {}
+        AcousticAStarNode() : prev(-1), g(1e16f), f(1e16f), passable(-1), open(false), closed(false) {}
     };
 
     struct AcousticAStarQueueNode
@@ -190,7 +192,7 @@ namespace acoustics
 
     struct AcousticAStarResult
     {
-        vector<int> cells;
+        vector<vec> points;
         vec virtualPosition;
         float pathCost, pathLength, sourceReverbGain, pathReverbGain, pathReverbDecay, pathReflection, muffleOpen, occlusion, diffraction, complexity;
         bool found;
@@ -382,7 +384,7 @@ namespace acoustics
     static vector<AcousticPortal> acousticPortals;
     static vector<int> acousticRegionPortalEdges;
     static hashtable<ivec, int> acousticCellLookup(1<<12);
-    static vector<int> acousticDebugPath;
+    static vector<vec> acousticDebugPath;
     static vec acousticDebugVirtualSource(0, 0, 0);
     static int acousticAStarFrame = -1, acousticAStarNodesThisFrame = 0, acousticDebugPathMillis = 0;
 
@@ -1719,82 +1721,146 @@ namespace acoustics
         return soundacousticastarbudget > 0 && acousticAStarNodesThisFrame < soundacousticastarbudget;
     }
 
-    static float acousticAStarHeuristic(const AcousticCell &cell, const AcousticCell &target, float cellsize)
+    static ivec acousticAStarCellCoord2D(const vec &o, float cellsize)
     {
-        return cell.origin.dist(target.origin)/max(cellsize, 1.0f);
+        return ivec(int(floorf(o.x/cellsize)), int(floorf(o.y/cellsize)), 0);
     }
 
-    static bool acousticAStarPassable(int cellidx, int targetidx)
+    static vec acousticAStarCellCenter2D(const ivec &coord, float z, float cellsize)
     {
-        if(cellidx == targetidx) return true;
-        return acousticCells.inrange(cellidx) && acousticCells[cellidx].valid && acousticCells[cellidx].airOccupancy > 0.5f;
+        return vec((coord.x + 0.5f)*cellsize, (coord.y + 0.5f)*cellsize, z);
     }
 
-    static void buildAcousticAStarResult(int sourceidx, int targetidx, const vector<AcousticAStarNode> &nodes, AcousticAStarResult &result)
+    static float acousticAStarHeuristic2D(const ivec &coord, const ivec &target, float cellsize)
     {
-        result.cells.setsize(0);
-        for(int cur = targetidx; acousticCells.inrange(cur); cur = nodes[cur].prev)
+        float dx = float(coord.x - target.x), dy = float(coord.y - target.y);
+        return sqrtf(dx*dx + dy*dy);
+    }
+
+    static int acousticAStarNodeIndex(hashtable<ivec, int> &lookup, vector<AcousticAStarNode> &nodes, vector<ivec> &coords, const ivec &coord)
+    {
+        int *idx = lookup.access(coord);
+        if(idx) return *idx;
+        int newidx = nodes.length();
+        nodes.add(AcousticAStarNode());
+        coords.add(coord);
+        lookup[coord] = newidx;
+        return newidx;
+    }
+
+    static bool acousticAStarPointPassable(const vec &p, float cellsize)
+    {
+        if(!insideworld(p)) return false;
+        float clearance = max(cellsize*0.35f, 4.0f);
+        static const vec dirs[5] =
         {
-            result.cells.add(cur);
+            vec(1, 0, 0), vec(-1, 0, 0), vec(0, 1, 0), vec(0, -1, 0), vec(0, 0, 1)
+        };
+        loopi(sizeof(dirs)/sizeof(dirs[0]))
+            if(acousticRaycube(p, dirs[i], clearance, RAY_POLY) >= clearance*0.45f) return true;
+        return false;
+    }
+
+    static bool acousticAStarSegmentPassable(const vec &from, const vec &to)
+    {
+        vec ray = vec(to).sub(from);
+        float len = ray.magnitude();
+        if(len <= 1e-3f) return true;
+        ray.div(len);
+        return acousticRaycube(from, ray, len, RAY_POLY) >= len*0.96f;
+    }
+
+    static bool acousticAStarNodePassable(vector<AcousticAStarNode> &nodes, const vector<ivec> &coords, int idx, float z, float cellsize)
+    {
+        if(!nodes.inrange(idx) || !coords.inrange(idx)) return false;
+        if(nodes[idx].passable < 0)
+        {
+            vec center = acousticAStarCellCenter2D(coords[idx], z, cellsize);
+            nodes[idx].passable = acousticAStarPointPassable(center, cellsize) ? 1 : 0;
+        }
+        return nodes[idx].passable > 0;
+    }
+
+    static bool acousticAStarCoordInRange(const ivec &coord, const vec &listener, float z, float cellsize, float maxdist)
+    {
+        vec center = acousticAStarCellCenter2D(coord, z, cellsize);
+        float limit = maxdist + cellsize*1.5f;
+        return center.squaredist(listener) <= limit*limit;
+    }
+
+    static void buildAcousticAStarResult(const vec &source, const vec &listener, float z, float cellsize, int sourceidx, int targetidx,
+                                         const vector<AcousticAStarNode> &nodes, const vector<ivec> &coords, float directOcclusion,
+                                         AcousticAStarResult &result)
+    {
+        vector<int> path;
+        for(int cur = targetidx; nodes.inrange(cur); cur = nodes[cur].prev)
+        {
+            path.add(cur);
             if(cur == sourceidx) break;
         }
-        result.cells.reverse();
-        if(result.cells.empty() || result.cells[0] != sourceidx || result.cells.last() != targetidx)
-        {
-            result.cells.setsize(0);
-            return;
-        }
+        path.reverse();
+        if(path.empty() || path[0] != sourceidx || path.last() != targetidx) return;
+
+        result.points.setsize(0);
+        loopv(path) if(coords.inrange(path[i])) result.points.add(acousticAStarCellCenter2D(coords[path[i]], z, cellsize));
+        if(result.points.empty()) return;
 
         result.found = true;
         result.pathCost = nodes[targetidx].g;
         result.pathLength = 0.0f;
-        result.sourceReverbGain = acousticCells[sourceidx].reverbGain;
-        float reverbGain = 0.0f, reverbDecay = 0.0f, reflection = 0.0f, muffleOpen = 0.0f, air = 0.0f;
-        loopv(result.cells)
-        {
-            const AcousticCell &cell = acousticCells[result.cells[i]];
-            if(i) result.pathLength += acousticCells[result.cells[i-1]].origin.dist(cell.origin);
-            reverbGain += cell.reverbGain;
-            reverbDecay += cell.reverbDecay;
-            reflection += cell.reflection;
-            muffleOpen += cell.muffleOpen;
-            air += cell.airOccupancy;
-        }
-        float count = max(float(result.cells.length()), 1.0f),
-              direct = max(acousticCells[sourceidx].origin.dist(acousticProbe.origin), 1.0f);
-        result.pathReverbGain = clamp(reverbGain/count, 0.0f, 1.0f);
-        result.pathReverbDecay = reverbDecay/count;
-        result.pathReflection = clamp(reflection/count, 0.0f, 1.0f);
-        result.muffleOpen = clamp(muffleOpen/count, 0.0f, 1.0f);
-        result.complexity = clamp((result.pathLength/direct - 1.0f)*0.65f + float(max(result.cells.length() - 2, 0))*0.045f, 0.0f, 1.0f);
-        result.diffraction = clamp((1.0f - air/count)*0.60f + result.complexity*0.40f, 0.0f, 1.0f);
-        result.occlusion = clamp((result.diffraction*0.55f + result.complexity*0.45f)*soundacousticocclusion, 0.0f, 1.0f);
+        loopv(result.points) if(i) result.pathLength += result.points[i-1].dist(result.points[i]);
 
-        vec portal = acousticCells[result.cells.length() >= 2 ? result.cells[result.cells.length() - 2] : targetidx].origin,
-            listenerToPortal = vec(portal).sub(acousticProbe.origin);
-        if(!listenerToPortal.iszero()) listenerToPortal.safenormalize();
-        float portalBias = clamp(0.35f + result.occlusion*0.35f + result.complexity*0.20f, 0.20f, 0.82f),
-              behind = max(soundacousticcellsize, 16)*(0.20f + result.occlusion*0.35f);
-        result.virtualPosition = vec(acousticCells[sourceidx].origin).mul(1.0f - portalBias).add(vec(portal).mul(portalBias));
-        result.virtualPosition.add(vec(listenerToPortal).mul(behind));
+        float direct = max(source.dist(listener), 1.0f);
+        result.complexity = clamp((result.pathLength/direct - 1.0f)*0.70f + float(max(result.points.length() - 2, 0))*0.025f, 0.0f, 1.0f);
+        result.diffraction = result.complexity;
+        result.occlusion = clamp(max(directOcclusion, result.complexity*0.65f)*soundacousticocclusion, 0.0f, 1.0f);
+        result.sourceReverbGain = result.pathReverbGain = acousticProbe.baked ? acousticProbe.reverbGain : 0.0f;
+        result.pathReverbDecay = acousticProbe.baked ? acousticProbe.reverbDecay : 0.3f;
+        result.pathReflection = acousticProbe.baked ? acousticProbe.reflection : 0.0f;
+        result.muffleOpen = 1.0f;
+
+        vec entry = result.points.length() >= 2 ? result.points[result.points.length() - 2] : source,
+            incoming = vec(entry).sub(listener);
+        incoming.z = 0;
+        if(incoming.iszero()) incoming = vec(source).sub(listener);
+        incoming.z = 0;
+        if(!incoming.iszero()) incoming.safenormalize();
+        result.virtualPosition = vec(listener).add(incoming.mul(max(cellsize*1.5f, 16.0f)));
     }
 
-    static bool findAcousticAStarPath(int sourceidx, int targetidx, float dist, AcousticAStarResult &result)
+    static bool findAcousticAStarPath(const vec &loc, float dist, float directOcclusion, AcousticAStarResult &result)
     {
-        if(!acousticCells.inrange(sourceidx) || !acousticCells.inrange(targetidx) || sourceidx == targetidx) return false;
+        if(!camera1) return false;
         if(soundacousticastarrange > 0 && dist > soundacousticastarrange) return false;
         if(!acousticAStarBudgetAvailable()) return false;
 
+        float cellsize = max(float(soundacousticastarcellsize), 8.0f),
+              z = camera1->o.z,
+              maxdist = soundacousticastarrange > 0 ? float(soundacousticastarrange) : max(dist + cellsize*4.0f, cellsize*8.0f);
+        vec source(loc.x, loc.y, z), listener(camera1->o.x, camera1->o.y, z);
+        ivec sourcecoord = acousticAStarCellCoord2D(source, cellsize),
+             targetcoord = acousticAStarCellCoord2D(listener, cellsize);
+        if(sourcecoord == targetcoord) return false;
+
+        hashtable<ivec, int> lookup(1<<10);
         vector<AcousticAStarNode> nodes;
-        loopv(acousticCells) nodes.add(AcousticAStarNode());
+        vector<ivec> coords;
         vector<AcousticAStarQueueNode> queue;
-        float cellsize = max(soundacousticcellsize, 16);
+
+        int sourceidx = acousticAStarNodeIndex(lookup, nodes, coords, sourcecoord),
+            targetidx = acousticAStarNodeIndex(lookup, nodes, coords, targetcoord);
+        nodes[sourceidx].passable = nodes[targetidx].passable = 1;
         nodes[sourceidx].g = 0.0f;
-        nodes[sourceidx].f = acousticAStarHeuristic(acousticCells[sourceidx], acousticCells[targetidx], cellsize);
+        nodes[sourceidx].f = acousticAStarHeuristic2D(sourcecoord, targetcoord, cellsize);
         nodes[sourceidx].open = true;
         queue.addheap(AcousticAStarQueueNode(sourceidx, nodes[sourceidx].f));
 
-        static const ivec dirs[6] = { ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0), ivec(0, 0, 1), ivec(0, 0, -1) };
+        static const ivec dirs[8] =
+        {
+            ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0),
+            ivec(1, 1, 0), ivec(1, -1, 0), ivec(-1, 1, 0), ivec(-1, -1, 0)
+        };
+
         while(!queue.empty())
         {
             if(!acousticAStarBudgetAvailable()) return false;
@@ -1803,42 +1869,32 @@ namespace acoustics
             acousticAStarNodesThisFrame++;
             if(q.cell == targetidx)
             {
-                buildAcousticAStarResult(sourceidx, targetidx, nodes, result);
+                buildAcousticAStarResult(source, listener, z, cellsize, sourceidx, targetidx, nodes, coords, directOcclusion, result);
                 return result.found;
             }
 
             AcousticAStarNode &curNode = nodes[q.cell];
             curNode.closed = true;
-            const AcousticCell &curCell = acousticCells[q.cell];
-            loopi(6)
+            vec curCenter = acousticAStarCellCenter2D(coords[q.cell], z, cellsize);
+            loopi(sizeof(dirs)/sizeof(dirs[0]))
             {
-                int nextidx = acousticCellIndex(ivec(curCell.coord).add(dirs[i]));
-                if(!acousticAStarPassable(nextidx, targetidx) || nodes[nextidx].closed) continue;
-                const AcousticCell &nextCell = acousticCells[nextidx];
-                float airPenalty = 1.0f + (1.0f - clamp(nextCell.airOccupancy, 0.0f, 1.0f))*1.25f,
-                      wallPenalty = 1.0f + nextCell.nearWallRatio*0.35f,
-                      g = curNode.g + airPenalty*wallPenalty;
+                ivec nextcoord = ivec(coords[q.cell]).add(dirs[i]);
+                if(!acousticAStarCoordInRange(nextcoord, listener, z, cellsize, maxdist)) continue;
+                int nextidx = acousticAStarNodeIndex(lookup, nodes, coords, nextcoord);
+                if(nodes[nextidx].closed || !acousticAStarNodePassable(nodes, coords, nextidx, z, cellsize)) continue;
+                vec nextCenter = acousticAStarCellCenter2D(nextcoord, z, cellsize);
+                if(!acousticAStarSegmentPassable(curCenter, nextCenter)) continue;
+                float step = dirs[i].x && dirs[i].y ? 1.41421356f : 1.0f,
+                      g = curNode.g + step;
                 if(nodes[nextidx].open && g >= nodes[nextidx].g - 1e-4f) continue;
                 nodes[nextidx].prev = q.cell;
                 nodes[nextidx].g = g;
-                nodes[nextidx].f = g + acousticAStarHeuristic(nextCell, acousticCells[targetidx], cellsize);
+                nodes[nextidx].f = g + acousticAStarHeuristic2D(nextcoord, targetcoord, cellsize);
                 nodes[nextidx].open = true;
                 queue.addheap(AcousticAStarQueueNode(nextidx, nodes[nextidx].f));
             }
         }
         return false;
-    }
-
-    static float acousticTravelReverbSend(float sourceReverbGain, float listenerReverbGain, float pathReverbGain, float occlusion, float pathComplexity, float diffraction)
-    {
-        float directness = clamp(1.0f - occlusion*0.75f - diffraction*0.35f - pathComplexity*0.25f, 0.0f, 1.0f),
-              sourceWeight = max(soundacousticsourcereverbmix*(0.75f + directness*0.25f - occlusion*0.25f), 0.0f),
-              listenerWeight = max(soundacousticlistenerreverbmix*(0.85f + listenerReverbGain*0.25f + occlusion*0.35f), 0.0f),
-              pathWeight = max(soundacousticpathreverbmix*(0.80f + pathComplexity*0.60f + diffraction*0.40f), 0.0f),
-              totalWeight = max(sourceWeight + listenerWeight + pathWeight, 1e-4f),
-              mixedReverb = (sourceReverbGain*sourceWeight + listenerReverbGain*listenerWeight + pathReverbGain*pathWeight)/totalWeight,
-              travelWetness = clamp(0.30f + occlusion*0.45f + pathComplexity*0.25f + diffraction*0.15f, 0.0f, 1.0f);
-        return clamp(mixedReverb*travelWetness*soundacousticreverb, 0.0f, 1.0f);
     }
 
     static float acousticDirectOcclusion(const vec &from, const vec &to)
@@ -1886,15 +1942,14 @@ namespace acoustics
         return clamp((blocked - 1)/3.0f, 0.0f, 1.0f);
     }
 
-    static void applySameCellOcclusion(float occlusion, float &volf, float &gainhf)
+    static void applyDirectOcclusion(float occlusion, float &volf, float &gainhf)
     {
-        float occ = clamp(occlusion*soundacousticocclusion, 0.0f, 0.65f),
-              sameCellBlockGain = max(soundacousticblockgain, 0.55f),
-              sameCellMuffleGainHF = max(clamp(soundacousticmufflegainhf, 0.02f, 1.0f), 0.35f),
-              occVol = powf(occ, 0.85f),
-              occHF = powf(occ, 0.60f);
-        volf *= 1.0f - occVol*(1.0f - sameCellBlockGain);
-        gainhf *= 1.0f - occHF*(1.0f - sameCellMuffleGainHF);
+        float occ = clamp(occlusion*soundacousticocclusion, 0.0f, 1.0f),
+              closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f),
+              occVol = powf(occ, 0.70f),
+              occHF = powf(occ, 0.35f);
+        volf *= 1.0f - occVol*(1.0f - soundacousticblockgain);
+        gainhf *= 1.0f - occHF*(1.0f - closedGainHF);
     }
 
     void acousticSource(const vec &loc, float dist, float &volf, float &gainhf, float &reverbSend, AcousticSourceInfo *info)
@@ -1907,58 +1962,30 @@ namespace acoustics
             info->path = false;
         }
 
-        if(!soundacoustics || !acousticProbe.baked || dist <= 1.0f) return;
+        if(!soundacoustics || !camera1 || dist <= 1.0f) return;
 
-        float directOcclusion = acousticDirectOcclusion(loc, acousticProbe.origin);
+        float directOcclusion = acousticDirectOcclusion(loc, camera1->o);
         if(directOcclusion <= 0.0f) return; // Cheap direct test first
 
-        AcousticCell *sourceCell = findAcousticCell(loc);
-        if(!sourceCell || !acousticCells.inrange(acousticProbe.cell)) return;
-        int sourceidx = acousticCellIndex(sourceCell->coord),
-            targetidx = acousticProbe.cell;
-        if(sourceidx == targetidx)
-        {
-            applySameCellOcclusion(directOcclusion, volf, gainhf);
-            if(info) info->occlusion = clamp(directOcclusion*soundacousticocclusion, 0.0f, 0.65f);
-            return;
-        }
+        applyDirectOcclusion(directOcclusion, volf, gainhf);
+        if(info) info->occlusion = clamp(directOcclusion*soundacousticocclusion, 0.0f, 1.0f);
 
         AcousticAStarResult path;
-        if(!findAcousticAStarPath(sourceidx, targetidx, dist, path)) return;
+        if(!findAcousticAStarPath(loc, dist, directOcclusion, path)) return;
 
-        acousticDebugPath = path.cells;
+        acousticDebugPath = path.points;
         acousticDebugVirtualSource = path.virtualPosition;
         acousticDebugPathMillis = totalmillis;
 
-        float closedGainHF = clamp(soundacousticmufflegainhf, 0.02f, 1.0f);
-        float openGainHF = max(closedGainHF, 0.5f);
-
-        float occ = clamp(path.occlusion, 0.0f, 1.0f);
-
-        // Normal environmental openness
-        float routeHF = closedGainHF + (openGainHF - closedGainHF)*path.muffleOpen;
-
-        // But hard obstruction should cap brightness
-        float blockedHFMax = 1.0f - powf(occ, 0.45f)*0.92f;
-        blockedHFMax = clamp(blockedHFMax, closedGainHF, 1.0f);
-
-        float effectiveMuffleGainHF = min(routeHF, blockedHFMax);
-
-        // Stronger non-linear occlusion, HF dies faster than volume
-        float occVol = powf(occ, 0.70f);
-        float occHF  = powf(occ, 0.35f);
-
-        volf *= 1.0f - occVol*(1.0f - soundacousticblockgain);
-        gainhf *= 1.0f - occHF*(1.0f - effectiveMuffleGainHF);
-
-        reverbSend = max(reverbSend, acousticTravelReverbSend(path.sourceReverbGain, acousticProbe.reverbGain, path.pathReverbGain, occ, path.complexity, path.diffraction));
+        if(acousticProbe.baked)
+            reverbSend = max(reverbSend, clamp(acousticProbe.reverbGain*soundacousticreverb*(0.35f + path.complexity*0.25f), 0.0f, 1.0f));
 
         if(info)
         {
             info->apparent = path.virtualPosition;
             info->occlusion = path.occlusion;
-            info->virtualGain = clamp(path.occlusion*(0.35f + path.complexity*0.45f), 0.0f, 0.75f);
-            info->virtualGainHF = clamp(effectiveMuffleGainHF + (1.0f - effectiveMuffleGainHF)*0.45f, 0.02f, 1.0f);
+            info->virtualGain = clamp(0.18f + path.occlusion*0.35f + path.complexity*0.25f, 0.0f, 0.75f);
+            info->virtualGainHF = 1.0f;
             info->path = true;
         }
     }
@@ -1983,11 +2010,10 @@ namespace acoustics
         gle::attrib(v[b]); gle::attrib(color, alpha);
     }
 
-    static void drawAcousticDebugLine(const vec &a, const vec &b, uchar alpha)
+    static void drawAcousticDebugLine(const vec &a, const vec &b, const bvec &color, uchar alpha)
     {
-        bvec white(255, 255, 255);
-        gle::attrib(a); gle::attrib(white, alpha);
-        gle::attrib(b); gle::attrib(white, alpha);
+        gle::attrib(a); gle::attrib(color, alpha);
+        gle::attrib(b); gle::attrib(color, alpha);
     }
 
     static void drawAcousticBakeBounds()
@@ -2034,43 +2060,105 @@ namespace acoustics
         if(acousticDebugPath.empty() || !camera1 || totalmillis - acousticDebugPathMillis > 500)
             return;
 
-        int lines = 3;
-        loopv(acousticDebugPath) if(acousticCells.inrange(acousticDebugPath[i]) && acousticCells[acousticDebugPath[i]].origin.dist(camera1->o) <= maxradius)
-            lines += 3 + (i ? 1 : 0);
+        vec feet = camera1->feetpos();
+        int lines = 2;
+        loopv(acousticDebugPath)
+        {
+            vec cur = acousticDebugPath[i];
+            cur.z = feet.z;
+            if(cur.dist(feet) <= maxradius) lines += 2 + (i ? 1 : 0);
+        }
         if(lines <= 0) return;
 
         GLfloat oldwidth = 1.0f;
         glGetFloatv(GL_LINE_WIDTH, &oldwidth);
-        glLineWidth(3.0f);
+        glLineWidth(4.0f);
         gle::begin(GL_LINES, lines*2);
 
-        float marker = max(soundacousticcellsize, 16)*0.35f;
-        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x - marker, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z), vec(acousticDebugVirtualSource.x + marker, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z), 255);
-        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y - marker, acousticDebugVirtualSource.z), vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y + marker, acousticDebugVirtualSource.z), 255);
-        drawAcousticDebugLine(vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z - marker), vec(acousticDebugVirtualSource.x, acousticDebugVirtualSource.y, acousticDebugVirtualSource.z + marker), 255);
+        bvec blue(48, 128, 255);
+        float marker = max(float(soundacousticastarcellsize), 8.0f)*0.30f;
+        vec virtualSource = acousticDebugVirtualSource;
+        virtualSource.z = feet.z;
+        drawAcousticDebugLine(vec(virtualSource.x - marker, virtualSource.y, virtualSource.z), vec(virtualSource.x + marker, virtualSource.y, virtualSource.z), blue, 255);
+        drawAcousticDebugLine(vec(virtualSource.x, virtualSource.y - marker, virtualSource.z), vec(virtualSource.x, virtualSource.y + marker, virtualSource.z), blue, 255);
 
         loopv(acousticDebugPath)
         {
-            if(!acousticCells.inrange(acousticDebugPath[i])) continue;
-            const vec &cur = acousticCells[acousticDebugPath[i]].origin;
-            if(cur.dist(camera1->o) > maxradius) continue;
-            drawAcousticDebugLine(vec(cur.x - marker*0.45f, cur.y, cur.z), vec(cur.x + marker*0.45f, cur.y, cur.z), 210);
-            drawAcousticDebugLine(vec(cur.x, cur.y - marker*0.45f, cur.z), vec(cur.x, cur.y + marker*0.45f, cur.z), 210);
-            drawAcousticDebugLine(vec(cur.x, cur.y, cur.z - marker*0.45f), vec(cur.x, cur.y, cur.z + marker*0.45f), 210);
-            if(i && acousticCells.inrange(acousticDebugPath[i-1]))
-                drawAcousticDebugLine(acousticCells[acousticDebugPath[i-1]].origin, cur, 235);
+            vec cur = acousticDebugPath[i];
+            cur.z = feet.z;
+            if(cur.dist(feet) > maxradius) continue;
+            drawAcousticDebugLine(vec(cur.x - marker*0.45f, cur.y, cur.z), vec(cur.x + marker*0.45f, cur.y, cur.z), blue, 230);
+            drawAcousticDebugLine(vec(cur.x, cur.y - marker*0.45f, cur.z), vec(cur.x, cur.y + marker*0.45f, cur.z), blue, 230);
+            if(i)
+            {
+                vec prev = acousticDebugPath[i-1];
+                prev.z = feet.z;
+                drawAcousticDebugLine(prev, cur, blue, 255);
+            }
         }
 
         xtraverts += gle::end();
         glLineWidth(oldwidth);
     }
 
+    static void drawAcousticAStarGridDebug(int maxradius)
+    {
+        if(!camera1) return;
+
+        float cellsize = max(float(soundacousticastarcellsize), 8.0f),
+              radius = float(maxradius);
+        if(soundacousticastarrange > 0) radius = min(radius, float(soundacousticastarrange));
+        if(radius <= 0) return;
+
+        vec feet = camera1->feetpos();
+        int minx = int(floorf((feet.x - radius)/cellsize)),
+            maxx = int(floorf((feet.x + radius)/cellsize)),
+            miny = int(floorf((feet.y - radius)/cellsize)),
+            maxy = int(floorf((feet.y + radius)/cellsize));
+        int visible = 0;
+        for(int y = miny; y <= maxy; ++y) for(int x = minx; x <= maxx; ++x)
+        {
+            vec center = acousticAStarCellCenter2D(ivec(x, y, 0), feet.z, cellsize);
+            if(center.dist(feet) <= radius) visible++;
+        }
+        int lines = visible*4;
+        if(lines <= 0) return;
+
+        bvec white(255, 255, 255), red(255, 48, 48);
+        gle::begin(GL_LINES, lines*2);
+        for(int y = miny; y <= maxy; ++y) for(int x = minx; x <= maxx; ++x)
+        {
+            ivec coord(x, y, 0);
+            vec center = acousticAStarCellCenter2D(coord, feet.z, cellsize);
+            if(center.dist(feet) > radius) continue;
+            vec probe = acousticAStarCellCenter2D(coord, camera1->o.z, cellsize),
+                v[4] =
+                {
+                    vec(x*cellsize, y*cellsize, feet.z),
+                    vec((x + 1)*cellsize, y*cellsize, feet.z),
+                    vec((x + 1)*cellsize, (y + 1)*cellsize, feet.z),
+                    vec(x*cellsize, (y + 1)*cellsize, feet.z)
+                };
+            bool passable = acousticAStarPointPassable(probe, cellsize);
+            const bvec &color = passable ? white : red;
+            uchar alpha = passable ? 80 : 190;
+            drawAcousticDebugLine(v[0], v[1], color, alpha);
+            drawAcousticDebugLine(v[1], v[2], color, alpha);
+            drawAcousticDebugLine(v[2], v[3], color, alpha);
+            drawAcousticDebugLine(v[3], v[0], color, alpha);
+        }
+        xtraverts += gle::end();
+    }
+
     void drawAcousticsDebug()
     {
         if(!debugsoundacoustics) return;
-        bool drawbounds = acousticBakeBoundsEnabled(),
-             drawgrid = soundacoustics && !acousticCells.empty();
-        if(!drawbounds && !drawgrid) return;
+        bool debugbaked = debugsoundacoustics == 1 || debugsoundacoustics == 3,
+             debugastar = debugsoundacoustics == 2 || debugsoundacoustics == 3;
+        bool drawbounds = debugbaked && acousticBakeBoundsEnabled(),
+             drawgrid = debugbaked && soundacoustics && !acousticCells.empty(),
+             drawastar = debugastar && soundacoustics && camera1;
+        if(!drawbounds && !drawgrid && !drawastar) return;
         ldrnotextureshader->set();
         GLboolean cull = glIsEnabled(GL_CULL_FACE);
         glDisable(GL_CULL_FACE);
@@ -2121,7 +2209,12 @@ namespace acoustics
                 xtraverts += gle::end();
             }
         }
-        if(drawgrid) drawAcousticAStarDebug(min(max(debugsoundacousticsradius, 32), 256));
+        if(drawastar)
+        {
+            int maxradius = max(debugsoundacousticsradius, 32);
+            drawAcousticAStarGridDebug(maxradius);
+            drawAcousticAStarDebug(maxradius);
+        }
         if(drawbounds) drawAcousticBakeBounds();
         glDepthMask(GL_TRUE);
         if(cull) glEnable(GL_CULL_FACE);

@@ -476,6 +476,10 @@ namespace sound
               pan = clamp(chan.targetAcousticPan/127.5f - 1.0f, -1.0f, 1.0f);
         alSourcef(chan.acousticSource, AL_GAIN, gain);
         alSource3f(chan.acousticSource, AL_POSITION, pan, 0.0f, -1.0f);
+        if(efxReverb && efxReverbSlot && gain > 0.001f && chan.targetReverbSend > 0.001f)
+            alSource3i(chan.acousticSource, AL_AUXILIARY_SEND_FILTER, efxReverbSlot, 0, AL_FILTER_NULL);
+        else if(efxReverb)
+            alSource3i(chan.acousticSource, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
         if(efxFilters && chan.targetAcousticGainHF < 0.999f)
         {
             if(chan.ensureFilter(chan.acousticFilter, AL_FILTER_LOWPASS))
