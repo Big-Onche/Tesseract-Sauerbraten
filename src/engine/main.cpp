@@ -11,6 +11,8 @@ extern void cleargamma();
 void cleanup()
 {
     recorder::stop();
+    extern void waitforscreenshots();
+    waitforscreenshots();
     cleanupserver();
     SDL_ShowCursor(SDL_TRUE);
     SDL_SetRelativeMouseMode(SDL_FALSE);
