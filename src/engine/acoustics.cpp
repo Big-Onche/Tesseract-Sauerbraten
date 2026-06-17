@@ -7,13 +7,13 @@
 namespace acoustics
 {
     VARP(soundacoustics, 0, 0, 1);
-    VAR(soundacousticsmooth, 0, 150, 2000);
+    VAR(soundacousticsmooth, 0, 250, 2000);
 
     FVAR(soundacousticrange, 4.0f, 512.0f, 1024.0f);
     FVAR(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
     FVAR(soundacousticblockgain, 0.05f, 0.15f, 1.0f);
     FVAR(soundacousticmufflegainhf, 0.02f, 0.05f, 1.0f);
-    FVARP(soundacousticreverb, 0.0f, 1.2f, 2.0f);
+    FVARP(soundacousticreverb, 0.0f, 1.0f, 2.0f);
 
     VARP(soundacousticgrid, 0, 1, 1);
     VAR(soundacousticcellsize, 16, 32, 128);
@@ -23,9 +23,6 @@ namespace acoustics
     VARP(soundacousticastarcellsize, 8, 32, 256);
     VARP(soundacousticastarrange, 0, 512, 4096);
     VARP(soundacousticastarbudget, 0, 256, 100000);
-    FVARP(soundacousticsourcereverbmix, 0.0f, 0.55f, 2.0f);
-    FVARP(soundacousticlistenerreverbmix, 0.0f, 0.30f, 2.0f);
-    FVARP(soundacousticpathreverbmix, 0.0f, 0.15f, 2.0f);
 
     VAR(debugsoundacoustics, 0, 0, 3);
     VARP(debugsoundacousticsradius, 32, 512, 1024);
@@ -386,7 +383,8 @@ namespace acoustics
     static hashtable<ivec, int> acousticCellLookup(1<<12);
     static vector<vec> acousticDebugPath;
     static vec acousticDebugVirtualSource(0, 0, 0);
-    static int acousticAStarFrame = -1, acousticAStarNodesThisFrame = 0, acousticDebugPathMillis = 0;
+    static int acousticAStarFrame = -1, acousticAStarNodesThisFrame = 0, acousticDebugPathMillis = 0,
+               acousticAStarBudgetSamples = 0, acousticAStarBudgetNodes = 0;
 
     struct AcousticBakeRequest
     {
@@ -1660,7 +1658,7 @@ namespace acoustics
         acousticProbe.muffleOpen += (cell.muffleOpen - acousticProbe.muffleOpen)*k;
         acousticProbe.reverbShape = cell.reverbShape;
 
-        if(debugsoundacoustics && totalmillis - acousticProbe.lastDebugMillis >= 1000)
+        if((debugsoundacoustics == 1 || debugsoundacoustics == 3) && totalmillis - acousticProbe.lastDebugMillis >= 1000)
         {
             acousticProbe.lastDebugMillis = totalmillis;
             conoutf(CON_DEBUG, "sound acoustics baked: region %d, %s %d%% / %s %d%%, occupancy %d%%, confidence %d%%, sky %d%%, exterior %d%%, median %.1fm, irregular %d%%, corridor %d%%, pca %d%%",
@@ -1679,8 +1677,33 @@ namespace acoustics
             acousticProbe.reverbGain*soundacousticreverb, acousticProbe.reverbDecay, acousticProbe.reflection);
     }
 
+    static void advanceAcousticAStarFrame(int now)
+    {
+        if(acousticAStarFrame == now) return;
+        if(acousticAStarFrame >= 0)
+        {
+            acousticAStarBudgetNodes += acousticAStarNodesThisFrame;
+            acousticAStarBudgetSamples++;
+        }
+        acousticAStarFrame = now;
+        acousticAStarNodesThisFrame = 0;
+    }
+
+    static void debugAcousticAStarBudget()
+    {
+        if(debugsoundacoustics != 2 || totalmillis - acousticProbe.lastDebugMillis < 1000) return;
+        float avg = acousticAStarBudgetSamples > 0 ? float(acousticAStarBudgetNodes)/float(acousticAStarBudgetSamples) : 0.0f;
+        acousticProbe.lastDebugMillis = totalmillis;
+        conoutf(CON_DEBUG, "sound propagation A* budget: average %.1f/%d nodes per frame", avg, max(soundacousticastarbudget, 0));
+        acousticAStarBudgetSamples = acousticAStarBudgetNodes = 0;
+    }
+
     void updateAcoustics()
     {
+        int now = totalmillis;
+        advanceAcousticAStarFrame(now);
+        debugAcousticAStarBudget();
+
         if(!soundacoustics || !camera1)
         {
             acousticProbe.baked = false;
@@ -1690,13 +1713,10 @@ namespace acoustics
             return;
         }
 
-        int now = totalmillis;
         if(!acousticProbe.lastmillis) acousticProbe.lastmillis = now;
         int elapsed = max(now - acousticProbe.lastmillis, 1);
         acousticProbe.lastmillis = now;
         acousticProbe.origin = camera1->o;
-        acousticAStarFrame = now;
-        acousticAStarNodesThisFrame = 0;
         AcousticCell *cell = findAcousticCell(acousticProbe.origin);
         if(cell)
         {
@@ -1713,11 +1733,7 @@ namespace acoustics
 
     static bool acousticAStarBudgetAvailable()
     {
-        if(acousticAStarFrame != totalmillis)
-        {
-            acousticAStarFrame = totalmillis;
-            acousticAStarNodesThisFrame = 0;
-        }
+        advanceAcousticAStarFrame(totalmillis);
         return soundacousticastarbudget > 0 && acousticAStarNodesThisFrame < soundacousticastarbudget;
     }
 

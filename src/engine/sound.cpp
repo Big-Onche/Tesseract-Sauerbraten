@@ -10,6 +10,8 @@
 
 extern vec hitsurface;
 
+namespace acoustics { extern int soundacoustics; }
+
 namespace sound
 {
     static const int MaxVolume = 128;
@@ -468,7 +470,7 @@ namespace sound
         return filterId;
     }
 
-    extern int soundacousticdualvoice, soundpropagation;
+    extern int soundacousticdualvoice;
 
     static bool acousticPropagatedSound(const SoundChannel &chan)
     {
@@ -483,7 +485,7 @@ namespace sound
     static void syncAcousticVoice(SoundChannel &chan, int volume)
     {
         if(!chan.acousticSource) return;
-        float targetGain = soundpropagation && acousticDualVoiceImportant(chan) ? chan.targetAcousticGain : 0.0f;
+        float targetGain = acoustics::soundacoustics && acousticDualVoiceImportant(chan) ? chan.targetAcousticGain : 0.0f;
         if(chan.acousticGain < 0.0f) chan.acousticGain = targetGain;
         float fade = curtime > 0 ? min(curtime/120.0f, 1.0f) : 1.0f;
         chan.acousticGain += (targetGain - chan.acousticGain)*fade;
@@ -1300,7 +1302,6 @@ namespace sound
     VARP(soundfollowentities, 0, 1, 1);
     VARP(soundpitchrandom, 0, 0, 1);
     FVAR(soundpitchrandomamount, 0.0f, 0.03f, 1.0f);
-    VARP(soundpropagation, 0, 0, 1);
     VARP(soundacousticdualvoice, 0, 1, 1);
     VARP(soundacousticlooprefresh, 0, 100, 5000);
     VARP(soundairattenuation, 0, 0, 1);
@@ -1621,7 +1622,7 @@ namespace sound
             if((chan.flags&SND_MAP) && rad > 0) volf *= mapSoundRadiusGain(dist, float(rad), inner);
             else if(!soundairattenuation && rad > 0) volf -= clamp(attenDist/rad, 0.0f, 1.0f);
             acoustics::AcousticSourceInfo acousticInfo;
-            if(soundpropagation && acousticPropagatedSound(chan) && mapSoundInRadius) acousticSourceForChannel(chan, dist, volf, gainhf, reverbSend, acousticInfo);
+            if(acoustics::soundacoustics && acousticPropagatedSound(chan) && mapSoundInRadius) acousticSourceForChannel(chan, dist, volf, gainhf, reverbSend, acousticInfo);
             if(acousticInfo.path)
             {
                 acousticGain = acousticInfo.virtualGain;
