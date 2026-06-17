@@ -10,7 +10,7 @@
 
 extern vec hitsurface;
 
-namespace acoustics { extern int soundacoustics; }
+namespace acoustics { extern int soundacoustics, soundacousticsmooth; }
 
 namespace sound
 {
@@ -203,7 +203,7 @@ namespace sound
         uint eventseed;
         int fadeStart, fadeEnd, fadeFrom;
         float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend,
-              acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF;
+              acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF, acousticBlockGain;
         vec acousticCacheLoc, acousticCacheListener;
         acoustics::AcousticSourceInfo acousticCacheInfo;
         int acousticCacheMillis;
@@ -242,6 +242,7 @@ namespace sound
             targetDistanceReverbSend = 0.0f;
             acousticGain = targetAcousticGain = 0.0f;
             acousticGainHF = targetAcousticGainHF = 1.0f;
+            acousticBlockGain = 1.0f;
             acousticCacheLoc = acousticCacheListener = vec(0, 0, 0);
             acousticCacheInfo = acoustics::AcousticSourceInfo();
             acousticCacheMillis = -1;
@@ -424,15 +425,32 @@ namespace sound
 
     static ALuint syncDirectFilter(SoundChannel &chan)
     {
-        if(!efxFilters || (chan.targetGainHF >= 0.999f && chan.targetGainLF >= 0.999f))
+        if(!efxFilters)
         {
             alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
             chan.gainhf = chan.gainlf = 1.0f;
             return AL_FILTER_NULL;
         }
 
-        ALenum type = chan.targetGainHF < 0.999f && chan.targetGainLF < 0.999f ? AL_FILTER_BANDPASS :
-                      chan.targetGainHF < 0.999f ? AL_FILTER_LOWPASS : AL_FILTER_HIGHPASS;
+        float appliedGainHF = chan.gainhf < 0.0f ? chan.targetGainHF : chan.gainhf;
+        if(acoustics::soundacousticsmooth > 0)
+        {
+            float k = curtime > 0 ? min(curtime/float(max(acoustics::soundacousticsmooth, 1)), 1.0f) : 1.0f;
+            appliedGainHF += (chan.targetGainHF - appliedGainHF)*k;
+            if(fabs(appliedGainHF - chan.targetGainHF) < 1e-3f) appliedGainHF = chan.targetGainHF;
+        }
+        else appliedGainHF = chan.targetGainHF;
+        appliedGainHF = clamp(appliedGainHF, 0.0f, 1.0f);
+
+        if(appliedGainHF >= 0.999f && chan.targetGainLF >= 0.999f)
+        {
+            alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+            chan.gainhf = chan.gainlf = 1.0f;
+            return AL_FILTER_NULL;
+        }
+
+        ALenum type = appliedGainHF < 0.999f && chan.targetGainLF < 0.999f ? AL_FILTER_BANDPASS :
+                      appliedGainHF < 0.999f ? AL_FILTER_LOWPASS : AL_FILTER_HIGHPASS;
         if(!chan.ensureFilter(chan.filter, type))
         {
             alSourcei(chan.source, AL_DIRECT_FILTER, AL_FILTER_NULL);
@@ -443,18 +461,18 @@ namespace sound
         switch(type)
         {
             case AL_FILTER_LOWPASS:
-                alFilterf_(chan.filter, AL_LOWPASS_GAINHF, chan.targetGainHF);
+                alFilterf_(chan.filter, AL_LOWPASS_GAINHF, appliedGainHF);
                 break;
             case AL_FILTER_HIGHPASS:
                 alFilterf_(chan.filter, AL_HIGHPASS_GAINLF, chan.targetGainLF);
                 break;
             case AL_FILTER_BANDPASS:
                 alFilterf_(chan.filter, AL_BANDPASS_GAINLF, chan.targetGainLF);
-                alFilterf_(chan.filter, AL_BANDPASS_GAINHF, chan.targetGainHF);
+                alFilterf_(chan.filter, AL_BANDPASS_GAINHF, appliedGainHF);
                 break;
         }
         alSourcei(chan.source, AL_DIRECT_FILTER, chan.filter);
-        chan.gainhf = chan.targetGainHF;
+        chan.gainhf = appliedGainHF;
         chan.gainlf = chan.targetGainLF;
         return chan.filter;
     }
@@ -462,11 +480,13 @@ namespace sound
     static ALuint syncSendFilter(SoundChannel &chan, ALuint &filterId, float sendGain)
     {
         if(!efxFilters) return AL_FILTER_NULL;
-        if(sendGain >= 0.999f && chan.targetGainHF >= 0.999f && chan.targetGainLF >= 0.999f) return AL_FILTER_NULL;
+        float sendGainHF = chan.gainhf >= 0.0f ? chan.gainhf : chan.targetGainHF,
+              sendGainLF = chan.gainlf >= 0.0f ? chan.gainlf : chan.targetGainLF;
+        if(sendGain >= 0.999f && sendGainHF >= 0.999f && sendGainLF >= 0.999f) return AL_FILTER_NULL;
         if(!chan.ensureFilter(filterId, AL_FILTER_BANDPASS)) return AL_FILTER_NULL;
         alFilterf_(filterId, AL_BANDPASS_GAIN, clamp(sendGain, 0.0f, 1.0f));
-        alFilterf_(filterId, AL_BANDPASS_GAINLF, chan.targetGainLF);
-        alFilterf_(filterId, AL_BANDPASS_GAINHF, chan.targetGainHF);
+        alFilterf_(filterId, AL_BANDPASS_GAINLF, sendGainLF);
+        alFilterf_(filterId, AL_BANDPASS_GAINHF, sendGainHF);
         return filterId;
     }
 
@@ -1585,6 +1605,19 @@ namespace sound
         info = chan.acousticCacheInfo;
     }
 
+    static float smoothAcousticBlockGain(SoundChannel &chan, float target)
+    {
+        target = clamp(target, 0.0f, 1.0f);
+        if(acoustics::soundacousticsmooth > 0)
+        {
+            float k = curtime > 0 ? min(curtime/float(max(acoustics::soundacousticsmooth, 1)), 1.0f) : 1.0f;
+            chan.acousticBlockGain += (target - chan.acousticBlockGain)*k;
+            if(fabs(chan.acousticBlockGain - target) < 1e-3f) chan.acousticBlockGain = target;
+        }
+        else chan.acousticBlockGain = target;
+        return chan.acousticBlockGain;
+    }
+
     static bool updateChannel(SoundChannel &chan)
     {
         if(!chan.slot) return false;
@@ -1622,7 +1655,15 @@ namespace sound
             if((chan.flags&SND_MAP) && rad > 0) volf *= mapSoundRadiusGain(dist, float(rad), inner);
             else if(!soundairattenuation && rad > 0) volf -= clamp(attenDist/rad, 0.0f, 1.0f);
             acoustics::AcousticSourceInfo acousticInfo;
-            if(acoustics::soundacoustics && acousticPropagatedSound(chan) && mapSoundInRadius) acousticSourceForChannel(chan, dist, volf, gainhf, reverbSend, acousticInfo);
+            if(acoustics::soundacoustics && acousticPropagatedSound(chan) && mapSoundInRadius)
+            {
+                float baseVol = volf,
+                      acousticVol = volf;
+                acousticSourceForChannel(chan, dist, acousticVol, gainhf, reverbSend, acousticInfo);
+                float acousticBlockTarget = baseVol > 1e-4f ? clamp(acousticVol/baseVol, 0.0f, 1.0f) : 1.0f;
+                volf = baseVol*smoothAcousticBlockGain(chan, acousticBlockTarget);
+            }
+            else volf *= smoothAcousticBlockGain(chan, 1.0f);
             if(acousticInfo.path)
             {
                 acousticGain = acousticInfo.virtualGain;
