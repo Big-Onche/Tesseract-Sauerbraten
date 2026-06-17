@@ -13,10 +13,11 @@ namespace acoustics
     FVAR(soundacousticocclusion, 0.0f, 1.0f, 2.0f);
     FVAR(soundacousticblockgain, 0.05f, 0.15f, 1.0f);
     FVAR(soundacousticmufflegainhf, 0.02f, 0.05f, 1.0f);
+    FVARP(soundacousticocclusionrelief, 0.0f, 12.0f, 100.0f);
     FVARP(soundacousticreverb, 0.0f, 1.0f, 2.0f);
 
     VARP(soundacousticgrid, 0, 1, 1);
-    VAR(soundacousticcellsize, 16, 32, 128);
+    VAR(soundacousticcellsize, 8, 32, 128);
     VAR(soundacousticbakerays, 16, 128, 256);
     VAR(soundacousticthreads, 0, 0, 16);
 
@@ -1958,6 +1959,35 @@ namespace acoustics
         return clamp((blocked - 1)/3.0f, 0.0f, 1.0f);
     }
 
+    static float outdoorSourceNeighborOcclusionScale(const vec &source, const vec &listener)
+    {
+        AcousticCell *listenerCell = findAcousticCell(listener);
+        if(!listenerCell || listenerCell->outdoorRatio < 0.5f) return 1.0f;
+
+        static const ivec dirs[] =
+        {
+            ivec(1, 0, 0), ivec(-1, 0, 0), ivec(0, 1, 0), ivec(0, -1, 0), ivec(0, 0, 1), ivec(0, 0, -1),
+            ivec(1, 1, 1), ivec(1, 1, -1), ivec(1, -1, 1), ivec(1, -1, -1),
+            ivec(-1, 1, 1), ivec(-1, 1, -1), ivec(-1, -1, 1), ivec(-1, -1, -1)
+        };
+
+        int openNeighbors = 0;
+        float cellsize = max(float(soundacousticcellsize), 8.0f);
+        int steps = max(int(ceilf(32.0f/cellsize)), 1);
+        float occlusionRelief = clamp(soundacousticocclusionrelief, 0.0f, 100.0f)/(100.0f*steps);
+        ivec sourceCoord = acousticCellCoord(source);
+        loopj(steps) loopi(sizeof(dirs)/sizeof(dirs[0]))
+        {
+            ivec offset = ivec(dirs[i]).mul(j + 1);
+            int idx = acousticCellIndex(ivec(sourceCoord).add(offset));
+            if(!acousticCells.inrange(idx)) continue;
+            const AcousticCell &cell = acousticCells[idx];
+            if(!cell.valid) continue;
+            if(acousticDirectOcclusion(acousticCellCenter(cell.coord), listener) <= 0.0f) openNeighbors++;
+        }
+        return max(1.0f - openNeighbors*occlusionRelief, 0.0f);
+    }
+
     static void applyDirectOcclusion(float occlusion, float &volf, float &gainhf)
     {
         float occ = clamp(occlusion*soundacousticocclusion, 0.0f, 1.0f),
@@ -1982,6 +2012,8 @@ namespace acoustics
 
         float directOcclusion = acousticDirectOcclusion(loc, camera1->o);
         if(directOcclusion <= 0.0f) return; // Cheap direct test first
+        directOcclusion *= outdoorSourceNeighborOcclusionScale(loc, camera1->o);
+        if(directOcclusion <= 0.0f) return;
 
         applyDirectOcclusion(directOcclusion, volf, gainhf);
         if(info) info->occlusion = clamp(directOcclusion*soundacousticocclusion, 0.0f, 1.0f);
