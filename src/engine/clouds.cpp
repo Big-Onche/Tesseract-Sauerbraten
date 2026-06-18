@@ -38,7 +38,7 @@ namespace volumetricClouds
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
-    VARP(vcblur, 0, 1, 1);
+    VARP(vcblur, 0, 0, 1);
     VARP(vcblurscale, 1, 1, 4);
     VARP(vcatrous, 0, 1, 1);
     VARP(vcatrousiter, 1, 2, 3);
@@ -83,7 +83,7 @@ namespace volumetricClouds
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
-    VARP(vcnoisescale, -1000, -350, 1000);
+    VARR(vcnoisescale, -1000, 0, 1000);
 
     static float normalizenoise(float n)
     {
