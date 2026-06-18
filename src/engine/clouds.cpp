@@ -68,6 +68,7 @@ namespace volumetricClouds
     FVARR(vcfogdistmul, 0.25f, 4.0f, 64.0f);
     VARR(vcatmoblendmin, 0, 70, 100);
     VARR(vcatmoblendmax, 0, 100, 100);
+    VARR(vcconfigured, 0, 0, 1);
     VARR(vcdensity, 0, 50, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
     VARR(vcheight, -1000, 80, 1000);
@@ -82,10 +83,16 @@ namespace volumetricClouds
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
+    VARP(vcnoisescale, -1000, -350, 1000);
 
     static float normalizenoise(float n)
     {
         return clamp(n * 0.5f + 0.5f, 0.0f, 1.0f);
+    }
+
+    static float noisesizemul()
+    {
+        return clamp(exp2f(float(vcnoisescale) / 100.0f), 1.0f / 1024.0f, 1024.0f);
     }
 
     static uchar weatherbyte(float n)
@@ -358,7 +365,7 @@ namespace volumetricClouds
 
     void init()
     {
-        if(!volumetricclouds) return;
+        if(!volumetricclouds || !vcconfigured) return;
         useshaderbyname("volumetricclouds");
         useshaderbyname("atrousfilter");
         useshaderbyname("volumetriccloudsupscale");
@@ -371,7 +378,7 @@ namespace volumetricClouds
 
     bool hasshadowmap()
     {
-        return volumetricclouds && vcdensity > 0 && vcradius > 0 && vcshadowtex && vcshadowfbo && vcshadowmapworld.w > 0.0f && vcshadowmapstrength > 1e-4f;
+        return volumetricclouds && vcconfigured && vcdensity > 0 && vcradius > 0 && vcshadowtex && vcshadowfbo && vcshadowmapworld.w > 0.0f && vcshadowmapstrength > 1e-4f;
     }
 
     void getshadowparams(vec4 &bounds, vec4 &dome)
@@ -420,7 +427,7 @@ namespace volumetricClouds
         vccompositetexparams = vec4(0, 0, 0, 0);
         vcshadowmapstrength = 0.0f;
         updatecloudscroll();
-        if(!volumetricclouds || vcdensity <= 0 || vcradius <= 0)
+        if(!volumetricclouds || !vcconfigured || vcdensity <= 0 || vcradius <= 0)
         {
             if(vcshadowtex || vcshadowfbo) cleanupshadowmap();
             return;
@@ -554,7 +561,8 @@ namespace volumetricClouds
         GLOBALPARAMF(tvclouddome, clouddome.x, clouddome.y, clouddome.z, clouddome.w);
         GLOBALPARAMF(tvcloudscroll, vcscrolloffset.x, vcscrolloffset.y);
         float ws = max(float(worldsize), 1.0f);
-        GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.30f, 1.0f), 1.0f / max(ws * 0.12f, 1.0f), 0.50f, 0.95f);
+        float noisemul = noisesizemul();
+        GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.30f * noisemul, 1.0f), 1.0f / max(ws * 0.12f * noisemul, 1.0f), 0.50f, 0.95f);
         GLOBALPARAMF(tvcloudstructure, float(vcstructure) / 100.0f);
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);

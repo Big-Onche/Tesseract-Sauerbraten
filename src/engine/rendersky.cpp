@@ -881,7 +881,7 @@ void drawskybox(bool clear)
         glDisable(GL_BLEND);
     }
 
-    if(cloudlayer[0] && cloudheight)
+    if(cloudlayer[0] && cloudheight && (!volumetricClouds::volumetricclouds || !volumetricClouds::vcconfigured))
     {
         SETSHADER(skybox);
 

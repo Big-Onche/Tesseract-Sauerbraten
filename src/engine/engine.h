@@ -836,6 +836,7 @@ namespace recorder
 namespace volumetricClouds
 {
     extern int volumetricclouds;
+    extern int vcconfigured;
 
     extern void init();
     extern void render();
