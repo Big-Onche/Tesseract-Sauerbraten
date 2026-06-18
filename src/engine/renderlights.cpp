@@ -5548,6 +5548,7 @@ void cleanuplights()
     cleanupshadowatlas();
     cleanupradiancehints();
     lightsphere::cleanup();
+    lensFlares::cleanup();
     cleanupaa();
 }
 
