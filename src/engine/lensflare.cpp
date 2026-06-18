@@ -29,6 +29,7 @@ namespace lensFlares
     VAR(debuglensflare, 0, 0, 1);
     FVARP(lensflareocclusionradians, 0.001f, 0.05236f, 0.2f);
     VARP(lensflareocclusionlerp, 0, 25, 5000);
+    FVARP(lensflarecloudocclusionthreshold, 0.05f, 0.60f, 1.0f);
     // Map vars
     VARR(sunflareshaftsize, 1, 75, 400);
     VARR(sunflarestrength, 0, 25, 200);
@@ -36,7 +37,7 @@ namespace lensFlares
     static GLuint sunOcclusionQuery = 0;
     static GLuint hardOcclusionQuery = 0;
     static bool sunOcclusionPending = false;
-    static float sunOcclusionTotal = 1.0f, sunOcclusionTarget = 1.0f, sunOcclusionSmoothed = 1.0f;
+    static float sunOcclusionTotal = 1.0f, sunGeometryVisibilityTarget = 1.0f, sunOcclusionTarget = 1.0f, sunOcclusionSmoothed = 1.0f;
     static int sunOcclusionMillis = 0, sunOcclusionDebugMillis = 0;
     static vec lastCameraPos(0, 0, 0);
     static int lastCameraMillis = 0;
@@ -168,16 +169,60 @@ namespace lensFlares
         if(hadDepth) glEnable(GL_DEPTH_TEST);
     }
 
-    static void reportDebugOcclusion(float occlusion)
+    static float queryCloudCircleOcclusion(const vec4 &screen, float radiusPixels, Shader *cloudOcclusionShader)
+    {
+        if(!cloudOcclusionShader || !glGenQueries_ || !glBeginQuery_) return 0.0f;
+        if(!hardOcclusionQuery) glGenQueries_(1, &hardOcclusionQuery);
+        if(!hardOcclusionQuery) return 0.0f;
+        if(!volumetricClouds::bindcomposite(0)) return 0.0f;
+
+        const vec4 &cloudParams = volumetricClouds::compositetexparams();
+        bool hadDepth = glIsEnabled(GL_DEPTH_TEST) != 0, hadBlend = glIsEnabled(GL_BLEND) != 0;
+        GLboolean oldDepthMask = GL_TRUE, oldColorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &oldDepthMask);
+        glGetBooleanv(GL_COLOR_WRITEMASK, oldColorMask);
+
+        glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+        glViewport(0, 0, vieww, viewh);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDepthMask(GL_FALSE);
+        if(hadDepth) glDisable(GL_DEPTH_TEST);
+        if(hadBlend) glDisable(GL_BLEND);
+
+        GLOBALPARAMF(sunFlareCloudTex, cloudParams.x, cloudParams.y, cloudParams.z, cloudParams.w);
+        cloudOcclusionShader->set();
+        glBeginQuery_(GL_SAMPLES_PASSED, hardOcclusionQuery);
+        drawOcclusionCircle(screen, radiusPixels, true);
+        glEndQuery_(GL_SAMPLES_PASSED);
+
+        GLuint samples = 0;
+        glGetQueryObjectuiv_(hardOcclusionQuery, GL_QUERY_RESULT, &samples);
+
+        glDepthMask(oldDepthMask);
+        glColorMask(oldColorMask[0], oldColorMask[1], oldColorMask[2], oldColorMask[3]);
+        if(hadDepth) glEnable(GL_DEPTH_TEST);
+        if(hadBlend) glEnable(GL_BLEND);
+        glActiveTexture_(GL_TEXTURE0);
+
+        float total = float(M_PI) * radiusPixels * radiusPixels * max(msaalight ? msaasamples : 1, 1);
+        return clamp(samples / max(total, 1.0f), 0.0f, 1.0f);
+    }
+
+    static void reportDebugOcclusion(float occlusion, float geometryOcclusion = -1.0f, float cloudOcclusion = -1.0f)
     {
         if(!debuglensflare) return;
         int millis = totalmillis ? totalmillis : lastmillis;
         if(millis - sunOcclusionDebugMillis < 1000) return;
         sunOcclusionDebugMillis = millis;
-        conoutf(CON_INFO, "lens flare occlusion: %.1f%%", 100.0f * clamp(occlusion, 0.0f, 1.0f));
+        if(geometryOcclusion >= 0.0f || cloudOcclusion >= 0.0f)
+            conoutf(CON_INFO, "lens flare occlusion: %.1f%% (geometry %.1f%%, clouds %.1f%%)",
+                100.0f * clamp(occlusion, 0.0f, 1.0f),
+                100.0f * clamp(max(geometryOcclusion, 0.0f), 0.0f, 1.0f),
+                100.0f * clamp(max(cloudOcclusion, 0.0f), 0.0f, 1.0f));
+        else conoutf(CON_INFO, "lens flare occlusion: %.1f%%", 100.0f * clamp(occlusion, 0.0f, 1.0f));
     }
 
-    static float updateSunOcclusion(const vec4 &screen, Shader *debugShader)
+    static float updateSunOcclusion(const vec4 &screen, Shader *debugShader, Shader *cloudOcclusionShader)
     {
         float radiusPixels = occlusionRadiusPixels();
 
@@ -189,10 +234,14 @@ namespace lensFlares
             {
                 GLuint samples = 0;
                 glGetQueryObjectuiv_(sunOcclusionQuery, GL_QUERY_RESULT, &samples);
-                sunOcclusionTarget = clamp(samples / max(sunOcclusionTotal, 1.0f), 0.0f, 1.0f);
+                sunGeometryVisibilityTarget = clamp(samples / max(sunOcclusionTotal, 1.0f), 0.0f, 1.0f);
                 sunOcclusionPending = false;
             }
         }
+
+        float cloudOcclusion = queryCloudCircleOcclusion(screen, radiusPixels, cloudOcclusionShader);
+        float cloudVisibility = 1.0f - clamp(cloudOcclusion / max(lensflarecloudocclusionthreshold, 1.0e-4f), 0.0f, 1.0f);
+        sunOcclusionTarget = clamp(sunGeometryVisibilityTarget * cloudVisibility, 0.0f, 1.0f);
 
         int millis = totalmillis ? totalmillis : lastmillis;
         if(!sunOcclusionMillis)
@@ -212,7 +261,7 @@ namespace lensFlares
             }
         }
 
-        reportDebugOcclusion(1.0f - sunOcclusionTarget);
+        reportDebugOcclusion(1.0f - sunOcclusionTarget, 1.0f - sunGeometryVisibilityTarget, cloudOcclusion);
 
         if(!sunOcclusionPending && glGenQueries_ && glBeginQuery_)
         {
@@ -438,6 +487,7 @@ namespace lensFlares
 
         Shader *flareShader = useshaderbyname("lensflare");
         Shader *debugShader = debuglensflare ? useshaderbyname("lensflaredebug") : NULL;
+        Shader *cloudOcclusionShader = useshaderbyname("lensflarecloudocclusion");
         if(!flareShader)
         {
             queuedFlares.setsize(0);
@@ -448,14 +498,14 @@ namespace lensFlares
         {
             if(!hardCenterVisible(sunScreen, 1.0f))
             {
-                sunOcclusionTarget = sunOcclusionSmoothed = 0.0f;
-                reportDebugOcclusion(1.0f);
+                sunGeometryVisibilityTarget = sunOcclusionTarget = sunOcclusionSmoothed = 0.0f;
+                reportDebugOcclusion(1.0f, 1.0f, 0.0f);
                 drawDebugCircle(debugShader, sunScreen, occlusionRadiusPixels());
                 renderSun = false;
             }
             else
             {
-                float sunVisibility = updateSunOcclusion(sunScreen, debugShader);
+                float sunVisibility = updateSunOcclusion(sunScreen, debugShader, cloudOcclusionShader);
                 sunVisibilityOverride = vec4(sunVisibility, 1.0f, 0.0f, 0.0f);
                 if(sunVisibility <= 1.0e-4f) renderSun = false;
             }
