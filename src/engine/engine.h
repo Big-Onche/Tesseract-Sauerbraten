@@ -833,14 +833,20 @@ namespace recorder
     extern void cleanup();
 }
 
-// volumetric clouds
-
-namespace vclouds
+namespace volumetricClouds
 {
     extern int volumetricclouds;
 
     extern void init();
     extern void render();
+    extern bool bindcomposite(int tmu = 0);
+    extern const vec4 &compositetexparams();
+    extern void getshadowparams(vec4 &bounds, vec4 &dome);
+    extern bool hasshadowmap();
+    extern bool bindshadowmap(int tmu = 0);
+    extern const vec4 &shadowmapworld();
+    extern float shadowmapstrength();
+
     extern void cleanup();
 }
 
@@ -850,7 +856,6 @@ namespace lensFlares // procedural ones
     extern void render();
     extern void cleanup();
 }
-
 
 #endif
 

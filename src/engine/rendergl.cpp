@@ -2530,7 +2530,7 @@ void gl_drawview()
 
     if(!drawtex)
     {
-        vclouds::render();
+        volumetricClouds::render();
         GLERROR;
     }
 
