@@ -43,9 +43,9 @@ namespace volumetricClouds
     VARP(vcatrous, 0, 1, 1);
     VARP(vcatrousiter, 1, 2, 3);
     FVARP(vcatrousalphak, 0.0f, 16.0f, 256.0f);
-    FVARP(vcscale, 0.25f, 0.5f, 2.0f);
+    FVARP(vcscale, 0.125f, 0.25f, 2.0f);
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
-    VARP(vcsteps, 4, 16, 128);
+    VARP(vcsteps, 4, 32, 128);
     VARP(vcsunsteps, 4, 4, 64);
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowmapsize, 64, 512, 2048);
@@ -625,7 +625,7 @@ namespace volumetricClouds
 
         if(vcblur && bilateralshader)
         {
-            GLOBALPARAMF(tvbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
+            GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
             GLOBALPARAMF(vcblurscale, float(vcblurscale));
 
             // Pass 1: horizontal bilateral blur + upscale from low-res cloud buffer.
@@ -664,7 +664,7 @@ namespace volumetricClouds
         {
             // Depth-aware upsample to avoid low-res cloud alpha bleeding over
             // foreground geometry silhouettes when vcscale < 1.
-            GLOBALPARAMF(tvbilateraldepthscale, 1.0f / max(float(farplane) * vcbilateraledge, 1e-4f));
+            GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
 
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
             glViewport(0, 0, vieww, viewh);
