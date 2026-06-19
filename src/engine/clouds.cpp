@@ -71,23 +71,23 @@ namespace volumetricClouds
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     FVAR(vcphaseg2, -0.95f, -0.25f, 0.95f);
     FVAR(vcphaseblend, 0.0f, 0.18f, 1.0f);
-    FVARR(vcfogdistmul, 0.25f, 4.0f, 64.0f);
-    VARR(vcatmoblendmin, 0, 70, 100);
+    FVARR(vcfogdistmul, 0.25f, 12.0f, 64.0f);
+    VARR(vcatmoblendmin, 0, 10, 100);
     VARR(vcatmoblendmax, 0, 100, 100);
     VARR(vcconfigured, 0, 0, 1);
     VARR(vcdensity, 0, 50, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
-    VARR(vcheight, -1000, 80, 1000);
-    VARR(vcthickness, 0, 20, 300);
-    VARR(vcradius, 0, 100, 10000);                  // 100 = worldsize, 0 disables the cloud layer
+    VARR(vcheight, -1000, 400, 1000);
+    VARR(vcthickness, 0, 40, 300);
+    VARR(vcradius, 0, 3000, 10000);                  // 100 = worldsize, 0 disables the cloud layer
     VARR(vcscrollx, -1000, 0, 1000);
     VARR(vcscrolly, -1000, 0, 1000);
-    VARR(vcdome, -1000, 0, 1000);
+    VARR(vcdome, -1000, 300, 1000);
     VARR(vcstructure, 0, 75, 200);                 // 75 = default shaping, lower = macro, higher = micro
     VARR(vcsilverradius, 0, 30, 100);              // radius of the sun mask as % of min screen dimension, 0 disables
     FVARR(vcsilvercontrast, 1.0f, 10.0f, 50.0f);
-    FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
-    FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
+    FVARR(vcdarkness, 0.1f, 0.5f, 2.0f);
+    FVARR(vcshadowstrength, 0.0f, 0.75f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
     VARR(vcnoisescale, -1000, 0, 1000);
 
@@ -407,6 +407,72 @@ namespace volumetricClouds
         return vec4((sunndc.x * 0.5f + 0.5f) * vieww, (sunndc.y * 0.5f + 0.5f) * viewh, radiuspixels, screenfade);
     }
 
+    struct CloudScissor
+    {
+        int x1, y1, x2, y2, lowx1, lowy1, lowx2, lowy2;
+    };
+
+    static void ndctopixelrect(float sx1, float sy1, float sx2, float sy2, int w, int h, int margin, int &x1, int &y1, int &x2, int &y2)
+    {
+        x1 = clamp(int(floorf((sx1 * 0.5f + 0.5f) * w)) - margin, 0, w);
+        y1 = clamp(int(floorf((sy1 * 0.5f + 0.5f) * h)) - margin, 0, h);
+        x2 = clamp(int(ceilf((sx2 * 0.5f + 0.5f) * w)) + margin, 0, w);
+        y2 = clamp(int(ceilf((sy2 * 0.5f + 0.5f) * h)) + margin, 0, h);
+    }
+
+    static bool calccloudscissor(const vec4 &bounds, const vec4 &dome, int targetw, int targeth, CloudScissor &scissor)
+    {
+        float radius = max(dome.w, 0.0f);
+        if(radius <= 1.0e-4f) return false;
+
+        float edgeoffset = dome.x * radius * radius;
+        float minz = min(bounds.x, bounds.y) + min(edgeoffset, 0.0f) - 2.0f,
+              maxz = max(bounds.x, bounds.y) + max(edgeoffset, 0.0f) + 2.0f,
+              minx = dome.y - radius, maxx = dome.y + radius,
+              miny = dome.z - radius, maxy = dome.z + radius;
+
+        const vec &cam = camera1->o;
+        if(cam.x >= minx && cam.x <= maxx && cam.y >= miny && cam.y <= maxy && cam.z >= minz && cam.z <= maxz)
+        {
+            scissor.x1 = scissor.y1 = scissor.lowx1 = scissor.lowy1 = 0;
+            scissor.x2 = vieww;
+            scissor.y2 = viewh;
+            scissor.lowx2 = targetw;
+            scissor.lowy2 = targeth;
+            return true;
+        }
+
+        float sx1, sy1, sx2, sy2;
+        if(!calcbbscissor(ivec::floor(vec(minx, miny, minz)), ivec::ceil(vec(maxx, maxy, maxz)), sx1, sy1, sx2, sy2))
+            return false;
+
+        ndctopixelrect(sx1, sy1, sx2, sy2, vieww, viewh, 2, scissor.x1, scissor.y1, scissor.x2, scissor.y2);
+        ndctopixelrect(sx1, sy1, sx2, sy2, targetw, targeth, 1, scissor.lowx1, scissor.lowy1, scissor.lowx2, scissor.lowy2);
+        return scissor.x2 > scissor.x1 && scissor.y2 > scissor.y1 && scissor.lowx2 > scissor.lowx1 && scissor.lowy2 > scissor.lowy1;
+    }
+
+    static void setcloudscissor(const CloudScissor &scissor, bool lowres, int margin = 0)
+    {
+        int x1 = lowres ? scissor.lowx1 : scissor.x1,
+            y1 = lowres ? scissor.lowy1 : scissor.y1,
+            x2 = lowres ? scissor.lowx2 : scissor.x2,
+            y2 = lowres ? scissor.lowy2 : scissor.y2,
+            w = lowres ? vcw : vieww,
+            h = lowres ? vch : viewh;
+        x1 = max(x1 - margin, 0);
+        y1 = max(y1 - margin, 0);
+        x2 = min(x2 + margin, w);
+        y2 = min(y2 + margin, h);
+        glScissor(x1, y1, max(x2 - x1, 0), max(y2 - y1, 0));
+    }
+
+    static void clearcloudtarget()
+    {
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+
     static void cleanupshadowmap()
     {
         if(vcshadowfbo)
@@ -509,6 +575,7 @@ namespace volumetricClouds
         Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
         bool useclarity = vcclarity && clarityshader && vcclaritystrength > 1e-4f;
         float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
+        bool doshadow = vcshadow && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f;
         if(!cloudshader) return;
 
         int targetw = max(int(ceilf(vieww * vcscale)), 1),
@@ -523,36 +590,43 @@ namespace volumetricClouds
         }
         if(!ensureWeatherMap()) return;
 
-        if((!vcshadow || !shadowmapshader || !shadowapplyshader || shadowstrength <= 1e-4f) && (vcshadowtex || vcshadowfbo))
-            cleanupshadowmap();
+        vec4 cloudbounds, clouddome;
+        calcshadowparams(cloudbounds, clouddome);
 
-        if(!vctex)
+        CloudScissor cloudscissor;
+        bool drawclouds = calccloudscissor(cloudbounds, clouddome, vcw, vch, cloudscissor);
+
+        if(!doshadow && (vcshadowtex || vcshadowfbo))
+            cleanupshadowmap();
+        if(!drawclouds && !doshadow) return;
+
+        if(drawclouds && !vctex)
         {
             glGenTextures(1, &vctex);
             createtexture(vctex, vcw, vch, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(!vcatroustex)
+        if(drawclouds && !vcatroustex)
         {
             glGenTextures(1, &vcatroustex);
             createtexture(vcatroustex, vcw, vch, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(!vcbilateraltex)
+        if(drawclouds && !vcbilateraltex)
         {
             glGenTextures(1, &vcbilateraltex);
             createtexture(vcbilateraltex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(!vcbilateraltemptex)
+        if(drawclouds && !vcbilateraltemptex)
         {
             glGenTextures(1, &vcbilateraltemptex);
             createtexture(vcbilateraltemptex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(useclarity && !vcclaritytex)
+        if(drawclouds && useclarity && !vcclaritytex)
         {
             glGenTextures(1, &vcclaritytex);
             createtexture(vcclaritytex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
 
-        if(!vcfbo)
+        if(drawclouds && !vcfbo)
         {
             glGenFramebuffers_(1, &vcfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
@@ -560,7 +634,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(!vcatrousfbo)
+        if(drawclouds && !vcatrousfbo)
         {
             glGenFramebuffers_(1, &vcatrousfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcatrousfbo);
@@ -568,7 +642,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud atrous buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(!vcbilateralfbo)
+        if(drawclouds && !vcbilateralfbo)
         {
             glGenFramebuffers_(1, &vcbilateralfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
@@ -576,7 +650,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(!vcbilateraltempfbo)
+        if(drawclouds && !vcbilateraltempfbo)
         {
             glGenFramebuffers_(1, &vcbilateraltempfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
@@ -584,7 +658,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral temp buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(useclarity && !vcclarityfbo)
+        if(drawclouds && useclarity && !vcclarityfbo)
         {
             glGenFramebuffers_(1, &vcclarityfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcclarityfbo);
@@ -592,7 +666,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud clarity buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(vcshadow && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f)
+        if(doshadow)
         {
             int shadowsz = max(vcshadowmapsize, 1);
             if(shadowsz != vcshadowsz) cleanupshadowmap();
@@ -620,9 +694,6 @@ namespace volumetricClouds
         else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
         glActiveTexture_(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vcweathertex);
-
-        vec4 cloudbounds, clouddome;
-        calcshadowparams(cloudbounds, clouddome);
 
         GLOBALPARAMF(tvcloudbounds, cloudbounds.x, cloudbounds.y, cloudbounds.z, cloudbounds.w);
         GLOBALPARAMF(tvclouddome, clouddome.x, clouddome.y, clouddome.z, clouddome.w);
@@ -660,128 +731,144 @@ namespace volumetricClouds
 
         begindebugtimer();
 
-        glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
-        glViewport(0, 0, vcw, vch);
+        GLuint compositetex = 0;
+        int compositetexw = 0, compositetexh = 0;
         glDisable(GL_DEPTH_TEST);
-        glDisable(GL_BLEND);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        cloudshader->set();
-        screenquad(vcw, vch);
 
-        GLuint lowrestex = vctex;
-        if(vcatrous && atrousshader)
+        if(drawclouds)
         {
-            int iterations = clamp(vcatrousiter, 1, 3);
-            loopi(iterations)
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
+            glViewport(0, 0, vcw, vch);
+            glDisable(GL_BLEND);
+            clearcloudtarget();
+            glEnable(GL_SCISSOR_TEST);
+            setcloudscissor(cloudscissor, true);
+            cloudshader->set();
+            screenquad(vcw, vch);
+
+            GLuint lowrestex = vctex;
+            if(vcatrous && atrousshader)
             {
-                bool writetomain = lowrestex == vcatroustex;
-                glBindFramebuffer_(GL_FRAMEBUFFER, writetomain ? vcfbo : vcatrousfbo);
-                glViewport(0, 0, vcw, vch);
+                int iterations = clamp(vcatrousiter, 1, 3);
+                loopi(iterations)
+                {
+                    bool writetomain = lowrestex == vcatroustex;
+                    glBindFramebuffer_(GL_FRAMEBUFFER, writetomain ? vcfbo : vcatrousfbo);
+                    glViewport(0, 0, vcw, vch);
+                    glDisable(GL_BLEND);
+                    clearcloudtarget();
+                    glEnable(GL_SCISSOR_TEST);
+                    setcloudscissor(cloudscissor, true, 2 * ((1<<(i + 1)) - 1));
+                    glActiveTexture_(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
+                    GLOBALPARAMF(tatroussize, float(vcw), float(vch));
+                    GLOBALPARAMF(tatrousparams, float(1<<i), vcatrousalphak, 0.0f, 0.0f);
+                    atrousshader->set();
+                    screenquad(vcw, vch);
+                    lowrestex = writetomain ? vctex : vcatroustex;
+                }
+            }
+
+            compositetex = lowrestex;
+            compositetexw = vcw;
+            compositetexh = vch;
+
+            if(vcblur && bilateralshader)
+            {
+                GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
+                GLOBALPARAMF(vcblurscale, float(vcblurscale));
+
+                // Pass 1: horizontal bilateral blur + upscale from low-res cloud buffer.
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
+                glViewport(0, 0, vieww, viewh);
                 glDisable(GL_BLEND);
+                clearcloudtarget();
+                glEnable(GL_SCISSOR_TEST);
+                setcloudscissor(cloudscissor, false, int(ceilf(max(float(vcblurscale), 1.0f) * 4.0f)) + 2);
+
                 glActiveTexture_(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
-                GLOBALPARAMF(tatroussize, float(vcw), float(vch));
-                GLOBALPARAMF(tatrousparams, float(1<<i), vcatrousalphak, 0.0f, 0.0f);
-                atrousshader->set();
-                screenquad(vcw, vch);
-                lowrestex = writetomain ? vctex : vcatroustex;
+                GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
+                GLOBALPARAMF(tvcloudblurdir, 1.0f, 0.0f);
+                bilateralshader->set();
+                screenquad(vieww, viewh);
+
+                // Pass 2: vertical bilateral blur on full-res intermediate.
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
+                glViewport(0, 0, vieww, viewh);
+                glDisable(GL_BLEND);
+                clearcloudtarget();
+                glEnable(GL_SCISSOR_TEST);
+                setcloudscissor(cloudscissor, false, int(ceilf(max(float(vcblurscale), 1.0f) * 8.0f)) + 2);
+
+                glActiveTexture_(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_RECTANGLE, vcbilateraltemptex);
+                GLOBALPARAMF(tvcloudscale, 1.0f, 1.0f, 1.0f, 1.0f);
+                GLOBALPARAMF(tvcloudblurdir, 0.0f, 1.0f);
+                bilateralshader->set();
+                screenquad(vieww, viewh);
+
+                compositetex = vcbilateraltex;
+                compositetexw = vieww;
+                compositetexh = viewh;
             }
+            else if((vcw < vieww || vch < viewh) && upscaleshader)
+            {
+                // Depth-aware upsample to avoid low-res cloud alpha bleeding over
+                // foreground geometry silhouettes when vcscale < 1.
+                GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
+
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
+                glViewport(0, 0, vieww, viewh);
+                glDisable(GL_BLEND);
+                clearcloudtarget();
+                glEnable(GL_SCISSOR_TEST);
+                setcloudscissor(cloudscissor, false, 2);
+
+                glActiveTexture_(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
+                GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
+                upscaleshader->set();
+                screenquad(vieww, viewh);
+
+                compositetex = vcbilateraltex;
+                compositetexw = vieww;
+                compositetexh = viewh;
+            }
+
+            // Full-res edge-aware clarity pass. Only run after the cloud chain has
+            // produced a full-resolution working texture; never sharpen low-res RTs.
+            if(useclarity && compositetexw == vieww && compositetexh == viewh)
+            {
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcclarityfbo);
+                glViewport(0, 0, vieww, viewh);
+                glDisable(GL_BLEND);
+                clearcloudtarget();
+                glEnable(GL_SCISSOR_TEST);
+                setcloudscissor(cloudscissor, false, int(ceilf(max(vcclarityradius, 0.5f))) + 2);
+
+                glActiveTexture_(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
+                GLOBALPARAMF(vcclarityparams, vcclaritystrength, vcclarityradius, vcclarityalphak, vcclaritylumak);
+                clarityshader->set();
+                screenquad(vieww, viewh);
+
+                compositetex = vcclaritytex;
+                compositetexw = vieww;
+                compositetexh = viewh;
+            }
+
+            glDisable(GL_SCISSOR_TEST);
+            vccompositetex = compositetex;
+            vccompositetexparams = vec4(
+                float(compositetexw) / max(float(vieww), 1.0f),
+                float(compositetexh) / max(float(viewh), 1.0f),
+                float(compositetexw),
+                float(compositetexh)
+            );
         }
 
-        GLuint compositetex = lowrestex;
-        int compositetexw = vcw, compositetexh = vch;
-
-        if(vcblur && bilateralshader)
-        {
-            GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
-            GLOBALPARAMF(vcblurscale, float(vcblurscale));
-
-            // Pass 1: horizontal bilateral blur + upscale from low-res cloud buffer.
-            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
-            glViewport(0, 0, vieww, viewh);
-            glDisable(GL_BLEND);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
-            GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
-            GLOBALPARAMF(tvcloudblurdir, 1.0f, 0.0f);
-            bilateralshader->set();
-            screenquad(vieww, viewh);
-
-            // Pass 2: vertical bilateral blur on full-res intermediate.
-            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
-            glViewport(0, 0, vieww, viewh);
-            glDisable(GL_BLEND);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, vcbilateraltemptex);
-            GLOBALPARAMF(tvcloudscale, 1.0f, 1.0f, 1.0f, 1.0f);
-            GLOBALPARAMF(tvcloudblurdir, 0.0f, 1.0f);
-            bilateralshader->set();
-            screenquad(vieww, viewh);
-
-            compositetex = vcbilateraltex;
-            compositetexw = vieww;
-            compositetexh = viewh;
-        }
-        else if((vcw < vieww || vch < viewh) && upscaleshader)
-        {
-            // Depth-aware upsample to avoid low-res cloud alpha bleeding over
-            // foreground geometry silhouettes when vcscale < 1.
-            GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
-
-            glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
-            glViewport(0, 0, vieww, viewh);
-            glDisable(GL_BLEND);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
-            GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
-            upscaleshader->set();
-            screenquad(vieww, viewh);
-
-            compositetex = vcbilateraltex;
-            compositetexw = vieww;
-            compositetexh = viewh;
-        }
-
-        // Full-res edge-aware clarity pass. Only run after the cloud chain has
-        // produced a full-resolution working texture; never sharpen low-res RTs.
-        if(useclarity && compositetexw == vieww && compositetexh == viewh)
-        {
-            glBindFramebuffer_(GL_FRAMEBUFFER, vcclarityfbo);
-            glViewport(0, 0, vieww, viewh);
-            glDisable(GL_BLEND);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
-            GLOBALPARAMF(vcclarityparams, vcclaritystrength, vcclarityradius, vcclarityalphak, vcclaritylumak);
-            clarityshader->set();
-            screenquad(vieww, viewh);
-
-            compositetex = vcclaritytex;
-            compositetexw = vieww;
-            compositetexh = viewh;
-        }
-
-        vccompositetex = compositetex;
-        vccompositetexparams = vec4(
-            float(compositetexw) / max(float(vieww), 1.0f),
-            float(compositetexh) / max(float(viewh), 1.0f),
-            float(compositetexw),
-            float(compositetexh)
-        );
-
-        if(vcshadow && vcshadowtex && vcshadowfbo && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f)
+        if(doshadow && vcshadowtex && vcshadowfbo)
         {
             float shadowworld = max(float(worldsize) * 2.0f, 1.0f);
             float worldpertexel = shadowworld / max(float(vcshadowsz), 1.0f);
@@ -823,16 +910,22 @@ namespace volumetricClouds
         glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         glViewport(0, 0, vieww, viewh);
 
-        glActiveTexture_(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
+        if(drawclouds)
+        {
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
 
-        glEnable(GL_BLEND);
-        // Cloud shader output is premultiplied (rgb already multiplied by alpha/transmittance).
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        SETSHADER(scalelinear);
-        screenquad(compositetexw, compositetexh);
+            glEnable(GL_SCISSOR_TEST);
+            setcloudscissor(cloudscissor, false, 2);
+            glEnable(GL_BLEND);
+            // Cloud shader output is premultiplied (rgb already multiplied by alpha/transmittance).
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            SETSHADER(scalelinear);
+            screenquad(compositetexw, compositetexh);
 
-        glDisable(GL_BLEND);
+            glDisable(GL_BLEND);
+            glDisable(GL_SCISSOR_TEST);
+        }
         glEnable(GL_DEPTH_TEST);
 
         enddebugtimer();
