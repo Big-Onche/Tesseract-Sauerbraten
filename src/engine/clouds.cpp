@@ -35,9 +35,15 @@ namespace volumetricClouds
     bool vcweatherdirty = true;
 
     static const int VC_WEATHER_MAP_SIZE = 512;
+    static const int VC_DEBUG_QUERY_COUNT = 3;
+    GLuint vcdebugquery[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
+    int vcdebugquerycycle = 0, vcdebugquerywaiting = 0, vcdebugcpustart = 0;
+    bool vcdebuggpuquery = false;
+    float vcdebugms = -1.0f;
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
+    VAR(debugvc, 0, 0, 1);
     VARP(vcblur, 0, 0, 1);
     VARP(vcblurscale, 1, 1, 4);
     VARP(vcatrous, 0, 1, 1);
@@ -79,7 +85,7 @@ namespace volumetricClouds
     VARR(vcdome, -1000, 0, 1000);
     VARR(vcstructure, 0, 75, 200);                 // 75 = default shaping, lower = macro, higher = micro
     VARR(vcsilverradius, 0, 30, 100);              // radius of the sun mask as % of min screen dimension, 0 disables
-    FVARR(vcsilvercontrast, 1.0f, 35.0f, 50.0f);
+    FVARR(vcsilvercontrast, 1.0f, 10.0f, 50.0f);
     FVARR(vcdarkness, 0.1f, 1.0f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 0.65f, 1.0f);
     CVARR(vccolour, 0xFFFFFF);
@@ -93,6 +99,67 @@ namespace volumetricClouds
     static float noisesizemul()
     {
         return clamp(exp2f(float(vcnoisescale) / 100.0f), 1.0f / 1024.0f, 1024.0f);
+    }
+
+    static void polldebugtimer()
+    {
+        if(!vcdebugquery[0]) return;
+        loopi(VC_DEBUG_QUERY_COUNT) if(vcdebugquerywaiting&(1<<i))
+        {
+            GLint available = 0;
+            glGetQueryObjectiv_(vcdebugquery[i], GL_QUERY_RESULT_AVAILABLE, &available);
+            if(!available) continue;
+
+            GLuint64EXT result = 0;
+            glGetQueryObjectui64v_(vcdebugquery[i], GL_QUERY_RESULT, &result);
+            vcdebugms = max(float(result) * 1.0e-6f, 0.0f);
+            vcdebugquerywaiting &= ~(1<<i);
+        }
+    }
+
+    static void begindebugtimer()
+    {
+        vcdebuggpuquery = false;
+        if(!debugvc) return;
+
+        polldebugtimer();
+        if(hasTQ && !deferquery)
+        {
+            if(!vcdebugquery[0]) glGenQueries_(VC_DEBUG_QUERY_COUNT, vcdebugquery);
+            if(!(vcdebugquerywaiting&(1<<vcdebugquerycycle)))
+            {
+                deferquery++;
+                glBeginQuery_(GL_TIME_ELAPSED_EXT, vcdebugquery[vcdebugquerycycle]);
+                vcdebuggpuquery = true;
+                return;
+            }
+        }
+
+        vcdebugcpustart = getclockmillis();
+    }
+
+    static void enddebugtimer()
+    {
+        if(!debugvc) return;
+        if(vcdebuggpuquery)
+        {
+            glEndQuery_(GL_TIME_ELAPSED_EXT);
+            deferquery--;
+            vcdebugquerywaiting |= 1<<vcdebugquerycycle;
+            vcdebugquerycycle = (vcdebugquerycycle + 1) % VC_DEBUG_QUERY_COUNT;
+            vcdebuggpuquery = false;
+        }
+        else vcdebugms = max(float(getclockmillis() - vcdebugcpustart), 0.0f);
+    }
+
+    static void cleanupdebugtimer()
+    {
+        if(vcdebugquery[0]) glDeleteQueries_(VC_DEBUG_QUERY_COUNT, vcdebugquery);
+        memset(vcdebugquery, 0, sizeof(vcdebugquery));
+        vcdebugquerywaiting = 0;
+        vcdebugquerycycle = 0;
+        vcdebuggpuquery = false;
+        vcdebugms = -1.0f;
     }
 
     static uchar weatherbyte(float n)
@@ -591,6 +658,8 @@ namespace volumetricClouds
         GLOBALPARAMF(vcloudatmobetamie, atmobetamie.x, atmobetamie.y, atmobetamie.z);
         GLOBALPARAMF(vcloudatmobetaozone, atmobetaozone.x, atmobetaozone.y, atmobetaozone.z);
 
+        begindebugtimer();
+
         glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
         glViewport(0, 0, vcw, vch);
         glDisable(GL_DEPTH_TEST);
@@ -765,6 +834,34 @@ namespace volumetricClouds
 
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
+
+        enddebugtimer();
+    }
+
+    bool debugview()
+    {
+        if(!debugvc) return false;
+
+        polldebugtimer();
+        if(vccompositetex && vccompositetexparams.z > 0.0f && vccompositetexparams.w > 0.0f)
+        {
+            int w = max(min(hudw, hudh)/3, 1),
+                h = max(int(ceilf(w * vccompositetexparams.w / max(vccompositetexparams.z, 1.0f))), 1);
+            SETSHADER(hudrect);
+            gle::colorf(1, 1, 1);
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, vccompositetex);
+            debugquad(0, 0, w, h, 0, 0, vccompositetexparams.z, vccompositetexparams.w);
+
+            glEnable(GL_BLEND);
+            draw_textf("volumetric clouds %.3f ms", 0, h + FONTH/4, max(vcdebugms, 0.0f));
+        }
+        else
+        {
+            glEnable(GL_BLEND);
+            draw_text("volumetric clouds inactive", 0, 0);
+        }
+        return true;
     }
 
     void cleanup()
@@ -821,6 +918,7 @@ namespace volumetricClouds
         }
         cleanupshadowmap();
         cleanupweathermap();
+        cleanupdebugtimer();
         vccompositetex = 0;
         vccompositetexparams = vec4(0, 0, 0, 0);
         vcw = vch = vcfullw = vcfullh = 0;

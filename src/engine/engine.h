@@ -840,6 +840,7 @@ namespace volumetricClouds
 
     extern void init();
     extern void render();
+    extern bool debugview();
     extern bool bindcomposite(int tmu = 0);
     extern const vec4 &compositetexparams();
     extern void getshadowparams(vec4 &bounds, vec4 &dome);
