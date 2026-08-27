@@ -17,7 +17,7 @@ VARP(emitmillis, 1, 17, 1000);
 static int lastemitframe = 0, emitoffset = 0;
 static bool canemit = false, regenemitters = false, canstep = false;
 
-static bool canemitparticles()
+bool canemitparticles()
 {
     return canemit || emitoffset;
 }
@@ -918,6 +918,7 @@ struct hazeRenderer : quadrenderer
 static partrenderer *parts[] =
 {
     new quadrenderer("<grey>packages/stain/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),      // blood spats (note: rgb is inverted)
+    new quadrenderer("packages/particle/grass.png", PT_PART|PT_FLIP|PT_RND4|PT_LERP|PT_COLLIDE),          // grass debris
     new trailrenderer("packages/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
     new quadrenderer("<grey>packages/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
     new quadrenderer("<grey>packages/particle/steam.png", PT_PART|PT_FLIP),                               // steam
@@ -1117,6 +1118,12 @@ static void regularsplash(int type, int color, int radius, int num, int fade, co
 bool canaddparticles()
 {
     return !minimized;
+}
+
+void particle_flying_flare(const vec &o, const vec &d, int fade, int type, int color, float size, int gravity)
+{
+    if(!canaddparticles()) return;
+    newparticle(o, d, fade, type, color, size, gravity);
 }
 
 void regular_particle_splash(int type, int num, int fade, const vec &p, int color, float size, int radius, int gravity, int delay)

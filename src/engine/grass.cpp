@@ -8,6 +8,7 @@ static void clearBurnField();
 
 static const int patchSize = 32, maxInstances = 1<<20, impulseMaxEvents = 64, impulseMaxPatch = 4,
                  burnFieldTexelSize = 8, burnFieldMaxSize = 2048;
+static const int IMPULSE_PLAYER = 2;
 
 VARP(grass, 0, 1, 1);
 VARP(grassdist, 0, 768, 10000);
@@ -61,6 +62,18 @@ FVAR(grassimpulseminstrength, 0, 0.01f, 10);
 VAR(grassimpulsebulletmergemillis, 0, 250, 500);
 FVAR(grassimpulsebulletmergedist, 0, 16, 64);
 
+VARP(grassplayerflatten, 0, 1, 1);
+FVARP(grassplayerflattendist, 0, 256, 10000);
+FVAR(grassplayerflattenradius, 1, 8, 64);
+FVAR(grassplayerflattenstrength, 0, 3, 5);
+VAR(grassplayerflattenmillis, 100, 600, 3000);
+FVAR(grassplayerflattenstep, 0.5f, 2, 32);
+
+VARP(grassimpactparticles, 0, 1, 1);
+VAR(grassplayerparticlemillis, 16, 80, 1000);
+FVAR(grassparticlesize, 0.1f, 0.5f, 8);
+FVAR(grassparticlebrightness, 0, 0.8f, 1);
+
 VAR(grassburnholdmillis, 0, 25000, 300000);
 VAR(grassburnfademillis, 100, 15000, 300000);
 VAR(grassburnpropagatemillis, 1, 500, 10000);
@@ -106,7 +119,8 @@ struct Impulse
 {
     vec position, direction;
     float radius, strength, propagationSpeed, falloff, radial;
-    int startTime, lifetime, type;
+    int startTime, lastRefresh, lastParticleTime, lifetime, type;
+    const dynent *owner;
     uint queryVersion;
 };
 
@@ -114,16 +128,44 @@ static vector<Impulse> impulseList;
 static hashtable<uint, vector<int> > impulseGrid(1<<10);
 static uint impulseQueryVersion = 0;
 
+struct GrassParticleEvent
+{
+    vec position, direction;
+    float radius, strength;
+    int type, spawnTime;
+};
+
+static vector<GrassParticleEvent> grassParticleEvents;
+
+static void queueGrassParticleEvent(const vec &position, const vec &direction, float radius, float strength, int type)
+{
+    if(!grassimpactparticles || (position.x < 0 && position.y < 0 && position.z < 0) || radius <= 0 || strength <= 0) return;
+    if(grassParticleEvents.length() >= impulseMaxEvents) grassParticleEvents.remove(0);
+
+    GrassParticleEvent &event = grassParticleEvents.add();
+    event.position = position;
+    event.direction = direction;
+    event.radius = radius;
+    event.strength = strength;
+    event.type = type;
+    event.spawnTime = lastmillis;
+}
+
 static float impulseRemainingStrength(const Impulse &impulse)
 {
-    float age = clamp((lastmillis - impulse.startTime)/float(max(impulse.lifetime, 1)), 0.0f, 1.0f);
+    int referenceTime = impulse.type == IMPULSE_PLAYER ? impulse.lastRefresh : impulse.startTime;
+    float age = clamp((lastmillis - referenceTime)/float(max(impulse.lifetime, 1)), 0.0f, 1.0f);
     return impulse.strength*(1.0f - age);
 }
 
 static void pruneImpulses()
 {
-    loopvrev(impulseList) if(lastmillis - impulseList[i].startTime >= impulseList[i].lifetime)
-        impulseList.removeunordered(i);
+    loopvrev(impulseList)
+    {
+        const Impulse &impulse = impulseList[i];
+        int referenceTime = impulse.type == IMPULSE_PLAYER ? impulse.lastRefresh : impulse.startTime;
+        if(lastmillis - referenceTime >= impulse.lifetime) impulseList.removeunordered(i);
+    }
 
     while(impulseList.length() > impulseMaxEvents)
     {
@@ -134,10 +176,13 @@ static void pruneImpulses()
     }
 }
 
-void addImpulse(const vec &position, const vec &direction, float radius, float strength, int lifetime, int type, float propagationSpeed, float falloff, float radial)
+void addImpulse(const vec &position, const vec &direction, float radius, float strength, int lifetime, int type, float propagationSpeed,
+                float falloff, float radial)
 {
-    if(!grassimpulses || (position.x < 0 && position.y < 0 && position.z < 0) || radius <= 0 || strength <= 0 || lifetime <= 0 || (type != IMPULSE_BULLET && type != IMPULSE_EXPLOSION)) return;
+    if(!grassimpulses || (position.x < 0 && position.y < 0 && position.z < 0) || radius <= 0 || strength <= 0 || lifetime <= 0 ||
+       (type != IMPULSE_BULLET && type != IMPULSE_EXPLOSION)) return;
 
+    queueGrassParticleEvent(position, direction, radius, strength, type);
     pruneImpulses();
     int effectLifetime = lifetime + (grassimpulseafterwind > 0 ? grassimpulseafterwindmillis : 0);
     vec normalizedDir = vec(direction).safenormalize();
@@ -149,7 +194,8 @@ void addImpulse(const vec &position, const vec &direction, float radius, float s
         {
             Impulse &impulse = impulseList[i];
 
-            if(impulse.type != type || lastmillis - impulse.startTime > grassimpulsebulletmergemillis || impulse.position.squaredist(position) > mergeDistSquared) continue;
+            if(impulse.type != type || lastmillis - impulse.startTime > grassimpulsebulletmergemillis ||
+               impulse.position.squaredist(position) > mergeDistSquared) continue;
 
             impulse.position.add(position).mul(0.5f);
             impulse.direction.add(normalizedDir).safenormalize();
@@ -157,6 +203,8 @@ void addImpulse(const vec &position, const vec &direction, float radius, float s
             impulse.strength = max(impulse.strength, strength);
             impulse.lifetime = max(impulse.lifetime, effectLifetime);
             impulse.startTime = lastmillis;
+            impulse.lastRefresh = lastmillis;
+            impulse.lastParticleTime = 0;
             impulse.falloff = max(impulse.falloff, falloff);
             impulse.radial = max(impulse.radial, radial);
             return;
@@ -188,14 +236,92 @@ void addImpulse(const vec &position, const vec &direction, float radius, float s
     impulse.falloff = clamp(falloff, 0.0f, 1.0f);
     impulse.radial = max(radial, 0.0f);
     impulse.startTime = lastmillis;
+    impulse.lastRefresh = lastmillis;
+    impulse.lastParticleTime = 0;
     impulse.lifetime = effectLifetime;
     impulse.type = type;
+    impulse.owner = NULL;
     impulse.queryVersion = 0;
+}
+
+static Impulse &addPlayerImpulse(const dynent *owner, const vec &position, const vec &direction, float radius)
+{
+    int target = impulseList.length();
+
+    if(target >= impulseMaxEvents)
+    {
+        target = 0;
+        loopv(impulseList) if(impulseRemainingStrength(impulseList[i]) < impulseRemainingStrength(impulseList[target])) target = i;
+    }
+    else impulseList.add();
+
+    Impulse &impulse = impulseList[target];
+    impulse.position = position;
+    impulse.direction = vec(direction.x, direction.y, 0).safenormalize();
+    impulse.radius = radius;
+    impulse.strength = grassplayerflattenstrength;
+    impulse.propagationSpeed = 0;
+    impulse.falloff = 1;
+    impulse.radial = 1;
+    impulse.startTime = impulse.lastRefresh = lastmillis;
+    impulse.lastParticleTime = lastmillis;
+    impulse.lifetime = grassplayerflattenmillis;
+    impulse.type = IMPULSE_PLAYER;
+    impulse.owner = owner;
+    impulse.queryVersion = 0;
+    return impulse;
+}
+
+static void updatePlayerImpulses()
+{
+    if(!grassimpulses || !grassplayerflatten || grassplayerflattenstrength <= 0 || grassplayerflattendist <= 0) return;
+
+    loopi(game::numdynents())
+    {
+        dynent *d = game::iterdynents(i);
+        if(!d || d->type != ENT_PLAYER || d->state != CS_ALIVE || d->physstate <= PHYS_FALL || d->inwater) continue;
+
+        vec position = d->feetpos(0.2f);
+        if(camera1->o.squaredist(position) > grassplayerflattendist*grassplayerflattendist) continue;
+
+        vec direction(d->vel.x, d->vel.y, 0);
+        float radius = max(grassplayerflattenradius, d->radius), step = min(grassplayerflattenstep, radius);
+        Impulse *contact = NULL;
+
+        loopv(impulseList) if(impulseList[i].type == IMPULSE_PLAYER && impulseList[i].owner == d)
+        {
+            contact = &impulseList[i];
+            break;
+        }
+
+        if(contact && contact->position.squaredist(position) >= step*step)
+        {
+            int lastParticleTime = contact->lastParticleTime;
+            if(lastmillis - lastParticleTime >= grassplayerparticlemillis)
+            {
+                queueGrassParticleEvent(position, direction, radius, grassplayerflattenstrength, IMPULSE_PLAYER);
+                lastParticleTime = lastmillis;
+            }
+            contact->owner = NULL;
+            contact = &addPlayerImpulse(d, position, direction, radius);
+            contact->lastParticleTime = lastParticleTime;
+        }
+        if(!contact) contact = &addPlayerImpulse(d, position, direction, radius);
+        else
+        {
+            if(direction.squaredlen() > 1e-4f) contact->direction = direction.safenormalize();
+            contact->radius = radius;
+            contact->strength = grassplayerflattenstrength;
+            contact->lifetime = grassplayerflattenmillis;
+            contact->lastRefresh = lastmillis;
+        }
+    }
 }
 
 void clearImpulses()
 {
     impulseList.setsize(0);
+    grassParticleEvents.setsize(0);
     impulseGrid.clear();
     impulseQueryVersion = 0;
 }
@@ -349,8 +475,12 @@ static bool impulseIsRenderable(const Impulse &impulse)
 
     if(strength <= grassimpulseminstrength || grassimpulsedist <= 0) return false;
 
-    float dist = max(camera1->o.dist(impulse.position) - impulse.radius, 0.0f),
-          limit = impulse.type == IMPULSE_BULLET ? min(grassimpulsebulletdist, grassimpulsedist) : grassimpulsedist;
+    float centerDist = camera1->o.dist(impulse.position),
+          dist = impulse.type == IMPULSE_PLAYER ? centerDist : max(centerDist - impulse.radius, 0.0f), limit;
+
+    if(impulse.type == IMPULSE_BULLET) limit = min(grassimpulsebulletdist, grassimpulsedist);
+    else if(impulse.type == IMPULSE_PLAYER) limit = min(grassplayerflattendist, grassimpulsedist);
+    else limit = grassimpulsedist;
 
     return dist <= limit && isvisiblesphere(impulse.radius + grassheight, impulse.position) != VFC_NOT_VISIBLE;
 }
@@ -1144,6 +1274,92 @@ static bool findBurnParticlePosition(vtxarray *vas, BurnEvent &event, vec &resul
     return matches > 0;
 }
 
+static bool findGrassParticlePosition(vtxarray *vas, const GrassParticleEvent &event, vec &result)
+{
+    float searchRadius = max(event.radius, grassstep*2), searchRadiusSquared = searchRadius*searchRadius,
+          closestDistance = searchRadiusSquared;
+    bool found = false;
+
+    for(vtxarray *va = vas; va; va = va->next)
+    {
+        if(!va->grassBuf || va->grassPatches.empty() || va->occluded >= OCCLUDE_GEOM || va->distance > grassdist) continue;
+
+        loopv(va->grassPatches)
+        {
+            const Patch &patch = va->grassPatches[i];
+            float reach = patch.radius + searchRadius + grassheight;
+            if(patch.center.squaredist(event.position) > reach*reach) continue;
+
+            loopk(patch.numParticlePositions)
+            {
+                vec candidate(patch.particlePositions[k]);
+                float distance = candidate.squaredist(event.position);
+                if(distance > closestDistance) continue;
+                closestDistance = distance;
+                result = candidate;
+                found = true;
+            }
+        }
+    }
+    return found;
+}
+
+static void emitGrassParticleBurst(const GrassParticleEvent &event, const vec &position)
+{
+    int count = event.type == IMPULSE_EXPLOSION ? 32 : (event.type == IMPULSE_BULLET ? 8 : 3);
+    int fade = event.type == IMPULSE_EXPLOSION ? 1100 : 650;
+    float speed = event.type == IMPULSE_EXPLOSION ? 400.0f : 120.0f,
+          verticalSpeed = event.type == IMPULSE_EXPLOSION ? 300.0f : 160.0f;
+
+    bvec particleColor(grasscolour);
+    particleColor.scale(int(grassparticlebrightness*255), 255);
+    vec travel(event.direction.x, event.direction.y, 0);
+    travel.safenormalize();
+
+    loopi(count)
+    {
+        float angle = rndscale(2*M_PI), radialSpeed = speed*(0.45f + rndscale(0.75f));
+        vec velocity(cosf(angle)*radialSpeed, sinf(angle)*radialSpeed, verticalSpeed*(0.55f + rndscale(0.75f)));
+
+        if(travel.squaredlen() > 1e-4f)
+            velocity.add(vec(travel).mul(speed*(event.type == IMPULSE_BULLET ? 0.45f : 0.18f)));
+
+        vec origin(position);
+        origin.x += rndscale(2.0f) - 1.0f;
+        origin.y += rndscale(2.0f) - 1.0f;
+        origin.z += 0.5f;
+        particle_flying_flare(origin, velocity, fade + rnd(fade/2), PART_GRASS, particleColor.tohexcolor(),
+                              grassparticlesize*(0.75f + rndscale(0.5f)), 2 + rnd(2));
+    }
+}
+
+static void emitGrassParticles(vtxarray *vas)
+{
+    if(!grassimpactparticles)
+    {
+        grassParticleEvents.setsize(0);
+        return;
+    }
+
+    loopvrev(grassParticleEvents)
+    {
+        GrassParticleEvent &event = grassParticleEvents[i];
+        float limit = event.type == IMPULSE_BULLET ? min(grassimpulsebulletdist, grassimpulsedist) :
+                      event.type == IMPULSE_PLAYER ? min(grassplayerflattendist, grassimpulsedist) : grassimpulsedist;
+
+        if(lastmillis - event.spawnTime > 500 || camera1->o.squaredist(event.position) > limit*limit)
+        {
+            grassParticleEvents.removeunordered(i);
+            continue;
+        }
+        if(!canemitparticles()) continue;
+
+        vec position;
+        if(findGrassParticlePosition(vas, event, position)) emitGrassParticleBurst(event, position);
+        grassParticleEvents.removeunordered(i);
+    }
+}
+
 static void emitBurnParticles(vtxarray *vas)
 {
     if(!grassburnparticles) return;
@@ -1287,9 +1503,10 @@ static void collectPatchImpulses(const Patch &patch, PatchImpulses &selected, De
     {
         const Impulse &impulse = impulseList[indices[i]];
         float ageSeconds = max(lastmillis - impulse.startTime, 0)/1000.0f,
+              releaseSeconds = impulse.type == IMPULSE_PLAYER ? max(lastmillis - impulse.lastRefresh, 0)/1000.0f : impulse.direction.z,
               behavior = impulse.type == IMPULSE_EXPLOSION ? max(impulse.propagationSpeed, 0.001f) : impulse.radial;
         selected.positions[i] = vec4(impulse.position, impulse.radius);
-        selected.directions[i] = vec4(impulse.direction, impulse.strength);
+        selected.directions[i] = vec4(impulse.direction.x, impulse.direction.y, releaseSeconds, impulse.strength);
         selected.params[i] = vec4(float(impulse.type), ageSeconds, behavior, impulse.lifetime/1000.0f);
     }
 }
@@ -1472,11 +1689,13 @@ void render()
     if(!grass || !grassdist || glversion < 400 || !glDrawElementsInstanced_ || !visibleva) return;
 
     DebugStats stats, *statsPtr = grassstats ? &stats : NULL;
+    updatePlayerImpulses();
     buildImpulseGrid();
     updateBurnField(statsPtr);
 
     if(!burnTexture) burnTexture = textureload("packages/noise/burning_grass.jpg", 0, true, false);
 
+    emitGrassParticles(visibleva);
     emitBurnParticles(visibleva);
     timer *cpuTimer = begintimer("grass", false), *gpuTimer = begintimer("grass");
     renderPatches(visibleva, false, 0, statsPtr);

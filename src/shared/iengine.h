@@ -326,6 +326,7 @@ extern void resethudshader();
 enum
 {
     PART_BLOOD = 0,
+    PART_GRASS,
     PART_WATER,
     PART_SMOKE,
     PART_STEAM,
@@ -345,7 +346,9 @@ enum
     PART_LENS_FLARE
 };
 
+extern bool canemitparticles();
 extern bool canaddparticles();
+extern void particle_flying_flare(const vec &o, const vec &d, int fade, int type, int color, float size, int gravity = 0);
 extern void regular_particle_splash(int type, int num, int fade, const vec &p, int color = 0xFFFFFF, float size = 1.0f, int radius = 150, int gravity = 2, int delay = 0);
 extern void regular_particle_flame(int type, const vec &p, float radius, float height, int color, int density = 3, float scale = 2.0f, float speed = 200.0f, float fade = 600.0f, int gravity = -15);
 extern void particle_splash(int type, int num, int fade, const vec &p, int color = 0xFFFFFF, float size = 1.0f, int radius = 150, int gravity = 2);
