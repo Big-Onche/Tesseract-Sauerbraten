@@ -1391,6 +1391,8 @@ void resetmap()
     clearslots();
     clearparticles();
     clearstains();
+    grass::clearImpulses();
+    grass::clearBurnEvents();
     cleardamagescreen();
     clearsleep();
     cancelsel();
@@ -1634,6 +1636,5 @@ void clampSpotAngles()
         if(e.type==ET_SPOTLIGHT && e.attr1 > maxspotangle) e.attr1 = maxspotangle;
     }
 }
-
 
 

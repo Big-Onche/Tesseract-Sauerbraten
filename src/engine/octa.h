@@ -92,16 +92,35 @@ static const surfaceinfo ambientsurface = {{LMID_AMBIENT, LMID_AMBIENT}, 0, LAYE
 static const surfaceinfo brightsurface = {{LMID_BRIGHT, LMID_AMBIENT}, 0, LAYER_TOP};
 static const surfaceinfo brightbottomsurface = {{LMID_AMBIENT, LMID_BRIGHT}, 0, LAYER_BOTTOM};
 
-struct grasstri
+struct Slot;
+
+namespace grass
 {
-    vec v[4];
-    int numv;
-    plane surface;
-    vec center;
-    float radius;
-    float minz, maxz;
-    ushort texture, blend;
-};
+    struct Triangle
+    {
+        vec v[4];
+        int numVerts;
+        plane surface;
+        vec center;
+        float radius;
+        float minZ, maxZ;
+        ushort texture, blend;
+    };
+
+    enum { MAX_PATCH_PARTICLE_POSITIONS = 16 };
+
+    struct Patch
+    {
+        vec center;
+        float radius;
+        Slot *slot;
+        int offset, count, sourceTris, shadowCount[2];
+        vec4 particlePositions[MAX_PATCH_PARTICLE_POSITIONS];
+        int numParticlePositions;
+        ivec blendPos;
+        ushort texture, blend;
+    };
+}
 
 struct occludequery
 {
@@ -151,7 +170,7 @@ struct vtxarray
     vertex *vdata;           // vertex data
     ushort voffset, eoffset, skyoffset, decaloffset; // offset into vertex data
     ushort *edata, *skydata, *decaldata; // vertex indices
-    GLuint vbuf, ebuf, skybuf, decalbuf; // VBOs
+    GLuint vbuf, ebuf, skybuf, decalbuf, grassBuf; // VBOs
     ushort minvert, maxvert; // DRE info
     elementset *texelems, *decalelems;   // List of element indices sets (range) per texture
     materialsurface *matbuf; // buffer of material surfaces
@@ -170,7 +189,8 @@ struct vtxarray
     uchar curvfc, occluded;
     occludequery *query;
     vector<octaentities *> mapmodels, decals;
-    vector<grasstri> grasstris;
+    vector<grass::Triangle> grassTris;
+    vector<grass::Patch> grassPatches;
     int hasmerges, mergelevel;
     int shadowmask, shadowtransparent;
 };
@@ -358,4 +378,3 @@ enum
 #define GENFACEVERTS(x0,x1, y0,y1, z0,z1, c0,c1, r0,r1, d0,d1) \
     GENFACEVERTSXY(x0,x1, y0,y1, z0,z1, c0,c1, r0,r1, d0,d1) \
     GENFACEVERTSZ(x0,x1, y0,y1, z0,z1, c0,c1, r0,r1, d0,d1)
-

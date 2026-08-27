@@ -1750,7 +1750,7 @@ void cleanupva()
     clearvas(worldroot);
     clearqueries();
     cleanupbb();
-    cleanupgrass();
+    grass::cleanup();
 }
 
 void setupgeom(renderstate &cur)
@@ -2819,4 +2819,3 @@ void rendershadowmesh(shadowmesh *m)
     gle::clearebo();
     gle::clearvbo();
 }
-

@@ -245,6 +245,10 @@ PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData_ = NULL;
 // GL_ARB_texture_storage
 PFNGLTEXSTORAGE2DPROC glTexStorage2D_ = NULL;
 
+PFNGLDRAWARRAYSINSTANCEDPROC glDrawArraysInstanced_ = NULL;
+PFNGLDRAWELEMENTSINSTANCEDPROC glDrawElementsInstanced_ = NULL;
+PFNGLVERTEXATTRIBDIVISORPROC glVertexAttribDivisor_ = NULL;
+
 void *getprocaddress(const char *name)
 {
     return SDL_GL_GetProcAddress(name);
@@ -528,6 +532,13 @@ void gl_checkextensions()
     if(glslversion < 120) fatal("GLSL 1.20 or greater is required!");
 
     parseglexts();
+
+    if(glversion >= 330 || (hasext("GL_ARB_draw_instanced") && hasext("GL_ARB_instanced_arrays")))
+    {
+        glDrawArraysInstanced_ = (PFNGLDRAWARRAYSINSTANCEDPROC)getprocaddress("glDrawArraysInstanced");
+        glDrawElementsInstanced_ = (PFNGLDRAWELEMENTSINSTANCEDPROC)getprocaddress("glDrawElementsInstanced");
+        glVertexAttribDivisor_ = (PFNGLVERTEXATTRIBDIVISORPROC)getprocaddress("glVertexAttribDivisor");
+    }
 
     GLint texsize = 0, texunits = 0, vtexunits = 0, cubetexsize = 0, drawbufs = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &texsize);
@@ -2497,8 +2508,7 @@ void gl_drawview()
     if(wireframe && editmode) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     else if(limitsky() && editmode && showsky) renderexplicitsky(true);
 
-    generategrass();
-    rendergrass();
+    grass::render();
     GLERROR;
 
     renderao();
@@ -2937,4 +2947,3 @@ void cleanupgl()
     cleanupscreenquad();
     gle::cleanup();
 }
-
