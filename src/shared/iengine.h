@@ -554,6 +554,19 @@ extern void neterr(const char *s, bool disc = true);
 extern void gets2c();
 extern void notifywelcome();
 
+// grass interaction events exposed to game code
+namespace grass
+{
+    enum
+    {
+        IMPULSE_BULLET = 0,
+        IMPULSE_EXPLOSION
+    };
+
+    extern void addImpulse(const vec &position, const vec &direction, float radius, float strength, int lifetime, int type, float propagationSpeed = 0, float falloff = 1, float radial = 0);
+    extern void addBurnEvent(const vec &center, float radius, int lifetime = -1);
+}
+
 // crypto
 extern void genprivkey(const char *seed, vector<char> &privstr, vector<char> &pubstr);
 extern bool calcpubkey(const char *privstr, vector<char> &pubstr);
@@ -564,4 +577,3 @@ extern void freepubkey(void *pubkey);
 extern void *genchallenge(void *pubkey, const void *seed, int seedlen, vector<char> &challengestr);
 extern void freechallenge(void *answer);
 extern bool checkchallenge(const char *answerstr, void *correct);
-

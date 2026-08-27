@@ -4684,6 +4684,7 @@ void rendercsmshadowmaps()
         shadowside = i;
 
         rendershadowmapworld();
+        grass::renderShadow(i);
         rendershadowmodelbatches();
     }
 
@@ -5552,4 +5553,3 @@ void cleanuplights()
     lensFlares::cleanup();
     cleanupaa();
 }
-

@@ -524,6 +524,16 @@ extern PFNGLVERTEXATTRIBPOINTERPROC      glVertexAttribPointer_;
 extern PFNGLDRAWBUFFERSPROC glDrawBuffers_;
 #endif
 
+// GL_ARB_draw_instanced / GL_ARB_instanced_arrays
+#ifdef __APPLE__
+typedef void (APIENTRYP PFNGLDRAWARRAYSINSTANCEDPROC) (GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
+typedef void (APIENTRYP PFNGLDRAWELEMENTSINSTANCEDPROC) (GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount);
+typedef void (APIENTRYP PFNGLVERTEXATTRIBDIVISORPROC) (GLuint index, GLuint divisor);
+#endif
+extern PFNGLDRAWARRAYSINSTANCEDPROC glDrawArraysInstanced_;
+extern PFNGLDRAWELEMENTSINSTANCEDPROC glDrawElementsInstanced_;
+extern PFNGLVERTEXATTRIBDIVISORPROC glVertexAttribDivisor_;
+
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
 #define GL_FRAGMENT_SHADER_DERIVATIVE_HINT 0x8B8B
@@ -840,4 +850,3 @@ extern PFNGLGETDEBUGMESSAGELOGPROC glGetDebugMessageLog_;
 
 // GL_ARB_copy_image
 extern PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData_;
-

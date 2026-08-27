@@ -276,7 +276,7 @@ struct vacollect : verthash
     vector<ushort> skyindices;
     vector<sortkey> texs;
     vector<decalkey> decaltexs;
-    vector<grasstri> grasstris;
+    vector<grass::Triangle> grassTris;
     vector<materialsurface> matsurfs;
     vector<octaentities *> mapmodels, decals, extdecals;
     int worldtris, skytris, decaltris;
@@ -296,7 +296,7 @@ struct vacollect : verthash
         mapmodels.setsize(0);
         decals.setsize(0);
         extdecals.setsize(0);
-        grasstris.setsize(0);
+        grassTris.setsize(0);
         texs.setsize(0);
         decaltexs.setsize(0);
         alphamin = refractmin = skymin = vec(1e16f, 1e16f, 1e16f);
@@ -453,6 +453,7 @@ struct vacollect : verthash
 
         va->verts = verts.length();
         va->tris = worldtris/3;
+        va->grassBuf = 0;
         va->vbuf = 0;
         va->vdata = 0;
         va->minvert = 0;
@@ -609,10 +610,11 @@ struct vacollect : verthash
             }
         }
 
-        if(grasstris.length())
+        if(grassTris.length())
         {
-            va->grasstris.move(grasstris);
-            loadgrassshaders();
+            va->grassTris.move(grassTris);
+            grass::build(va);
+            grass::loadShaders();
         }
 
         if(mapmodels.length()) va->mapmodels.put(mapmodels.getbuf(), mapmodels.length());
@@ -621,7 +623,7 @@ struct vacollect : verthash
 
     bool emptyva()
     {
-        return verts.empty() && matsurfs.empty() && skyindices.empty() && grasstris.empty() && mapmodels.empty() && decals.empty();
+        return verts.empty() && matsurfs.empty() && skyindices.empty() && grassTris.empty() && mapmodels.empty() && decals.empty();
     }
 } vc;
 
@@ -762,7 +764,7 @@ void addtris(VSlot &vslot, int orient, const sortkey &key, vertex *verts, int *i
 
 void addgrasstri(int face, vertex *verts, int numv, ushort texture, int layer)
 {
-    grasstri &g = vc.grasstris.add();
+    grass::Triangle &g = vc.grassTris.add();
     int i1, i2, i3, i4;
     if(numv <= 3 && face%2) { i1 = face+1; i2 = face+2; i3 = i4 = 0; }
     else { i1 = 0; i2 = face+1; i3 = face+2; i4 = numv > 3 ? face+3 : i3; }
@@ -770,13 +772,13 @@ void addgrasstri(int face, vertex *verts, int numv, ushort texture, int layer)
     g.v[1] = verts[i2].pos;
     g.v[2] = verts[i3].pos;
     g.v[3] = verts[i4].pos;
-    g.numv = numv;
+    g.numVerts = numv;
 
     g.surface.toplane(g.v[0], g.v[1], g.v[2]);
-    if(g.surface.z <= 0) { vc.grasstris.pop(); return; }
+    if(g.surface.z <= 0) { vc.grassTris.pop(); return; }
 
-    g.minz = min(min(g.v[0].z, g.v[1].z), min(g.v[2].z, g.v[3].z));
-    g.maxz = max(max(g.v[0].z, g.v[1].z), max(g.v[2].z, g.v[3].z));
+    g.minZ = min(min(g.v[0].z, g.v[1].z), min(g.v[2].z, g.v[3].z));
+    g.maxZ = max(max(g.v[0].z, g.v[1].z), max(g.v[2].z, g.v[3].z));
 
     g.center = vec(0, 0, 0);
     loopk(numv) g.center.add(g.v[k]);
@@ -1210,6 +1212,7 @@ void destroyva(vtxarray *va, bool reparent)
     if(va->ebuf) destroyvbo(va->ebuf);
     if(va->skybuf) destroyvbo(va->skybuf);
     if(va->decalbuf) destroyvbo(va->decalbuf);
+    grass::destroy(va);
     if(va->texelems) delete[] va->texelems;
     if(va->decalelems) delete[] va->decalelems;
     if(va->matbuf) delete[] va->matbuf;
@@ -1763,4 +1766,3 @@ void recalc()
 }
 
 COMMAND(recalc, "");
-

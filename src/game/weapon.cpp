@@ -452,6 +452,16 @@ namespace game
 
     void explode(bool local, fpsent *owner, const vec &v, dynent *safe, int damage, int gun)
     {
+        if(gun==GUN_RL || gun==GUN_GL)
+        {
+            float radius = max(float(guns[gun].exprad), 1.0f),
+                  strength = clamp(0.75f + radius/1000.0f, 0.8f, 1.0f);
+            int lifetime = clamp(550 + guns[gun].exprad/2, 500, 900);
+            float wavespeed = radius/(lifetime*0.00055f);
+            grass::addImpulse(v, vec(0, 0, 0), radius*3, strength, lifetime, grass::IMPULSE_EXPLOSION, wavespeed, 0.18f);
+            grass::addBurnEvent(v, guns[gun].exprad*0.20f);
+        }
+
         particle_splash(PART_SPARK, 200, 300, v, 0xB49B4B, 0.24f);
         playsound(gun!=GUN_GL ? S_RLHIT : S_FEXPLODE, &v);
         int color = gun!=GUN_GL ? 0xFF8080 : 0x80FFFF;
@@ -672,6 +682,7 @@ namespace game
 
                 loopi(guns[gun].rays)
                 {
+                    grass::addImpulse(rays[i], vec(rays[i]).sub(from), 18.0f, 0.8f, 450, grass::IMPULSE_BULLET, 0, 0.35f, 0.4f);
                     particle_splash(PART_SPARK, 20, 250, rays[i], 0xB49B4B, 0.24f);
                     if(improvedparticles) particle_splash(PART_SMOKE, 2, 750, rays[i], 0x554433, 4.0f, 30, -100);
                     particle_flare(hudgunorigin(gun, from, rays[i], d), rays[i], 300, PART_STREAK, 0xFFC864, 0.28f);
@@ -690,6 +701,7 @@ namespace game
             case GUN_PISTOL:
             {
                 bool isCg = (gun==GUN_CG);
+                grass::addImpulse(to, vec(to).sub(from), isCg ? 24.0f : 18.0f, isCg ? 1.0f : 0.8f, isCg ? 600 : 450, grass::IMPULSE_BULLET, 0, 0.35f, 0.4f);
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
                 if(improvedparticles) particle_splash(PART_SMOKE, 3, 750, to, 0x554433, 5.0f, 40, -100);
                 particle_flare(hudgunorigin(gun, from, to, d), to, 600, PART_STREAK, 0xFFC864, 0.28f);
@@ -743,6 +755,7 @@ namespace game
             }
 
             case GUN_RIFLE:
+                grass::addImpulse(to, vec(to).sub(from), 28.0f, 1.0f, 600, grass::IMPULSE_BULLET, 0, 0.35f, 0.4f);
                 particle_splash(PART_SPARK, 200, 250, to, 0xB49B4B, 0.24f);
                 if(improvedparticles) particle_splash(PART_SMOKE, 4, 1000, to, 0x4A3A3A, 5.0f, 40, -100);
                 particle_trail(PART_SMOKE, 500, hudgunorigin(gun, from, to, d), to, 0x404040, 0.6f, 20);
@@ -1104,4 +1117,3 @@ namespace game
         }
     }
 };
-

@@ -61,7 +61,7 @@ CLIENT_LIBS= -F../sauerbraten.app/Contents/Frameworks/ -framework SDL2 -framewor
 CLIENT_LIBS+= -framework OpenAL -lsndfile -framework CoreAudio -framework AudioToolbox
 CLIENT_LIBS+= -framework AudioUnit -framework OpenGL -framework Cocoa -lz -Lenet -lenet
 else
-CLIENT_INCLUDES= $(INCLUDES) -I/usr/X11R6/include `sdl2-config --cflags`
+CLIENT_INCLUDES= $(INCLUDES) -Iinclude -I/usr/X11R6/include `sdl2-config --cflags`
 CLIENT_LIBS= -Lenet -lenet -L/usr/X11R6/lib -lX11 `sdl2-config --libs` -lSDL2_image -lopenal -lsndfile -lz -lGL
 endif
 endif
@@ -85,11 +85,14 @@ CLIENT_OBJS= \
 	engine/bih.o \
 	engine/blend.o \
 	engine/client.o	\
+	engine/clouds.o \
 	engine/command.o \
 	engine/console.o \
 	engine/dynlight.o \
 	engine/grass.o \
+	engine/heathaze.o \
 	engine/light.o \
+	engine/lensflare.o \
 	engine/main.o \
 	engine/material.o \
 	engine/menus.o \

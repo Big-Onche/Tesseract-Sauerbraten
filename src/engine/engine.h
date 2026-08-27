@@ -428,7 +428,7 @@ extern void updatevabbs(bool force = false);
 extern int oqfrags;
 extern float alphafrontsx1, alphafrontsx2, alphafrontsy1, alphafrontsy2, alphabacksx1, alphabacksx2, alphabacksy1, alphabacksy2, alpharefractsx1, alpharefractsx2, alpharefractsy1, alpharefractsy2;
 extern uint alphatiles[LIGHTTILE_MAXH];
-extern vtxarray *visibleva;
+extern vtxarray *visibleva, *shadowva;
 
 extern void visiblecubes(bool cull = true);
 extern void setvfcP(const vec &bbmin = vec(-1, -1, -1), const vec &bbmax = vec(1, 1, 1));
@@ -792,10 +792,20 @@ extern void closemumble();
 extern void updatemumble();
 
 // grass
-extern void loadgrassshaders();
-extern void generategrass();
-extern void rendergrass();
-extern void cleanupgrass();
+namespace grass
+{
+    extern void build(vtxarray *va);
+    extern void destroy(vtxarray *va);
+    extern void loadShaders();
+    extern void render();
+    extern void renderShadow(int cascade);
+    extern void clearImpulses();
+    extern float grassburnflamethrowerradius;
+    extern void carryBurnEvent(size_t owner, const vec &center, float radius);
+    extern void removeBurnEvent(size_t owner);
+    extern void clearBurnEvents();
+    extern void cleanup();
+}
 
 // blendmap
 extern int blendpaintmode;
@@ -862,4 +872,3 @@ namespace lensFlares // procedural ones
 #endif
 
 #endif
-
