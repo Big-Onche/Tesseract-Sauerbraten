@@ -26,7 +26,7 @@ VARP(grassloddist, 8, 192, 10000);
 VAR(grasslodtransition, 0, 64, 256);
 FVAR(grassfardensity, 0.05f, 1, 1);
 
-FVAR(grassrootdarkness, 0, 1.5f, 2.0f);
+FVAR(grassrootdarkness, 0, 1, 2);
 FVAR(grassrootdarknesspower, 0.25f, 5.0f, 16.0f);
 
 VARP(grassshadowcascades, 0, 2, 2);
