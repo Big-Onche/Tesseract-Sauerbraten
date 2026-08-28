@@ -1,5 +1,5 @@
 CFLAGS=-O3 -fomit-frame-pointer
-override CFLAGS:= $(CFLAGS) -Iinclude $(shell ./check_cflags.sh $(CC) $(CFLAGS))
+override CFLAGS:= $(CFLAGS) -Iinclude $(shell sh ./check_cflags.sh $(CC) $(CFLAGS))
 
 OBJS= \
 	callbacks.o \
@@ -16,6 +16,8 @@ libenet.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 default: libenet.a
+
+$(OBJS): Makefile check_cflags.sh
 
 clean:
 	-$(RM) libenet.a $(OBJS)
