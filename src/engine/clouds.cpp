@@ -23,6 +23,7 @@ namespace volumetricClouds
     GLuint vcclaritytex = 0, vcclarityfbo = 0;
     GLuint vcshadowtex = 0, vcshadowfbo = 0;
     GLuint vcweathertex = 0;
+    GLuint vcnoisetex = 0;
     GLuint vccompositetex = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
@@ -34,7 +35,7 @@ namespace volumetricClouds
     int vcweatherseed = 1337;
     bool vcweatherdirty = true;
 
-    static const int VC_WEATHER_MAP_SIZE = 512;
+    static const int VC_WEATHER_MAP_SIZE = 512, VC_NOISE_TEXTURE_SIZE = 64, VC_NOISE_TEXTURE_SEED = 0;
     enum VCDebugPass
     {
         VC_DEBUG_RAYMARCH = 0,
@@ -114,6 +115,43 @@ namespace volumetricClouds
     static float normalizenoise(float n)
     {
         return clamp(n * 0.5f + 0.5f, 0.0f, 1.0f);
+    }
+
+    static float cloudnoisehash(int x, int y, int z)
+    {
+        // Seed zero intentionally matches the existing shader hash lattice as
+        // closely as CPU/GPU floating-point implementations allow.
+        float phase = x * 127.1f + y * 311.7f + z * 74.7f + VC_NOISE_TEXTURE_SEED;
+        float n = sinf(phase) * 43758.5453123f;
+        return n - floorf(n);
+    }
+
+    static void cleanupnoisetexture()
+    {
+        if(!vcnoisetex) return;
+        glDeleteTextures(1, &vcnoisetex);
+        vcnoisetex = 0;
+    }
+
+    static void ensurenoisetexture()
+    {
+        if(vcnoisetex) return;
+
+        const int size = VC_NOISE_TEXTURE_SIZE, total = size * size * size;
+        vector<uchar> pixels;
+        uchar *volume = pixels.pad(total);
+        loopk(size) loopj(size) loopi(size)
+            volume[(k * size + j) * size + i] = uchar(cloudnoisehash(i, j, k) * 255.0f + 0.5f);
+
+        glGenTextures(1, &vcnoisetex);
+        create3dtexture(vcnoisetex, size, size, size, volume, 0, 2, GL_R8);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glGenerateMipmap_(GL_TEXTURE_3D);
+        glBindTexture(GL_TEXTURE_3D, 0);
     }
 
     static float noisesizemul()
@@ -581,6 +619,11 @@ namespace volumetricClouds
         conoutf(CON_INFO, "regenerated volumetric cloud weather map with seed %d", *seed);
     });
 
+    void initnoise()
+    {
+        ensurenoisetexture();
+    }
+
     void init()
     {
         if(!volumetricclouds || !vcconfigured) return;
@@ -674,6 +717,7 @@ namespace volumetricClouds
             vcfullh = viewh;
         }
         if(!ensureWeatherMap()) return;
+        ensurenoisetexture();
 
         vec4 cloudbounds, clouddome;
         calcshadowparams(cloudbounds, clouddome);
@@ -777,6 +821,8 @@ namespace volumetricClouds
         glActiveTexture_(GL_TEXTURE9);
         if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
         else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
+        glActiveTexture_(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_3D, vcnoisetex);
         glActiveTexture_(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vcweathertex);
 
@@ -1065,7 +1111,7 @@ namespace volumetricClouds
         return true;
     }
 
-    void cleanup()
+    void cleanup(bool shutdown)
     {
         if(vcfbo)
         {
@@ -1119,6 +1165,7 @@ namespace volumetricClouds
         }
         cleanupshadowmap();
         cleanupweathermap();
+        if(shutdown) cleanupnoisetexture();
         cleanupdebugtimer();
         vccompositetex = 0;
         vccompositetexparams = vec4(0, 0, 0, 0);

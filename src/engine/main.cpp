@@ -673,7 +673,7 @@ void resetgl()
     cleanuptextures();
     cleanupblendmap();
     cleanuplights();
-    volumetricClouds::cleanup();
+    volumetricClouds::cleanup(true);
     cleanupshaders();
     cleanupgl();
 
@@ -682,6 +682,7 @@ void resetgl()
     inputgrab(grabinput);
 
     gl_init();
+    volumetricClouds::initnoise();
 
     inbetweenframes = false;
     if(!reloadtexture(*notexture) ||
@@ -1216,6 +1217,7 @@ int main(int argc, char **argv)
     logoutf("init: gl");
     gl_checkextensions();
     gl_init();
+    volumetricClouds::initnoise();
     notexture = textureload("packages/texture/game/notexture.png");
     if(!notexture) fatal("could not find core textures");
 

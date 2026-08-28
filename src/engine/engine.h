@@ -848,6 +848,7 @@ namespace volumetricClouds
     extern int volumetricclouds;
     extern int vcconfigured;
 
+    extern void initnoise();
     extern void init();
     extern void render();
     extern bool debugview();
@@ -858,8 +859,7 @@ namespace volumetricClouds
     extern bool bindshadowmap(int tmu = 0);
     extern const vec4 &shadowmapworld();
     extern float shadowmapstrength();
-
-    extern void cleanup();
+    extern void cleanup(bool shutdown = false);
 }
 
 namespace lensFlares // procedural ones
