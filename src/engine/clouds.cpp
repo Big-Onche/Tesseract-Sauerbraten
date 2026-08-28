@@ -73,6 +73,7 @@ namespace volumetricClouds
     FVARP(vcscale, 0.125f, 0.25f, 2.0f);
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
     VARP(vcsteps, 4, 32, 128);
+    FVARP(vcmaxviewstep, 0.0f, 0.0f, 1.0e7f);       // maximum far-view step in world units, 0 derives it from cloud/world scale
     VARP(vcsunsteps, 4, 4, 64);
     VARP(vcfbmresolution, 64, 128, 128);
     VARP(vcfbmseed, -0x100000, 0, 0x100000);
@@ -901,7 +902,8 @@ namespace volumetricClouds
         GLOBALPARAMF(tvcloudscroll, vcscrolloffset.x, vcscrolloffset.y);
         float ws = max(float(worldsize), 1.0f);
         float noisemul = noisesizemul();
-        GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.30f * noisemul, 1.0f), 1.0f / max(ws * 0.12f * noisemul, 1.0f), 0.50f, 0.95f);
+        float basewavelength = max(ws * 0.30f * noisemul, 1.0f);
+        GLOBALPARAMF(tvcloudnoise, 1.0f / basewavelength, 1.0f / max(ws * 0.12f * noisemul, 1.0f), 0.50f, 0.95f);
         GLOBALPARAMF(tvcloudfbmparams, 1.0f / float(VC_FBM_PERIOD), float(vcfbmtexsize) / float(VC_FBM_PERIOD),
                      logf(float(vcfbmtexsize)) / M_LN2);
         GLOBALPARAMF(tvcloudstructure, float(vcstructure) / 100.0f);
@@ -917,6 +919,12 @@ namespace volumetricClouds
         GLOBALPARAMF(tvcloudsilvermask, silverscreen.x, silverscreen.y, silverscreen.z, silverscreen.w);
         GLOBALPARAMF(tvcloudsilvercontrast, max(vcsilvercontrast, 1.0f));
         GLOBALPARAMF(tvcloudsteps, float(vcsteps));
+        float cloudthickness = max(cloudbounds.y - cloudbounds.x, 1.0f);
+        float automaxviewstep = min(min(cloudthickness / 3.0f, basewavelength / 3.0f), ws / 8.0f);
+        float maxviewstep = max(vcmaxviewstep > 0.0f ? vcmaxviewstep : automaxviewstep, 1.0e-3f);
+        float nearviewstep = min(maxviewstep, min(min(cloudthickness / 24.0f, basewavelength / 16.0f), ws / 128.0f));
+        float mediumviewstep = min(maxviewstep, min(min(cloudthickness / 8.0f, basewavelength / 8.0f), ws / 32.0f));
+        GLOBALPARAMF(tvcloudviewsteps, max(nearviewstep, 1.0e-3f), max(mediumviewstep, 1.0e-3f), maxviewstep, ws);
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         GLOBALPARAM(sunlightdir, sunlightdir);
