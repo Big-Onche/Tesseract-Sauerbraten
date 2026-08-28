@@ -23,7 +23,7 @@ namespace volumetricClouds
     GLuint vcclaritytex = 0, vcclarityfbo = 0;
     GLuint vcshadowtex = 0, vcshadowfbo = 0;
     GLuint vcweathertex = 0;
-    GLuint vcnoisetex = 0;
+    GLuint vcnoisetex = 0, vcfbmtex = 0;
     GLuint vccompositetex = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
@@ -32,10 +32,10 @@ namespace volumetricClouds
     float vcshadowmapstrength = 0.0f;
     vec2 vcscrolloffset(0, 0);
     int vcscrolllastmillis = -1;
-    int vcweatherseed = 1337;
+    int vcweatherseed = 1337, vcnoisetexseed = -1, vcfbmtexseed = -1, vcfbmtexsize = 0;
     bool vcweatherdirty = true;
 
-    static const int VC_WEATHER_MAP_SIZE = 512, VC_NOISE_TEXTURE_SIZE = 64, VC_NOISE_TEXTURE_SEED = 0;
+    static const int VC_WEATHER_MAP_SIZE = 512, VC_NOISE_TEXTURE_SIZE = 64, VC_FBM_PERIOD = 16, VC_FBM_OCTAVES = 4;
     enum VCDebugPass
     {
         VC_DEBUG_RAYMARCH = 0,
@@ -74,6 +74,9 @@ namespace volumetricClouds
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
     VARP(vcsteps, 4, 32, 128);
     VARP(vcsunsteps, 4, 4, 64);
+    VARP(vcprecomputedfbm, 0, 1, 1);
+    VARP(vcfbmresolution, 64, 128, 128);
+    VARP(vcfbmseed, -0x100000, 0, 0x100000);
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowmapsize, 64, 512, 2048);
     VARP(vcshadowsamples, 1, 4, 8);
@@ -117,41 +120,121 @@ namespace volumetricClouds
         return clamp(n * 0.5f + 0.5f, 0.0f, 1.0f);
     }
 
-    static float cloudnoisehash(int x, int y, int z)
+    static float cloudnoisehash(int x, int y, int z, int seed)
     {
-        // Seed zero intentionally matches the existing shader hash lattice as
-        // closely as CPU/GPU floating-point implementations allow.
-        float phase = x * 127.1f + y * 311.7f + z * 74.7f + VC_NOISE_TEXTURE_SEED;
+        float phase = x * 127.1f + y * 311.7f + z * 74.7f + seed;
         float n = sinf(phase) * 43758.5453123f;
         return n - floorf(n);
     }
 
-    static void cleanupnoisetexture()
+    static int wrapnoiseindex(int n, int period)
     {
-        if(!vcnoisetex) return;
-        glDeleteTextures(1, &vcnoisetex);
-        vcnoisetex = 0;
+        n %= period;
+        return n < 0 ? n + period : n;
     }
 
-    static void ensurenoisetexture()
+    static float sampleperiodicnoise(const float *lattice, float x, float y, float z)
     {
-        if(vcnoisetex) return;
+        int ix = int(floorf(x)), iy = int(floorf(y)), iz = int(floorf(z));
+        float fx = x - float(ix), fy = y - float(iy), fz = z - float(iz);
+        float ux = fx * fx * (3.0f - 2.0f * fx), uy = fy * fy * (3.0f - 2.0f * fy), uz = fz * fz * (3.0f - 2.0f * fz);
+        int x0 = wrapnoiseindex(ix, VC_FBM_PERIOD), x1 = wrapnoiseindex(ix + 1, VC_FBM_PERIOD),
+            y0 = wrapnoiseindex(iy, VC_FBM_PERIOD), y1 = wrapnoiseindex(iy + 1, VC_FBM_PERIOD),
+            z0 = wrapnoiseindex(iz, VC_FBM_PERIOD), z1 = wrapnoiseindex(iz + 1, VC_FBM_PERIOD);
+#define VC_FBM_LATTICE(x, y, z) lattice[((z) * VC_FBM_PERIOD + (y)) * VC_FBM_PERIOD + (x)]
+        float n000 = VC_FBM_LATTICE(x0, y0, z0), n100 = VC_FBM_LATTICE(x1, y0, z0),
+              n010 = VC_FBM_LATTICE(x0, y1, z0), n110 = VC_FBM_LATTICE(x1, y1, z0),
+              n001 = VC_FBM_LATTICE(x0, y0, z1), n101 = VC_FBM_LATTICE(x1, y0, z1),
+              n011 = VC_FBM_LATTICE(x0, y1, z1), n111 = VC_FBM_LATTICE(x1, y1, z1);
+#undef VC_FBM_LATTICE
+        float nx00 = n000 + (n100 - n000) * ux, nx10 = n010 + (n110 - n010) * ux,
+              nx01 = n001 + (n101 - n001) * ux, nx11 = n011 + (n111 - n011) * ux,
+              nxy0 = nx00 + (nx10 - nx00) * uy, nxy1 = nx01 + (nx11 - nx01) * uy;
+        return nxy0 + (nxy1 - nxy0) * uz;
+    }
 
-        const int size = VC_NOISE_TEXTURE_SIZE, total = size * size * size;
-        vector<uchar> pixels;
-        uchar *volume = pixels.pad(total);
-        loopk(size) loopj(size) loopi(size)
-            volume[(k * size + j) * size + i] = uchar(cloudnoisehash(i, j, k) * 255.0f + 0.5f);
+    static float sampleperiodicfbm(const float *lattice, float x, float y, float z)
+    {
+        float value = 0.0f, amplitude = 0.5f;
+        loopi(VC_FBM_OCTAVES)
+        {
+            value += amplitude * sampleperiodicnoise(lattice, x, y, z);
+            // Integer lacunarity keeps the complete FBM exactly periodic; 2.0
+            // remains visually close to the runtime comparison path's 2.03.
+            x = x * 2.0f + 7.3f;
+            y = y * 2.0f + 19.1f;
+            z = z * 2.0f + 3.7f;
+            amplitude *= 0.5f;
+        }
+        return value;
+    }
 
-        glGenTextures(1, &vcnoisetex);
-        create3dtexture(vcnoisetex, size, size, size, volume, 0, 2, GL_R8);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glGenerateMipmap_(GL_TEXTURE_3D);
-        glBindTexture(GL_TEXTURE_3D, 0);
+    static void cleanupnoisetextures()
+    {
+        if(vcnoisetex) glDeleteTextures(1, &vcnoisetex);
+        if(vcfbmtex) glDeleteTextures(1, &vcfbmtex);
+        vcnoisetex = vcfbmtex = 0;
+        vcnoisetexseed = vcfbmtexseed = -1;
+        vcfbmtexsize = 0;
+    }
+
+    static void ensurenoisetextures()
+    {
+        int size = clamp(vcfbmresolution, 64, 128);
+        if(vcnoisetex && vcnoisetexseed != vcfbmseed)
+        {
+            glDeleteTextures(1, &vcnoisetex);
+            vcnoisetex = 0;
+        }
+        if(vcfbmtex && (vcfbmtexseed != vcfbmseed || vcfbmtexsize != size))
+        {
+            glDeleteTextures(1, &vcfbmtex);
+            vcfbmtex = 0;
+        }
+
+        if(!vcnoisetex)
+        {
+            const int total = VC_NOISE_TEXTURE_SIZE * VC_NOISE_TEXTURE_SIZE * VC_NOISE_TEXTURE_SIZE;
+            vector<uchar> pixels;
+            uchar *volume = pixels.pad(total);
+            loopk(VC_NOISE_TEXTURE_SIZE) loopj(VC_NOISE_TEXTURE_SIZE) loopi(VC_NOISE_TEXTURE_SIZE)
+                volume[(k * VC_NOISE_TEXTURE_SIZE + j) * VC_NOISE_TEXTURE_SIZE + i] = uchar(cloudnoisehash(i, j, k, vcfbmseed) * 255.0f + 0.5f);
+
+            glGenTextures(1, &vcnoisetex);
+            create3dtexture(vcnoisetex, VC_NOISE_TEXTURE_SIZE, VC_NOISE_TEXTURE_SIZE, VC_NOISE_TEXTURE_SIZE, volume, 0, 1, GL_R8);
+            vcnoisetexseed = vcfbmseed;
+        }
+
+        if(!vcfbmtex)
+        {
+            vector<float> lattice;
+            float *values = lattice.pad(VC_FBM_PERIOD * VC_FBM_PERIOD * VC_FBM_PERIOD);
+            loopk(VC_FBM_PERIOD) loopj(VC_FBM_PERIOD) loopi(VC_FBM_PERIOD)
+                values[(k * VC_FBM_PERIOD + j) * VC_FBM_PERIOD + i] = cloudnoisehash(i, j, k, vcfbmseed);
+
+            vector<uchar> pixels;
+            uchar *volume = pixels.pad(size * size * size);
+            float voxelstep = float(VC_FBM_PERIOD) / float(size);
+            loopk(size) loopj(size) loopi(size)
+            {
+                float x = (float(i) + 0.5f) * voxelstep,
+                      y = (float(j) + 0.5f) * voxelstep,
+                      z = (float(k) + 0.5f) * voxelstep;
+                volume[(k * size + j) * size + i] = uchar(clamp(sampleperiodicfbm(values, x, y, z), 0.0f, 1.0f) * 255.0f + 0.5f);
+            }
+
+            glGenTextures(1, &vcfbmtex);
+            create3dtexture(vcfbmtex, size, size, size, volume, 0, 2, GL_R8);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glGenerateMipmap_(GL_TEXTURE_3D);
+            glBindTexture(GL_TEXTURE_3D, 0);
+            vcfbmtexseed = vcfbmseed;
+            vcfbmtexsize = size;
+        }
     }
 
     static float noisesizemul()
@@ -619,9 +702,16 @@ namespace volumetricClouds
         conoutf(CON_INFO, "regenerated volumetric cloud weather map with seed %d", *seed);
     });
 
+    ICOMMAND(vcregenfbm, "", (),
+    {
+        cleanupnoisetextures();
+        ensurenoisetextures();
+        conoutf(CON_INFO, "regenerated %d^3 volumetric cloud FBM volume with seed %d", vcfbmtexsize, vcfbmseed);
+    });
+
     void initnoise()
     {
-        ensurenoisetexture();
+        ensurenoisetextures();
     }
 
     void init()
@@ -717,7 +807,7 @@ namespace volumetricClouds
             vcfullh = viewh;
         }
         if(!ensureWeatherMap()) return;
-        ensurenoisetexture();
+        ensurenoisetextures();
 
         vec4 cloudbounds, clouddome;
         calcshadowparams(cloudbounds, clouddome);
@@ -823,6 +913,8 @@ namespace volumetricClouds
         else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
         glActiveTexture_(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_3D, vcnoisetex);
+        glActiveTexture_(GL_TEXTURE11);
+        glBindTexture(GL_TEXTURE_3D, vcfbmtex);
         glActiveTexture_(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vcweathertex);
 
@@ -832,6 +924,8 @@ namespace volumetricClouds
         float ws = max(float(worldsize), 1.0f);
         float noisemul = noisesizemul();
         GLOBALPARAMF(tvcloudnoise, 1.0f / max(ws * 0.30f * noisemul, 1.0f), 1.0f / max(ws * 0.12f * noisemul, 1.0f), 0.50f, 0.95f);
+        GLOBALPARAMF(tvcloudfbmparams, 1.0f / float(VC_FBM_PERIOD), float(vcfbmtexsize) / float(VC_FBM_PERIOD),
+                     logf(float(vcfbmtexsize)) / M_LN2, vcprecomputedfbm && vcfbmtex ? 1.0f : 0.0f);
         GLOBALPARAMF(tvcloudstructure, float(vcstructure) / 100.0f);
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
@@ -1096,6 +1190,9 @@ namespace volumetricClouds
             glEnable(GL_BLEND);
             int texty = h + FONTH/4;
             draw_textf("volumetric clouds total %.3f ms", 0, texty, max(vcdebugms, 0.0f));
+            texty += FONTH;
+            if(vcprecomputedfbm) draw_textf("  FBM precomputed R8 %d^3", 0, texty, vcfbmtexsize);
+            else draw_text("  FBM runtime reconstruction", 0, texty);
             loopi(VC_DEBUG_PASS_COUNT)
             {
                 texty += FONTH;
@@ -1165,7 +1262,7 @@ namespace volumetricClouds
         }
         cleanupshadowmap();
         cleanupweathermap();
-        if(shutdown) cleanupnoisetexture();
+        if(shutdown) cleanupnoisetextures();
         cleanupdebugtimer();
         vccompositetex = 0;
         vccompositetexparams = vec4(0, 0, 0, 0);
