@@ -5,6 +5,11 @@ VAR(animationinterpolationtime, 0, 200, 1000);
 
 model *loadingmodel = NULL;
 
+void setfirstpersonmodel(bool enable)
+{
+    GLOBALPARAMF(firstpersonmodel, enable ? 1 : 0);
+}
+
 #include "ragdoll.h"
 #include "animmodel.h"
 #include "vertmodel.h"
@@ -1140,7 +1145,7 @@ VAR(testpitch, -90, 0, 90);
 
 #include "game.h"
 
-void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int hold, int attack, int attackdelay, int lastaction, int lastpain, float fade, bool ragdoll, bool onlyshadow)
+void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int hold, int attack, int attackdelay, int lastaction, int lastpain, float fade, bool ragdoll, bool onlyshadow, int flags)
 {
     int anim = hold ? hold : ANIM_IDLE|ANIM_LOOP;
     float yaw = testanims && d==player ? 0 : d->yaw,
@@ -1187,7 +1192,6 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     }
     if(d->ragdoll && (!ragdoll || (anim&ANIM_INDEX)!=ANIM_DYING)) DELETEP(d->ragdoll);
     if(!((anim>>ANIM_SECONDARY)&ANIM_INDEX)) anim |= (ANIM_IDLE|ANIM_LOOP)<<ANIM_SECONDARY;
-    int flags = 0;
     if(d!=player && !(anim&ANIM_RAGDOLL)) flags |= MDL_CULL_VFC | MDL_CULL_OCCLUDED | MDL_CULL_QUERY;
     if(d->type==ENT_PLAYER) flags |= MDL_FULLBRIGHT;
     else flags |= MDL_CULL_DIST;

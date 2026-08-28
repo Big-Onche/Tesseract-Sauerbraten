@@ -135,7 +135,8 @@ namespace game
         loopi(sizeof(animnames)/sizeof(animnames[0])) if(matchanim(animnames[i], pattern)) anims.add(i);
     }
 
-    void renderplayer(fpsent *d, const playermodelinfo &mdl, bool onlyshadow, int team, float fade = 1, bool mainpass = true)
+    void renderplayer(fpsent *d, const playermodelinfo &mdl, bool onlyshadow, int team, float fade = 1, bool mainpass = true, bool vwep = true,
+                      bool armour = true, int flags = 0)
     {
         int lastaction = d->lastaction, hold = mdl.vwep || d->gunselect==GUN_PISTOL ? 0 : (ANIM_HOLD1+d->gunselect)|ANIM_LOOP, attack = ANIM_ATTACK1+d->gunselect, delay = mdl.vwep ? 300 : guns[d->gunselect].attackdelay+50;
         if(intermission && d->state!=CS_DEAD)
@@ -154,7 +155,7 @@ namespace game
         modelattach a[5];
         static const char * const vweps[] = {"vwep/fist", "vwep/shotg", "vwep/chaing", "vwep/rocket", "vwep/rifle", "vwep/gl", "vwep/pistol"};
         int ai = 0;
-        if((!mdl.vwep || d->gunselect!=GUN_FIST) && d->gunselect<=GUN_PISTOL)
+        if(vwep && (!mdl.vwep || d->gunselect!=GUN_FIST) && d->gunselect<=GUN_PISTOL)
         {
             int vanim = ANIM_VWEP_IDLE|ANIM_LOOP, vtime = 0;
             if(lastaction && d->lastattackgun==d->gunselect && lastmillis < lastaction + delay)
@@ -168,7 +169,7 @@ namespace game
         {
             if((testquad || d->quadmillis) && mdl.quad)
                 a[ai++] = modelattach("tag_powerup", mdl.quad, ANIM_POWERUP|ANIM_LOOP, 0);
-            if(testarmour || d->armour)
+            if(armour && (testarmour || d->armour))
             {
                 int type = clamp(d->armourtype, (int)A_BLUE, (int)A_YELLOW);
                 if(mdl.armour[type])
@@ -188,7 +189,7 @@ namespace game
             case 2: mdlname = mdl.redteam; break;
         }
 
-        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow);
+        renderclient(d, mdlname, ai ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, onlyshadow, flags);
 #if 0
         if(d->state!=CS_DEAD && d->quadmillis)
         {
@@ -358,6 +359,10 @@ namespace game
     }
 
     VARP(hudgun, 0, 1, 1);
+    VARP(firstpersonbody, 0, 0, 1);
+    FVAR(firstpersonbodyforward, -10, -4, 10);
+    FVAR(firstpersonbodyside, -10, 0, 10);
+    FVAR(firstpersonbodypitch, -90, 28, 90);
     VARP(hudgunsway, 0, 1, 1);
     VARP(teamhudguns, 0, 1, 1);
     VARP(chainsawhudgun, 0, 1, 1);
@@ -465,6 +470,26 @@ namespace game
 
     void renderavatar()
     {
+        fpsent *d = hudplayer();
+        if(firstpersonbody && !editmode && d->state==CS_ALIVE)
+        {
+            physent camera = *camera1, *view = camera1;
+            if(camera1 == d) camera1 = &camera;
+            vec position = d->o;
+            float pitch = d->pitch;
+            vec forward, side;
+            vecfromyawpitch(d->yaw, 0, 1, 0, forward);
+            vecfromyawpitch(d->yaw, 0, 0, -1, side);
+            d->o.madd(forward, firstpersonbodyforward).madd(side, firstpersonbodyside);
+            d->pitch = firstpersonbodypitch;
+            int team = teamskins || m_teammode ? (isteam(player1->team, d->team) ? 1 : 2) : 0;
+            setfirstpersonmodel(true);
+            renderplayer(d, getplayermodelinfo(d), false, team, 1, false, false, false, MDL_NOBATCH);
+            setfirstpersonmodel(false);
+            d->o = position;
+            d->pitch = pitch;
+            camera1 = view;
+        }
         drawhudgun();
     }
 

@@ -118,12 +118,13 @@ struct animmodel : model
         };
 
         part *owner;
-        Texture *tex, *decal, *masks, *envmap, *normalmap;
+        Texture *tex, *decal, *masks, *envmap, *normalmap, *fpalpha;
         Shader *shader, *rsmshader;
         int flags;
         shaderparamskey *key;
 
-        skin() : owner(0), tex(notexture), decal(NULL), masks(notexture), envmap(NULL), normalmap(NULL), shader(NULL), rsmshader(NULL), flags(CULL_FACE), key(NULL) {}
+        skin() : owner(0), tex(notexture), decal(NULL), masks(notexture), envmap(NULL), normalmap(NULL), fpalpha(NULL), shader(NULL), rsmshader(NULL),
+                 flags(CULL_FACE), key(NULL) {}
 
         bool masked() const { return masks != notexture; }
         bool envmapped() const { return envmapmax>0; }
@@ -131,6 +132,7 @@ struct animmodel : model
         bool alphatested() const { return alphatest > 0 && tex->type&Texture::ALPHA; }
         bool dithered() const { return (flags&DITHER) != 0; }
         bool decaled() const { return decal != NULL; }
+        bool firstpersonmasked() const { return fpalpha != NULL; }
         bool shouldcullface() const { return (flags&CULL_FACE) != 0; }
         bool doublesided() const { return (flags&DOUBLE_SIDED) != 0; }
 
@@ -207,6 +209,7 @@ struct animmodel : model
             if(envmapped()) { opts[optslen++] = 'm'; opts[optslen++] = 'e'; }
             else if(masked()) opts[optslen++] = 'm';
             if(doublesided()) opts[optslen++] = 'c';
+            if(firstpersonmasked()) opts[optslen++] = 'f';
             opts[optslen++] = '\0';
 
             defformatstring(name, "model%s", opts);
@@ -281,6 +284,13 @@ struct animmodel : model
                 activetmu = 4;
                 glBindTexture(GL_TEXTURE_2D, decal->id);
                 lastdecal = decal;
+            }
+            if(firstpersonmasked() && fpalpha!=lastfpalpha)
+            {
+                glActiveTexture_(GL_TEXTURE5);
+                activetmu = 5;
+                glBindTexture(GL_TEXTURE_2D, fpalpha->id);
+                lastfpalpha = fpalpha;
             }
             if(masked() && masks!=lastmasks)
             {
@@ -1655,7 +1665,7 @@ struct animmodel : model
     static float sizescale;
     static vec4 colorscale;
     static GLuint lastvbuf, lasttcbuf, lastxbuf, lastbbuf, lastebuf, lastenvmaptex, closestenvmaptex;
-    static Texture *lasttex, *lastdecal, *lastmasks, *lastnormalmap;
+    static Texture *lasttex, *lastdecal, *lastmasks, *lastnormalmap, *lastfpalpha;
     static int matrixpos;
     static matrix4 matrixstack[64];
 
@@ -1664,7 +1674,7 @@ struct animmodel : model
         enabletc = enabletangents = enablebones = enabledepthoffset = false;
         enablecullface = true;
         lastvbuf = lasttcbuf = lastxbuf = lastbbuf = lastebuf = lastenvmaptex = closestenvmaptex = 0;
-        lasttex = lastdecal = lastmasks = lastnormalmap = NULL;
+        lasttex = lastdecal = lastmasks = lastnormalmap = lastfpalpha = NULL;
         shaderparamskey::invalidate();
     }
 
@@ -1718,7 +1728,8 @@ float animmodel::sizescale = 1;
 vec4 animmodel::colorscale(1, 1, 1, 1);
 GLuint animmodel::lastvbuf = 0, animmodel::lasttcbuf = 0, animmodel::lastxbuf = 0, animmodel::lastbbuf = 0, animmodel::lastebuf = 0,
        animmodel::lastenvmaptex = 0, animmodel::closestenvmaptex = 0;
-Texture *animmodel::lasttex = NULL, *animmodel::lastdecal = NULL, *animmodel::lastmasks = NULL, *animmodel::lastnormalmap = NULL;
+Texture *animmodel::lasttex = NULL, *animmodel::lastdecal = NULL, *animmodel::lastmasks = NULL, *animmodel::lastnormalmap = NULL,
+        *animmodel::lastfpalpha = NULL;
 int animmodel::matrixpos = 0;
 matrix4 animmodel::matrixstack[64];
 
@@ -1872,6 +1883,13 @@ template<class MDL, class MESH> struct modelcommands
         );
     }
 
+    static void setfpalpha(char *meshname, char *fpalpha)
+    {
+        loopskins(meshname, s,
+            s.fpalpha = textureload(makerelpath(MDL::dir, fpalpha), 0, true, false);
+        );
+    }
+
     static void setfullbright(char *meshname, float *fullbright)
     {
         loopskins(meshname, s, s.fullbright = *fullbright);
@@ -1930,6 +1948,7 @@ template<class MDL, class MESH> struct modelcommands
             modelcommand(setenvmap, "envmap", "ss");
             modelcommand(setbumpmap, "bumpmap", "ss");
             modelcommand(setdecal, "decal", "ss");
+            modelcommand(setfpalpha, "fpalpha", "ss");
             modelcommand(setfullbright, "fullbright", "sf");
             modelcommand(setshader, "shader", "ss");
             modelcommand(setscroll, "scroll", "sff");
