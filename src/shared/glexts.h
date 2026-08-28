@@ -74,6 +74,15 @@ typedef void (APIENTRYP PFNGLGETQUERYOBJECTUI64VEXTPROC) (GLuint id, GLenum pnam
 extern PFNGLGETQUERYOBJECTI64VEXTPROC glGetQueryObjecti64v_;
 extern PFNGLGETQUERYOBJECTUI64VEXTPROC glGetQueryObjectui64v_;
 
+#ifndef GL_TIMESTAMP
+#define GL_TIMESTAMP 0x8E28
+#endif
+#ifdef __APPLE__
+#define glQueryCounter_ glQueryCounter
+#else
+extern PFNGLQUERYCOUNTERPROC glQueryCounter_;
+#endif
+
 #ifndef GL_ARB_framebuffer_object
 #define GL_ARB_framebuffer_object 1
 #define GL_INVALID_FRAMEBUFFER_OPERATION  0x0506

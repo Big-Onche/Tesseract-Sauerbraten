@@ -14,6 +14,9 @@ VAR(glcompat, 1, 0, 0);
 // GL_EXT_timer_query
 PFNGLGETQUERYOBJECTI64VEXTPROC glGetQueryObjecti64v_  = NULL;
 PFNGLGETQUERYOBJECTUI64VEXTPROC glGetQueryObjectui64v_ = NULL;
+#ifndef __APPLE__
+PFNGLQUERYCOUNTERPROC glQueryCounter_ = NULL;
+#endif
 
 // GL_EXT_framebuffer_object
 PFNGLBINDRENDERBUFFERPROC           glBindRenderbuffer_           = NULL;
@@ -843,6 +846,10 @@ void gl_checkextensions()
         hasTQ = true;
         if(glversion < 330 && dbgexts) conoutf(CON_INIT, "Using GL_ARB_timer_query extension.");
     }
+#ifndef __APPLE__
+    if(glversion >= 330 || hasext("GL_ARB_timer_query"))
+        glQueryCounter_ = (PFNGLQUERYCOUNTERPROC)getprocaddress("glQueryCounter");
+#endif
 
     if(hasext("GL_EXT_texture_compression_s3tc"))
     {

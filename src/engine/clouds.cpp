@@ -35,11 +35,31 @@ namespace volumetricClouds
     bool vcweatherdirty = true;
 
     static const int VC_WEATHER_MAP_SIZE = 512;
-    static const int VC_DEBUG_QUERY_COUNT = 3;
+    enum VCDebugPass
+    {
+        VC_DEBUG_RAYMARCH = 0,
+        VC_DEBUG_ATROUS,
+        VC_DEBUG_UPSCALE,
+        VC_DEBUG_BILATERAL,
+        VC_DEBUG_CLARITY,
+        VC_DEBUG_SHADOW_MAP,
+        VC_DEBUG_SHADOW_APPLY,
+        VC_DEBUG_COMPOSITE,
+        VC_DEBUG_PASS_COUNT
+    };
+
+    static const int VC_DEBUG_QUERY_COUNT = 3, VC_DEBUG_TIMESTAMPS = 2 + 2 * VC_DEBUG_PASS_COUNT;
+    static const char * const vcdebugpassnames[VC_DEBUG_PASS_COUNT] =
+    {
+        "main raymarch", "atrous filtering", "upscale", "bilateral blur", "clarity", "shadow map", "shadow application", "final composite"
+    };
     GLuint vcdebugquery[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
+    GLuint vcdebugtimestampquery[VC_DEBUG_QUERY_COUNT][VC_DEBUG_TIMESTAMPS] = { { 0 } };
     int vcdebugquerycycle = 0, vcdebugquerywaiting = 0, vcdebugcpustart = 0;
-    bool vcdebuggpuquery = false;
-    float vcdebugms = -1.0f;
+    int vcdebugtimestampcycle = 0, vcdebugtimestampwaiting = 0, vcdebugtimestampactive = -1;
+    int vcdebugpassmask[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
+    bool vcdebuggpuquery = false, vcdebugtimestamps = false;
+    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
@@ -103,6 +123,27 @@ namespace volumetricClouds
 
     static void polldebugtimer()
     {
+        loopi(VC_DEBUG_QUERY_COUNT) if(vcdebugtimestampwaiting&(1<<i))
+        {
+            GLint available = 0;
+            glGetQueryObjectiv_(vcdebugtimestampquery[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+            if(!available) continue;
+
+            GLuint64EXT totalstart = 0, totalend = 0;
+            glGetQueryObjectui64v_(vcdebugtimestampquery[i][0], GL_QUERY_RESULT, &totalstart);
+            glGetQueryObjectui64v_(vcdebugtimestampquery[i][1], GL_QUERY_RESULT, &totalend);
+            vcdebugms = max(float(totalend - totalstart) * 1.0e-6f, 0.0f);
+            loopj(VC_DEBUG_PASS_COUNT) if(vcdebugpassmask[i]&(1<<j))
+            {
+                GLuint64EXT passstart = 0, passend = 0;
+                glGetQueryObjectui64v_(vcdebugtimestampquery[i][2 + 2*j], GL_QUERY_RESULT, &passstart);
+                glGetQueryObjectui64v_(vcdebugtimestampquery[i][2 + 2*j + 1], GL_QUERY_RESULT, &passend);
+                vcdebugpassms[j] = max(float(passend - passstart) * 1.0e-6f, 0.0f);
+            }
+            else vcdebugpassms[j] = 0.0f;
+            vcdebugtimestampwaiting &= ~(1<<i);
+        }
+
         if(!vcdebugquery[0]) return;
         loopi(VC_DEBUG_QUERY_COUNT) if(vcdebugquerywaiting&(1<<i))
         {
@@ -120,9 +161,24 @@ namespace volumetricClouds
     static void begindebugtimer()
     {
         vcdebuggpuquery = false;
+        vcdebugtimestamps = false;
+        vcdebugtimestampactive = -1;
         if(!debugvc) return;
 
         polldebugtimer();
+        if(hasTQ && glQueryCounter_)
+        {
+            if(!vcdebugtimestampquery[0][0]) glGenQueries_(VC_DEBUG_QUERY_COUNT * VC_DEBUG_TIMESTAMPS, &vcdebugtimestampquery[0][0]);
+            if(!(vcdebugtimestampwaiting&(1<<vcdebugtimestampcycle)))
+            {
+                vcdebugtimestampactive = vcdebugtimestampcycle;
+                vcdebugpassmask[vcdebugtimestampactive] = 0;
+                glQueryCounter_(vcdebugtimestampquery[vcdebugtimestampactive][0], GL_TIMESTAMP);
+                vcdebugtimestamps = true;
+                return;
+            }
+        }
+
         if(hasTQ && !deferquery)
         {
             if(!vcdebugquery[0]) glGenQueries_(VC_DEBUG_QUERY_COUNT, vcdebugquery);
@@ -138,10 +194,31 @@ namespace volumetricClouds
         vcdebugcpustart = getclockmillis();
     }
 
+    static void begindebugpass(VCDebugPass pass)
+    {
+        if(!vcdebugtimestamps) return;
+        vcdebugpassmask[vcdebugtimestampactive] |= 1<<pass;
+        glQueryCounter_(vcdebugtimestampquery[vcdebugtimestampactive][2 + 2*pass], GL_TIMESTAMP);
+    }
+
+    static void enddebugpass(VCDebugPass pass)
+    {
+        if(!vcdebugtimestamps) return;
+        glQueryCounter_(vcdebugtimestampquery[vcdebugtimestampactive][2 + 2*pass + 1], GL_TIMESTAMP);
+    }
+
     static void enddebugtimer()
     {
         if(!debugvc) return;
-        if(vcdebuggpuquery)
+        if(vcdebugtimestamps)
+        {
+            glQueryCounter_(vcdebugtimestampquery[vcdebugtimestampactive][1], GL_TIMESTAMP);
+            vcdebugtimestampwaiting |= 1<<vcdebugtimestampactive;
+            vcdebugtimestampcycle = (vcdebugtimestampactive + 1) % VC_DEBUG_QUERY_COUNT;
+            vcdebugtimestampactive = -1;
+            vcdebugtimestamps = false;
+        }
+        else if(vcdebuggpuquery)
         {
             glEndQuery_(GL_TIME_ELAPSED_EXT);
             deferquery--;
@@ -155,11 +232,19 @@ namespace volumetricClouds
     static void cleanupdebugtimer()
     {
         if(vcdebugquery[0]) glDeleteQueries_(VC_DEBUG_QUERY_COUNT, vcdebugquery);
+        if(vcdebugtimestampquery[0][0]) glDeleteQueries_(VC_DEBUG_QUERY_COUNT * VC_DEBUG_TIMESTAMPS, &vcdebugtimestampquery[0][0]);
         memset(vcdebugquery, 0, sizeof(vcdebugquery));
+        memset(vcdebugtimestampquery, 0, sizeof(vcdebugtimestampquery));
         vcdebugquerywaiting = 0;
         vcdebugquerycycle = 0;
+        vcdebugtimestampwaiting = 0;
+        vcdebugtimestampcycle = 0;
+        vcdebugtimestampactive = -1;
+        memset(vcdebugpassmask, 0, sizeof(vcdebugpassmask));
         vcdebuggpuquery = false;
+        vcdebugtimestamps = false;
         vcdebugms = -1.0f;
+        loopi(VC_DEBUG_PASS_COUNT) vcdebugpassms[i] = -1.0f;
     }
 
     static uchar weatherbyte(float n)
@@ -737,6 +822,7 @@ namespace volumetricClouds
 
         if(drawclouds)
         {
+            begindebugpass(VC_DEBUG_RAYMARCH);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
             glViewport(0, 0, vcw, vch);
             glDisable(GL_BLEND);
@@ -745,10 +831,12 @@ namespace volumetricClouds
             setcloudscissor(cloudscissor, true);
             cloudshader->set();
             screenquad(vcw, vch);
+            enddebugpass(VC_DEBUG_RAYMARCH);
 
             GLuint lowrestex = vctex;
             if(vcatrous && atrousshader)
             {
+                begindebugpass(VC_DEBUG_ATROUS);
                 int iterations = clamp(vcatrousiter, 1, 3);
                 loopi(iterations)
                 {
@@ -767,6 +855,7 @@ namespace volumetricClouds
                     screenquad(vcw, vch);
                     lowrestex = writetomain ? vctex : vcatroustex;
                 }
+                enddebugpass(VC_DEBUG_ATROUS);
             }
 
             compositetex = lowrestex;
@@ -775,6 +864,7 @@ namespace volumetricClouds
 
             if(vcblur && bilateralshader)
             {
+                begindebugpass(VC_DEBUG_BILATERAL);
                 GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
                 GLOBALPARAMF(vcblurscale, float(vcblurscale));
 
@@ -811,9 +901,11 @@ namespace volumetricClouds
                 compositetex = vcbilateraltex;
                 compositetexw = vieww;
                 compositetexh = viewh;
+                enddebugpass(VC_DEBUG_BILATERAL);
             }
             else if((vcw < vieww || vch < viewh) && upscaleshader)
             {
+                begindebugpass(VC_DEBUG_UPSCALE);
                 // Depth-aware upsample to avoid low-res cloud alpha bleeding over
                 // foreground geometry silhouettes when vcscale < 1.
                 GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
@@ -834,12 +926,14 @@ namespace volumetricClouds
                 compositetex = vcbilateraltex;
                 compositetexw = vieww;
                 compositetexh = viewh;
+                enddebugpass(VC_DEBUG_UPSCALE);
             }
 
             // Full-res edge-aware clarity pass. Only run after the cloud chain has
             // produced a full-resolution working texture; never sharpen low-res RTs.
             if(useclarity && compositetexw == vieww && compositetexh == viewh)
             {
+                begindebugpass(VC_DEBUG_CLARITY);
                 glBindFramebuffer_(GL_FRAMEBUFFER, vcclarityfbo);
                 glViewport(0, 0, vieww, viewh);
                 glDisable(GL_BLEND);
@@ -856,6 +950,7 @@ namespace volumetricClouds
                 compositetex = vcclaritytex;
                 compositetexw = vieww;
                 compositetexh = viewh;
+                enddebugpass(VC_DEBUG_CLARITY);
             }
 
             glDisable(GL_SCISSOR_TEST);
@@ -883,6 +978,7 @@ namespace volumetricClouds
             GLOBALPARAMF(tvshadowmapworld, minx, miny, worldpertexel, float(vcshadowsz));
             GLOBALPARAMF(tvcloudshadowsamples, float(vcshadowsamples));
 
+            begindebugpass(VC_DEBUG_SHADOW_MAP);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcshadowfbo);
             glViewport(0, 0, vcshadowsz, vcshadowsz);
             glDisable(GL_BLEND);
@@ -892,7 +988,9 @@ namespace volumetricClouds
             glBindTexture(GL_TEXTURE_2D, vcweathertex);
             shadowmapshader->set();
             screenquad(vcshadowsz, vcshadowsz);
+            enddebugpass(VC_DEBUG_SHADOW_MAP);
 
+            begindebugpass(VC_DEBUG_SHADOW_APPLY);
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
             glViewport(0, 0, vieww, viewh);
             glActiveTexture_(GL_TEXTURE0);
@@ -905,6 +1003,7 @@ namespace volumetricClouds
             shadowapplyshader->set();
             screenquad(vieww, viewh);
             glDisable(GL_BLEND);
+            enddebugpass(VC_DEBUG_SHADOW_APPLY);
         }
 
         glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
@@ -912,6 +1011,7 @@ namespace volumetricClouds
 
         if(drawclouds)
         {
+            begindebugpass(VC_DEBUG_COMPOSITE);
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
 
@@ -925,6 +1025,7 @@ namespace volumetricClouds
 
             glDisable(GL_BLEND);
             glDisable(GL_SCISSOR_TEST);
+            enddebugpass(VC_DEBUG_COMPOSITE);
         }
         glEnable(GL_DEPTH_TEST);
 
@@ -947,7 +1048,14 @@ namespace volumetricClouds
             debugquad(0, 0, w, h, 0, 0, vccompositetexparams.z, vccompositetexparams.w);
 
             glEnable(GL_BLEND);
-            draw_textf("volumetric clouds %.3f ms", 0, h + FONTH/4, max(vcdebugms, 0.0f));
+            int texty = h + FONTH/4;
+            draw_textf("volumetric clouds total %.3f ms", 0, texty, max(vcdebugms, 0.0f));
+            loopi(VC_DEBUG_PASS_COUNT)
+            {
+                texty += FONTH;
+                if(vcdebugpassms[i] >= 0.0f) draw_textf("  %s %.3f ms", 0, texty, vcdebugpassnames[i], vcdebugpassms[i]);
+                else draw_textf("  %s n/a", 0, texty, vcdebugpassnames[i]);
+            }
         }
         else
         {
