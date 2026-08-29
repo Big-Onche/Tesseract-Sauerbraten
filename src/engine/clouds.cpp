@@ -78,7 +78,8 @@ namespace volumetricClouds
     VARP(vcfbmresolution, 64, 128, 128);
     VARP(vcfbmseed, -0x100000, 0, 0x100000);
     VARP(vcshadow, 0, 1, 1);
-    VARP(vcshadowmapsize, 64, 512, 2048);
+    VARP(vcshadowradius, 10, 100, 1000);              // shadow footprint half-width as a percentage of world size
+    VARP(vcshadowmapsize, 64, 128, 4096);
     VARP(vcshadowsamples, 1, 4, 8);
     VARP(vcshadowpcf, 0, 1, 2);
     VARP(vcclarity, 0, 1, 1);
@@ -102,7 +103,7 @@ namespace volumetricClouds
     VARR(vcdensity, 0, 50, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
     VARR(vcheight, -1000, 400, 1000);
-    VARR(vcthickness, 0, 40, 300);
+    VARR(vcthickness, 0, 50, 300);
     VARR(vcradius, 0, 3000, 10000);                  // 100 = worldsize, 0 disables the cloud layer
     VARR(vcscrollx, -1000, 0, 1000);
     VARR(vcscrolly, -1000, 0, 1000);
@@ -111,7 +112,7 @@ namespace volumetricClouds
     VARR(vcsilverradius, 0, 30, 100);              // radius of the sun mask as % of min screen dimension, 0 disables
     FVARR(vcsilvercontrast, 1.0f, 10.0f, 50.0f);
     FVARR(vcdarkness, 0.1f, 0.5f, 2.0f);
-    FVARR(vcshadowstrength, 0.0f, 0.75f, 1.0f);
+    FVARR(vcshadowstrength, 0.0f, 1.35f, 2.0f);
     CVARR(vccolour, 0xFFFFFF);
     VARR(vcnoisescale, -1000, 0, 1000);
 
@@ -544,6 +545,33 @@ namespace volumetricClouds
 
         bounds = vec4(base, top, maxclouddist, lastmillis / 1000.0f);
         dome = vec4(domek, camera1->o.x, camera1->o.y, maxclouddist);
+    }
+
+    static vec2 calcshadowmapcenter(float cloudmidz, float domek)
+    {
+        vec sdir = sunlightdir;
+        float slen = sdir.magnitude();
+        if(slen <= 1.0e-4f || sdir.z <= 1.0e-4f) return vec2(camera1->o.x, camera1->o.y);
+        sdir.div(slen);
+
+        float testimate = (cloudmidz - camera1->o.z) / sdir.z;
+        float t = testimate;
+        float a = -domek * (sdir.x * sdir.x + sdir.y * sdir.y);
+        float b = sdir.z;
+        float c = camera1->o.z - cloudmidz;
+        if(fabsf(a) > 1.0e-8f)
+        {
+            float disc = b * b - 4.0f * a * c;
+            if(disc >= 0.0f)
+            {
+                float s = sqrtf(max(disc, 0.0f));
+                float q = -0.5f * (b + (b < 0.0f ? -s : s));
+                float root0 = q / a;
+                float root1 = fabsf(q) > 1.0e-8f ? c / q : (-b + s) / (2.0f * a);
+                t = fabsf(root1 - testimate) < fabsf(root0 - testimate) ? root1 : root0;
+            }
+        }
+        return vec2(camera1->o.x + sdir.x * t, camera1->o.y + sdir.y * t);
     }
 
     static float getsilverfovscale()
@@ -1091,13 +1119,16 @@ namespace volumetricClouds
 
         if(doshadow && vcshadowtex && vcshadowfbo)
         {
-            float shadowworld = max(float(worldsize) * 2.0f, 1.0f);
+            float ws = max(float(worldsize), 1.0f);
+            float shadowradius = max(ws * float(vcshadowradius) / 100.0f, 1.0f);
+            float shadowworld = shadowradius * 2.0f;
             float worldpertexel = shadowworld / max(float(vcshadowsz), 1.0f);
-            float snappedx = floorf(camera1->o.x / worldpertexel) * worldpertexel;
-            float snappedy = floorf(camera1->o.y / worldpertexel) * worldpertexel;
+            float cloudmidz = 0.5f * (cloudbounds.x + cloudbounds.y);
+            vec2 shadowcenter = calcshadowmapcenter(cloudmidz, clouddome.x);
+            float snappedx = floorf(shadowcenter.x / worldpertexel) * worldpertexel;
+            float snappedy = floorf(shadowcenter.y / worldpertexel) * worldpertexel;
             float minx = snappedx - shadowworld * 0.5f;
             float miny = snappedy - shadowworld * 0.5f;
-            float cloudmidz = 0.5f * (cloudbounds.x + cloudbounds.y);
             vcshadowmapworld = vec4(minx, miny, worldpertexel, float(vcshadowsz));
             vcshadowmapstrength = shadowstrength;
 
