@@ -17,6 +17,7 @@ namespace volumetricClouds
     };
 
     GLuint vctex = 0, vcfbo = 0;
+    GLuint vcdepthtex = 0, vcdepthfbo = 0;
     GLuint vcatroustex = 0, vcatrousfbo = 0;
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
     GLuint vcbilateraltemptex = 0, vcbilateraltempfbo = 0;
@@ -39,6 +40,7 @@ namespace volumetricClouds
     enum VCDebugPass
     {
         VC_DEBUG_RAYMARCH = 0,
+        VC_DEBUG_DEPTH_CACHE,
         VC_DEBUG_ATROUS,
         VC_DEBUG_UPSCALE,
         VC_DEBUG_BILATERAL,
@@ -52,7 +54,7 @@ namespace volumetricClouds
     static const int VC_DEBUG_QUERY_COUNT = 3, VC_DEBUG_TIMESTAMPS = 2 + 2 * VC_DEBUG_PASS_COUNT;
     static const char * const vcdebugpassnames[VC_DEBUG_PASS_COUNT] =
     {
-        "main raymarch", "atrous filtering", "upscale", "bilateral blur", "clarity", "shadow map", "shadow application", "final composite"
+        "main raymarch", "depth cache", "atrous filtering", "upscale", "bilateral blur", "clarity", "shadow map", "shadow application", "final composite"
     };
     GLuint vcdebugquery[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     GLuint vcdebugtimestampquery[VC_DEBUG_QUERY_COUNT][VC_DEBUG_TIMESTAMPS] = { { 0 } };
@@ -60,7 +62,7 @@ namespace volumetricClouds
     int vcdebugtimestampcycle = 0, vcdebugtimestampwaiting = 0, vcdebugtimestampactive = -1;
     int vcdebugpassmask[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     bool vcdebuggpuquery = false, vcdebugtimestamps = false;
-    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
+    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
@@ -806,6 +808,7 @@ namespace volumetricClouds
     {
         if(!volumetricclouds || !vcconfigured) return;
         useshaderbyname("volumetricclouds");
+        useshaderbyname("volumetricclouddepth");
         useshaderbyname("atrousfilter");
         useshaderbyname("volumetriccloudsupscale");
         useshaderbyname("volumetriccloudsbilateral");
@@ -877,6 +880,7 @@ namespace volumetricClouds
         float shadowamount = clamp(shadowstrength * cloudsun.shadowHorizonFade, 0.0f, 1.0f);
 
         Shader *cloudshader = useshaderbyname("volumetricclouds");
+        Shader *depthshader = useshaderbyname("volumetricclouddepth");
         Shader *atrousshader = vcatrous ? useshaderbyname("atrousfilter") : NULL;
         Shader *upscaleshader = useshaderbyname("volumetriccloudsupscale");
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
@@ -905,6 +909,9 @@ namespace volumetricClouds
 
         CloudScissor cloudscissor;
         bool drawclouds = calccloudscissor(cloudbounds, clouddome, vcw, vch, cloudscissor);
+        bool usebilateral = drawclouds && vcblur && bilateralshader && depthshader;
+        bool useupscale = drawclouds && (vcw < vieww || vch < viewh) && upscaleshader && depthshader;
+        bool needdepthcache = usebilateral || useupscale;
 
         if(!doshadow && (vcshadowtex || vcshadowfbo))
             cleanupshadowmap();
@@ -914,6 +921,11 @@ namespace volumetricClouds
         {
             glGenTextures(1, &vctex);
             createtexture(vctex, vcw, vch, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+        }
+        if(needdepthcache && !vcdepthtex)
+        {
+            glGenTextures(1, &vcdepthtex);
+            createtexture(vcdepthtex, vcw, vch, NULL, 3, 0, GL_R32F, GL_TEXTURE_RECTANGLE);
         }
         if(drawclouds && !vcatroustex)
         {
@@ -942,6 +954,14 @@ namespace volumetricClouds
             glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vctex, 0);
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud buffer!");
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+        }
+        if(needdepthcache && !vcdepthfbo)
+        {
+            glGenFramebuffers_(1, &vcdepthfbo);
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcdepthfbo);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcdepthtex, 0);
+            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud depth cache!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
         if(drawclouds && !vcatrousfbo)
@@ -1076,6 +1096,22 @@ namespace volumetricClouds
 
         if(drawclouds)
         {
+            if(needdepthcache)
+            {
+                begindebugpass(VC_DEBUG_DEPTH_CACHE);
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcdepthfbo);
+                glViewport(0, 0, vcw, vch);
+                glDisable(GL_BLEND);
+                glDisable(GL_SCISSOR_TEST);
+                depthshader->set();
+                screenquad(vcw, vch);
+                glActiveTexture_(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_RECTANGLE, vcdepthtex);
+                glActiveTexture_(GL_TEXTURE0);
+                GLOBALPARAMF(tvclouddepthscale, float(vcw)/vieww, float(vch)/viewh);
+                enddebugpass(VC_DEBUG_DEPTH_CACHE);
+            }
+
             begindebugpass(VC_DEBUG_RAYMARCH);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
             glViewport(0, 0, vcw, vch);
@@ -1119,7 +1155,7 @@ namespace volumetricClouds
             compositetexw = vcw;
             compositetexh = vch;
 
-            if(vcblur && bilateralshader)
+            if(usebilateral)
             {
                 begindebugpass(VC_DEBUG_BILATERAL);
                 GLOBALPARAMF(tvbilateraledge, vcbilateraledge);
@@ -1160,7 +1196,7 @@ namespace volumetricClouds
                 compositetexh = viewh;
                 enddebugpass(VC_DEBUG_BILATERAL);
             }
-            else if((vcw < vieww || vch < viewh) && upscaleshader)
+            else if(useupscale)
             {
                 begindebugpass(VC_DEBUG_UPSCALE);
                 // Depth-aware upsample to avoid low-res cloud alpha bleeding over
@@ -1338,6 +1374,16 @@ namespace volumetricClouds
         {
             glDeleteTextures(1, &vctex);
             vctex = 0;
+        }
+        if(vcdepthfbo)
+        {
+            glDeleteFramebuffers_(1, &vcdepthfbo);
+            vcdepthfbo = 0;
+        }
+        if(vcdepthtex)
+        {
+            glDeleteTextures(1, &vcdepthtex);
+            vcdepthtex = 0;
         }
         if(vcatrousfbo)
         {
