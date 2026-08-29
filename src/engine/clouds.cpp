@@ -931,9 +931,18 @@ namespace volumetricClouds
         float ws = max(float(worldsize), 1.0f);
         float noisemul = noisesizemul();
         float basewavelength = max(ws * 0.30f * noisemul, 1.0f);
-        GLOBALPARAMF(tvcloudnoise, 1.0f / basewavelength, 1.0f / max(ws * 0.12f * noisemul, 1.0f), 0.50f, 0.95f);
-        GLOBALPARAMF(tvcloudfbmparams, 1.0f / float(VC_FBM_PERIOD), float(vcfbmtexsize) / float(VC_FBM_PERIOD),
-                     logf(float(vcfbmtexsize)) / M_LN2);
+        float basenoisescale = 1.0f / basewavelength;
+        float detailnoisescale = 1.0f / max(ws * 0.12f * noisemul, 1.0f);
+        float fbmtexelsperunit = float(vcfbmtexsize) / float(VC_FBM_PERIOD);
+        float baselodoffset = logf(max(basenoisescale * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        float macrolodoffset = logf(max(basenoisescale * 0.22f * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        float detaillodoffset = logf(max(detailnoisescale * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        float lightlodoffset = logf(max(basenoisescale * 0.35f * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        float silverlodoffset = logf(max(basenoisescale * 0.55f * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        GLOBALPARAMF(tvcloudnoise, basenoisescale, detailnoisescale, 0.50f, 0.95f);
+        GLOBALPARAMF(tvcloudfbmparams, 1.0f / float(VC_FBM_PERIOD), fbmtexelsperunit, logf(float(vcfbmtexsize)) / M_LN2);
+        GLOBALPARAMF(tvcloudlodoffsets, baselodoffset, macrolodoffset, detaillodoffset, lightlodoffset);
+        GLOBALPARAMF(tvcloudsilverlodoffset, silverlodoffset);
         GLOBALPARAMF(tvcloudstructure, float(vcstructure) / 100.0f);
         GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
