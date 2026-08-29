@@ -36,6 +36,8 @@ namespace volumetricClouds
     int vcweatherseed = 1337, vcfbmtexseed = -1, vcfbmtexsize = 0;
     bool vcweatherdirty = true;
 
+    static void cleanupbuffers();
+
     static const int VC_WEATHER_MAP_SIZE = 512, VC_FBM_PERIOD = 16, VC_FBM_OCTAVES = 4;
     enum VCDebugPass
     {
@@ -61,7 +63,7 @@ namespace volumetricClouds
     int vcdebugquerycycle = 0, vcdebugquerywaiting = 0, vcdebugcpustart = 0;
     int vcdebugtimestampcycle = 0, vcdebugtimestampwaiting = 0, vcdebugtimestampactive = -1;
     int vcdebugpassmask[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
-    bool vcdebuggpuquery = false, vcdebugtimestamps = false;
+    bool vcdebuggpuquery = false, vcdebugtimestamps = false, vcdebugcputimer = false;
     float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
 
     // graphic settings
@@ -72,9 +74,10 @@ namespace volumetricClouds
     VARP(vcatrous, 0, 1, 1);
     VARP(vcatrousiter, 1, 2, 3);
     FVARP(vcatrousalphak, 0.0f, 16.0f, 256.0f);
-    FVARP(vcscale, 0.125f, 0.25f, 2.0f);
+    FVARP(vcscale, 0.125f, 0.25f, 0.5f);
+    FVARP(vcbudget, 0.0f, 0.0f, 2000.0f);          // target GPU time in milliseconds, 0 disables adaptation
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
-    VARP(vcsteps, 4, 32, 128);
+    VARP(vcsteps, 4, 32, 48);
     FVARP(vcmaxviewstep, 0.0f, 0.0f, 1.0e7f);       // maximum far-view step in world units, 0 derives it from cloud/world scale
     VARP(vcsunsteps, 4, 4, 64);
     VARP(vcfbmresolution, 64, 128, 128);
@@ -226,6 +229,67 @@ namespace volumetricClouds
         return clamp(exp2f(float(vcnoisescale) / 100.0f), 1.0f / 1024.0f, 1024.0f);
     }
 
+    static const float VC_BUDGET_MIN_SCALE = 0.125f, VC_BUDGET_MAX_SCALE = 0.5f;
+    static const int VC_BUDGET_MIN_STEPS = 4, VC_BUDGET_MAX_STEPS = 48;
+    static bool vcbudgetinitialized = false;
+    static float vcbudgetscale = 0.25f, vcbudgetsteps = 32.0f;
+    static float vcbudgetfilteredms = -1.0f, vcbudgetlasttarget = -1.0f;
+    static int vcbudgetlastadjust = 0;
+    static float vceffectivescale = 0.25f;
+    static int vceffectivesteps = 32;
+
+    static void preparebudgetsettings()
+    {
+        if(vcbudget <= 0.0f)
+        {
+            vcbudgetinitialized = false;
+            vcbudgetfilteredms = -1.0f;
+            vcbudgetlasttarget = vcbudget;
+            vceffectivescale = clamp(vcscale, VC_BUDGET_MIN_SCALE, VC_BUDGET_MAX_SCALE);
+            vceffectivesteps = clamp(vcsteps, VC_BUDGET_MIN_STEPS, VC_BUDGET_MAX_STEPS);
+            return;
+        }
+
+        if(!vcbudgetinitialized)
+        {
+            vcbudgetscale = clamp(vcscale, VC_BUDGET_MIN_SCALE, VC_BUDGET_MAX_SCALE);
+            vcbudgetsteps = float(clamp(vcsteps, VC_BUDGET_MIN_STEPS, VC_BUDGET_MAX_STEPS));
+            vcbudgetfilteredms = -1.0f;
+            vcbudgetlastadjust = getclockmillis();
+            vcbudgetinitialized = true;
+        }
+        if(vcbudgetlasttarget != vcbudget)
+        {
+            vcbudgetfilteredms = -1.0f;
+            vcbudgetlasttarget = vcbudget;
+        }
+
+        // Quantize scale to avoid reallocating every render target for tiny feedback changes.
+        vceffectivescale = clamp(floorf(vcbudgetscale * 64.0f + 0.5f) / 64.0f,
+                                     VC_BUDGET_MIN_SCALE, VC_BUDGET_MAX_SCALE);
+        vceffectivesteps = clamp(int(floorf(vcbudgetsteps + 0.5f)), VC_BUDGET_MIN_STEPS, VC_BUDGET_MAX_STEPS);
+    }
+
+    static void updatebudgetcontroller(float measuredms)
+    {
+        if(vcbudget <= 0.0f || !vcbudgetinitialized || !(measuredms > 0.0f)) return;
+
+        vcbudgetfilteredms = vcbudgetfilteredms > 0.0f ? vcbudgetfilteredms + (measuredms - vcbudgetfilteredms) * 0.20f : measuredms;
+        int now = getclockmillis();
+        if(now - vcbudgetlastadjust < 250) return;
+        vcbudgetlastadjust = now;
+
+        float ratio = vcbudget / max(vcbudgetfilteredms, 1.0e-3f);
+        if(ratio >= 0.92f && ratio <= 1.08f) return;
+
+        // Move scale and primary samples together with a conservative exponent
+        // so delayed GPU queries do not turn a transient spike into a large
+        // quality swing. Nested sun samples remain entirely user-controlled.
+        float factor = powf(clamp(ratio, 0.25f, 4.0f), 0.12f);
+        vcbudgetscale = clamp(vcbudgetscale * factor, VC_BUDGET_MIN_SCALE, VC_BUDGET_MAX_SCALE);
+        vcbudgetsteps = clamp(vcbudgetsteps * factor, float(VC_BUDGET_MIN_STEPS), float(VC_BUDGET_MAX_STEPS));
+    }
+
     static void polldebugtimer()
     {
         loopi(VC_DEBUG_QUERY_COUNT) if(vcdebugtimestampwaiting&(1<<i))
@@ -238,6 +302,7 @@ namespace volumetricClouds
             glGetQueryObjectui64v_(vcdebugtimestampquery[i][0], GL_QUERY_RESULT, &totalstart);
             glGetQueryObjectui64v_(vcdebugtimestampquery[i][1], GL_QUERY_RESULT, &totalend);
             vcdebugms = max(float(totalend - totalstart) * 1.0e-6f, 0.0f);
+            updatebudgetcontroller(vcdebugms);
             loopj(VC_DEBUG_PASS_COUNT) if(vcdebugpassmask[i]&(1<<j))
             {
                 GLuint64EXT passstart = 0, passend = 0;
@@ -259,6 +324,7 @@ namespace volumetricClouds
             GLuint64EXT result = 0;
             glGetQueryObjectui64v_(vcdebugquery[i], GL_QUERY_RESULT, &result);
             vcdebugms = max(float(result) * 1.0e-6f, 0.0f);
+            updatebudgetcontroller(vcdebugms);
             vcdebugquerywaiting &= ~(1<<i);
         }
     }
@@ -267,11 +333,12 @@ namespace volumetricClouds
     {
         vcdebuggpuquery = false;
         vcdebugtimestamps = false;
+        vcdebugcputimer = false;
         vcdebugtimestampactive = -1;
-        if(!debugvc) return;
+        if(!debugvc && vcbudget <= 0.0f) return;
 
         polldebugtimer();
-        if(hasTQ && glQueryCounter_)
+        if(debugvc && hasTQ && glQueryCounter_)
         {
             if(!vcdebugtimestampquery[0][0]) glGenQueries_(VC_DEBUG_QUERY_COUNT * VC_DEBUG_TIMESTAMPS, &vcdebugtimestampquery[0][0]);
             if(!(vcdebugtimestampwaiting&(1<<vcdebugtimestampcycle)))
@@ -296,7 +363,11 @@ namespace volumetricClouds
             }
         }
 
+        // A temporarily unavailable GPU query is not comparable to GPU
+        // milliseconds, so only fall back to CPU timing on hardware without TQ.
+        if(hasTQ) return;
         vcdebugcpustart = getclockmillis();
+        vcdebugcputimer = true;
     }
 
     static void begindebugpass(VCDebugPass pass)
@@ -314,7 +385,7 @@ namespace volumetricClouds
 
     static void enddebugtimer()
     {
-        if(!debugvc) return;
+        if(!debugvc && vcbudget <= 0.0f) return;
         if(vcdebugtimestamps)
         {
             glQueryCounter_(vcdebugtimestampquery[vcdebugtimestampactive][1], GL_TIMESTAMP);
@@ -331,7 +402,12 @@ namespace volumetricClouds
             vcdebugquerycycle = (vcdebugquerycycle + 1) % VC_DEBUG_QUERY_COUNT;
             vcdebuggpuquery = false;
         }
-        else vcdebugms = max(float(getclockmillis() - vcdebugcpustart), 0.0f);
+        else if(vcdebugcputimer)
+        {
+            vcdebugms = max(float(getclockmillis() - vcdebugcpustart), 0.0f);
+            updatebudgetcontroller(vcdebugms);
+            vcdebugcputimer = false;
+        }
     }
 
     static void cleanupdebugtimer()
@@ -348,6 +424,7 @@ namespace volumetricClouds
         memset(vcdebugpassmask, 0, sizeof(vcdebugpassmask));
         vcdebuggpuquery = false;
         vcdebugtimestamps = false;
+        vcdebugcputimer = false;
         vcdebugms = -1.0f;
         loopi(VC_DEBUG_PASS_COUNT) vcdebugpassms[i] = -1.0f;
     }
@@ -874,6 +951,7 @@ namespace volumetricClouds
             if(vcshadowtex || vcshadowfbo) cleanupshadowmap();
             return;
         }
+        preparebudgetsettings();
 
         const CloudSunParams &cloudsun = calccloudsunparams();
         float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
@@ -891,11 +969,11 @@ namespace volumetricClouds
         bool doshadow = shadowmapshader && shadowapplyshader;
         if(!cloudshader) return;
 
-        int targetw = max(int(ceilf(vieww * vcscale)), 1),
-            targeth = max(int(ceilf(viewh * vcscale)), 1);
+        int targetw = max(int(ceilf(vieww * vceffectivescale)), 1),
+            targeth = max(int(ceilf(viewh * vceffectivescale)), 1);
         if(targetw != vcw || targeth != vch || vieww != vcfullw || viewh != vcfullh)
         {
-            cleanup();
+            cleanupbuffers();
             vcw = targetw;
             vch = targeth;
             vcfullw = vieww;
@@ -1068,12 +1146,18 @@ namespace volumetricClouds
         vec4 silverscreen = calcsilverscreenparams(cloudsun.direction);
         GLOBALPARAMF(tvcloudsilvermask, silverscreen.x, silverscreen.y, silverscreen.z, silverscreen.w);
         GLOBALPARAMF(tvcloudsilvercontrast, max(vcsilvercontrast, 1.0f));
-        GLOBALPARAMF(tvcloudsteps, float(vcsteps));
+        GLOBALPARAMF(tvcloudsteps, float(vceffectivesteps));
         float cloudthickness = max(cloudbounds.y - cloudbounds.x, 1.0f);
         float automaxviewstep = min(min(cloudthickness / 3.0f, basewavelength / 3.0f), ws / 8.0f);
         float maxviewstep = max(vcmaxviewstep > 0.0f ? vcmaxviewstep : automaxviewstep, 1.0e-3f);
         float nearviewstep = min(maxviewstep, min(min(cloudthickness / 24.0f, basewavelength / 16.0f), ws / 128.0f));
         float mediumviewstep = min(maxviewstep, min(min(cloudthickness / 8.0f, basewavelength / 8.0f), ws / 32.0f));
+        // When the primary step budget falls, relax the world-space subdivision
+        // caps too; otherwise these inner subdivisions can defeat the controller.
+        float budgetsteprelax = vcbudget > 0.0f ? float(VC_BUDGET_MAX_STEPS) / float(vceffectivesteps) : 1.0f;
+        nearviewstep *= budgetsteprelax;
+        mediumviewstep *= budgetsteprelax;
+        maxviewstep *= budgetsteprelax;
         GLOBALPARAMF(tvcloudviewsteps, max(nearviewstep, 1.0e-3f), max(mediumviewstep, 1.0e-3f), maxviewstep, ws);
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
@@ -1346,6 +1430,13 @@ namespace volumetricClouds
             glEnable(GL_BLEND);
             int texty = h + FONTH/4;
             draw_textf("volumetric clouds total %.3f ms", 0, texty, max(vcdebugms, 0.0f));
+            if(vcbudget > 0.0f)
+            {
+                texty += FONTH;
+                draw_textf("  budget %.3f ms filtered %.3f ms", 0, texty, vcbudget, max(vcbudgetfilteredms, 0.0f));
+                texty += FONTH;
+                draw_textf("  adaptive scale %.3f steps %d", 0, texty, vceffectivescale, vceffectivesteps);
+            }
             texty += FONTH;
             draw_textf("  FBM precomputed R8 %d^3", 0, texty, vcfbmtexsize);
             loopi(VC_DEBUG_PASS_COUNT)
@@ -1363,7 +1454,7 @@ namespace volumetricClouds
         return true;
     }
 
-    void cleanup(bool shutdown)
+    static void cleanupbuffers()
     {
         if(vcfbo)
         {
@@ -1425,12 +1516,19 @@ namespace volumetricClouds
             glDeleteTextures(1, &vcclaritytex);
             vcclaritytex = 0;
         }
+        vccompositetex = 0;
+        vccompositetexparams = vec4(0, 0, 0, 0);
+        vcw = vch = vcfullw = vcfullh = 0;
+    }
+
+    void cleanup(bool shutdown)
+    {
+        cleanupbuffers();
         cleanupshadowmap();
         cleanupweathermap();
         if(shutdown) cleanupfbmtexture();
         cleanupdebugtimer();
-        vccompositetex = 0;
-        vccompositetexparams = vec4(0, 0, 0, 0);
-        vcw = vch = vcfullw = vcfullh = 0;
+        vcbudgetinitialized = false;
+        vcbudgetfilteredms = -1.0f;
     }
 }
