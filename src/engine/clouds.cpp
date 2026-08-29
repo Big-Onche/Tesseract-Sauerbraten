@@ -547,12 +547,9 @@ namespace volumetricClouds
         dome = vec4(domek, camera1->o.x, camera1->o.y, maxclouddist);
     }
 
-    static vec2 calcshadowmapcenter(float cloudmidz, float domek)
+    static vec2 calcshadowmapcenter(float cloudmidz, float domek, const vec &sdir)
     {
-        vec sdir = sunlightdir;
-        float slen = sdir.magnitude();
-        if(slen <= 1.0e-4f || sdir.z <= 1.0e-4f) return vec2(camera1->o.x, camera1->o.y);
-        sdir.div(slen);
+        if(sdir.z <= 1.0e-4f) return vec2(camera1->o.x, camera1->o.y);
 
         float testimate = (cloudmidz - camera1->o.z) / sdir.z;
         float t = testimate;
@@ -596,12 +593,94 @@ namespace volumetricClouds
         vcscrolloffset.madd(vec2(float(vcscrollx), float(vcscrolly)), deltaseconds);
     }
 
-    static vec4 calcsilverscreenparams()
+    struct CloudSunParams
+    {
+        vec direction, tint, ambientTint, directTint, silverWarm, phase, multiscatParams;
+        vec4 silver0, silver1, multiscatExtScale, sunExtScale;
+        float strength, ambientBoost, shadowHorizonFade;
+    };
+
+    static const CloudSunParams &calccloudsunparams()
+    {
+        static CloudSunParams params;
+        static vec cacheddirection, cachedcolor, cachedphase;
+        static vec4 cachedmultiscat;
+        static float cachedcolorscale = 0.0f;
+        static bool valid = false;
+
+        vec sourcecolor(float(sunlight.x), float(sunlight.y), float(sunlight.z));
+        vec phase(vcphaseg, vcphaseg2, vcphaseblend);
+        vec4 multiscat(vcmultiscat, vcmultiscatext, vcmultiscatphase, float(vcmultiscatoctaves));
+        float colorscale = 2.0f * ldrscaleb * sunlightscale;
+        if(valid && cacheddirection.x == sunlightdir.x && cacheddirection.y == sunlightdir.y && cacheddirection.z == sunlightdir.z &&
+           cachedcolor.x == sourcecolor.x && cachedcolor.y == sourcecolor.y && cachedcolor.z == sourcecolor.z &&
+           cachedphase.x == phase.x && cachedphase.y == phase.y && cachedphase.z == phase.z &&
+           cachedmultiscat.x == multiscat.x && cachedmultiscat.y == multiscat.y && cachedmultiscat.z == multiscat.z &&
+           cachedmultiscat.w == multiscat.w && cachedcolorscale == colorscale) return params;
+
+        valid = true;
+        cacheddirection = sunlightdir;
+        cachedcolor = sourcecolor;
+        cachedphase = phase;
+        cachedmultiscat = multiscat;
+        cachedcolorscale = colorscale;
+
+        params.direction = cacheddirection;
+        float sundirlen = params.direction.magnitude();
+        if(sundirlen > 1.0e-4f) params.direction.div(sundirlen);
+        else params.direction.div(1.0e-4f);
+
+        vec suncolor(max(cachedcolor.x * colorscale, 0.0f), max(cachedcolor.y * colorscale, 0.0f), max(cachedcolor.z * colorscale, 0.0f));
+        float sunscale = max(max(suncolor.x, suncolor.y), suncolor.z);
+        float sunlum = suncolor.dot(vec(0.299f, 0.587f, 0.114f));
+        params.tint = sunscale > 1.0e-4f ? vec(suncolor).div(sunscale) : vec(1, 1, 1);
+        params.strength = max(sunlum, 0.85f * sunscale);
+
+        float sunup = clamp(params.direction.z * 0.5f + 0.5f, 0.0f, 1.0f);
+        float sunheight = clamp(params.direction.z, 0.0f, 1.0f);
+        float ambientmix = 0.18f + 0.12f * sunup;
+        params.ambientBoost = 0.03f + 0.09f * sunup;
+        params.ambientTint = vec(1.0f + (params.tint.x - 1.0f) * ambientmix, 1.0f + (params.tint.y - 1.0f) * ambientmix,
+                                 1.0f + (params.tint.z - 1.0f) * ambientmix);
+        params.directTint = vec(0.25f + 0.75f * params.tint.x, 0.25f + 0.75f * params.tint.y, 0.25f + 0.75f * params.tint.z);
+        params.silverWarm = vec(0.35f + 0.65f * params.tint.x * 1.15f, 0.35f + 0.65f * params.tint.y * 1.15f,
+                                0.35f + 0.65f * params.tint.z * 1.15f);
+        params.silver0 = vec4(2.5f + 4.5f * sunheight, 1.18f - 0.18f * sunheight, 0.34f - 0.10f * sunheight,
+                              0.54f - 0.14f * sunheight);
+        params.silver1 = vec4(0.94f - 0.10f * sunheight, 0.28f - 0.08f * sunheight, 0.46f - 0.12f * sunheight,
+                              0.90f - 0.10f * sunheight);
+
+        float multiscatext = clamp(cachedmultiscat.y, 0.0f, 1.0f);
+        float multiscatscatter = clamp(cachedmultiscat.x, 0.0f, multiscatext);
+        float multiscatphase = clamp(cachedmultiscat.z, 0.0f, 1.0f);
+        int configuredoctaves = clamp(int(cachedmultiscat.w), 1, 4), activeoctaves = 1;
+        float contribution = multiscatscatter;
+        for(int i = 1; i < 4; ++i)
+        {
+            if(i >= configuredoctaves || contribution <= 1.0e-5f) break;
+            activeoctaves++;
+            contribution *= multiscatscatter;
+        }
+        float multiscatext2 = multiscatext * multiscatext;
+        params.multiscatExtScale = vec4(1.0f, multiscatext, multiscatext2, multiscatext2 * multiscatext);
+        params.sunExtScale = vec4(params.multiscatExtScale.x, activeoctaves > 1 ? params.multiscatExtScale.y : 0.0f,
+                                  activeoctaves > 2 ? params.multiscatExtScale.z : 0.0f,
+                                  activeoctaves > 3 ? params.multiscatExtScale.w : 0.0f);
+        params.multiscatParams = vec(multiscatscatter, multiscatphase, float(activeoctaves));
+        params.phase = vec(clamp(cachedphase.x, -0.95f, 0.95f), clamp(cachedphase.y, -0.95f, 0.95f),
+                           clamp(cachedphase.z, 0.0f, 1.0f));
+
+        float horizonfade = clamp((params.direction.z - 0.08f) / 0.12f, 0.0f, 1.0f);
+        params.shadowHorizonFade = horizonfade * horizonfade * (3.0f - 2.0f * horizonfade);
+        return params;
+    }
+
+    static vec4 calcsilverscreenparams(const vec &sdir)
     {
         if(vcsilverradius <= 0 || sunlight.iszero() || sunlightscale <= 1.0e-4f) return vec4(0, 0, 0, 0);
 
         vec sunpoint(camera1->o);
-        sunpoint.madd(sunlightdir, max(nearplane * 4.0f, 1.0f));
+        sunpoint.madd(sdir, max(nearplane * 4.0f, 1.0f));
 
         vec4 sunclip;
         camprojmatrix.transform(sunpoint, sunclip);
@@ -612,7 +691,7 @@ namespace volumetricClouds
 
         float screenedge = max(fabsf(sunndc.x), fabsf(sunndc.y));
         float edgefade = clamp(1.0f - max(screenedge - 0.90f, 0.0f) / 0.40f, 0.0f, 1.0f);
-        float horizonfade = clamp((sunlightdir.z - 0.02f) / 0.10f, 0.0f, 1.0f);
+        float horizonfade = clamp((sdir.z - 0.02f) / 0.10f, 0.0f, 1.0f);
         float screenfade = edgefade * horizonfade;
         if(screenfade <= 1.0e-4f) return vec4(0, 0, 0, 0);
 
@@ -793,16 +872,19 @@ namespace volumetricClouds
             return;
         }
 
+        const CloudSunParams &cloudsun = calccloudsunparams();
+        float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
+        float shadowamount = clamp(shadowstrength * cloudsun.shadowHorizonFade, 0.0f, 1.0f);
+
         Shader *cloudshader = useshaderbyname("volumetricclouds");
         Shader *atrousshader = vcatrous ? useshaderbyname("atrousfilter") : NULL;
         Shader *upscaleshader = useshaderbyname("volumetriccloudsupscale");
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
         Shader *clarityshader = vcclarity ? useshaderbyname("volumetriccloudclarity") : NULL;
-        Shader *shadowmapshader = vcshadow ? useshaderbyname("volumetriccloudshadowmap") : NULL;
-        Shader *shadowapplyshader = vcshadow ? useshaderbyname("volumetriccloudshadowapply") : NULL;
+        Shader *shadowmapshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowmap") : NULL;
+        Shader *shadowapplyshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowapply") : NULL;
         bool useclarity = vcclarity && clarityshader && vcclaritystrength > 1e-4f;
-        float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
-        bool doshadow = vcshadow && shadowmapshader && shadowapplyshader && shadowstrength > 1e-4f;
+        bool doshadow = shadowmapshader && shadowapplyshader;
         if(!cloudshader) return;
 
         int targetw = max(int(ceilf(vieww * vcscale)), 1),
@@ -948,11 +1030,22 @@ namespace volumetricClouds
         GLOBALPARAMF(vclouddensity, float(vcdensity) / 100.0f);
         GLOBALPARAMF(vcloudalpha, vcalpha);
         GLOBALPARAMF(vcloudthickness, vcdarkness);
-        GLOBALPARAMF(vcloudphaseparams, vcphaseg, vcphaseg2, vcphaseblend);
-        GLOBALPARAMF(vcloudmultiscatparams, vcmultiscat, vcmultiscatext, vcmultiscatphase, float(vcmultiscatoctaves));
+        GLOBALPARAMF(tvcloudsundir, cloudsun.direction.x, cloudsun.direction.y, cloudsun.direction.z, fabsf(cloudsun.direction.z));
+        GLOBALPARAMF(tvcloudsuntintstrength, cloudsun.tint.x, cloudsun.tint.y, cloudsun.tint.z, cloudsun.strength);
+        GLOBALPARAM(tvcloudambienttint, cloudsun.ambientTint);
+        GLOBALPARAMF(tvcloudambientboost, cloudsun.ambientBoost);
+        GLOBALPARAM(tvclouddirecttint, cloudsun.directTint);
+        GLOBALPARAM(tvcloudsilverwarm, cloudsun.silverWarm);
+        GLOBALPARAM(tvcloudphaseparams, cloudsun.phase);
+        GLOBALPARAMF(tvcloudmultiscatparams, cloudsun.multiscatParams.x, cloudsun.multiscatParams.y, cloudsun.multiscatParams.z);
+        GLOBALPARAMF(tvcloudmultiscatextscale, cloudsun.multiscatExtScale.x, cloudsun.multiscatExtScale.y,
+                     cloudsun.multiscatExtScale.z, cloudsun.multiscatExtScale.w);
+        GLOBALPARAMF(tvcloudsunextscale, cloudsun.sunExtScale.x, cloudsun.sunExtScale.y, cloudsun.sunExtScale.z, cloudsun.sunExtScale.w);
+        GLOBALPARAMF(tvcloudsilverparams0, cloudsun.silver0.x, cloudsun.silver0.y, cloudsun.silver0.z, cloudsun.silver0.w);
+        GLOBALPARAMF(tvcloudsilverparams1, cloudsun.silver1.x, cloudsun.silver1.y, cloudsun.silver1.z, cloudsun.silver1.w);
         GLOBALPARAMF(tvcloudfogdistmul, max(vcfogdistmul, 1.0e-3f));
         GLOBALPARAMF(tvcloudatmoblend, float(vcatmoblendmin) / 100.0f, float(vcatmoblendmax) / 100.0f);
-        vec4 silverscreen = calcsilverscreenparams();
+        vec4 silverscreen = calcsilverscreenparams(cloudsun.direction);
         GLOBALPARAMF(tvcloudsilvermask, silverscreen.x, silverscreen.y, silverscreen.z, silverscreen.w);
         GLOBALPARAMF(tvcloudsilvercontrast, max(vcsilvercontrast, 1.0f));
         GLOBALPARAMF(tvcloudsteps, float(vcsteps));
@@ -964,8 +1057,6 @@ namespace volumetricClouds
         GLOBALPARAMF(tvcloudviewsteps, max(nearviewstep, 1.0e-3f), max(mediumviewstep, 1.0e-3f), maxviewstep, ws);
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
-        GLOBALPARAM(sunlightdir, sunlightdir);
-        GLOBALPARAMF(sunlightcolor, sunlight.x*(2.0f*ldrscaleb)*sunlightscale, sunlight.y*(2.0f*ldrscaleb)*sunlightscale, sunlight.z*(2.0f*ldrscaleb)*sunlightscale);
         vec4 atmoopticaldepthparams, atmosunlightparams;
         vec atmosunweight, atmomieparams, atmobetarayleigh, atmobetamie, atmobetaozone;
         calcatmosphereparams(atmoopticaldepthparams, atmosunweight, atmomieparams, atmobetarayleigh, atmobetamie, atmobetaozone, atmosunlightparams);
@@ -1133,13 +1224,13 @@ namespace volumetricClouds
             float shadowworld = shadowradius * 2.0f;
             float worldpertexel = shadowworld / max(float(vcshadowsz), 1.0f);
             float cloudmidz = 0.5f * (cloudbounds.x + cloudbounds.y);
-            vec2 shadowcenter = calcshadowmapcenter(cloudmidz, clouddome.x);
+            vec2 shadowcenter = calcshadowmapcenter(cloudmidz, clouddome.x, cloudsun.direction);
             float snappedx = floorf(shadowcenter.x / worldpertexel) * worldpertexel;
             float snappedy = floorf(shadowcenter.y / worldpertexel) * worldpertexel;
             float minx = snappedx - shadowworld * 0.5f;
             float miny = snappedy - shadowworld * 0.5f;
             vcshadowmapworld = vec4(minx, miny, worldpertexel, float(vcshadowsz));
-            vcshadowmapstrength = shadowstrength;
+            vcshadowmapstrength = shadowamount;
 
             GLOBALPARAMF(tvshadowmapworld, minx, miny, worldpertexel, float(vcshadowsz));
             GLOBALPARAMF(tvcloudshadowsamples, float(vcshadowsamples));
@@ -1161,7 +1252,7 @@ namespace volumetricClouds
             glViewport(0, 0, vieww, viewh);
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, vcshadowtex);
-            GLOBALPARAMF(tvcloudshadowparams, shadowstrength, cloudmidz, 0.08f, 0.20f);
+            GLOBALPARAMF(tvcloudshadowparams, shadowamount, cloudmidz);
             GLOBALPARAMF(tvcloudshadowpcf, float(vcshadowpcf));
 
             glEnable(GL_BLEND);
