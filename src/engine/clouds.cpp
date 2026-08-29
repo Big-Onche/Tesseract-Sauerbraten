@@ -1083,7 +1083,10 @@ namespace volumetricClouds
             clearcloudtarget();
             glEnable(GL_SCISSOR_TEST);
             setcloudscissor(cloudscissor, true);
-            cloudshader->set();
+            int multiscatoctaves = clamp(int(cloudsun.multiscatParams.z), 1, 4);
+            // The base program is one lane; variant columns 0..2 are two through four lanes.
+            if(multiscatoctaves > 1) cloudshader->setvariant(multiscatoctaves - 2, 0);
+            else cloudshader->set();
             screenquad(vcw, vch);
             enddebugpass(VC_DEBUG_RAYMARCH);
 
