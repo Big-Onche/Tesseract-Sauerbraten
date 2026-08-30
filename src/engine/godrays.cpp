@@ -312,8 +312,13 @@ namespace geometry
     VARP(grgatrousiter, 1, 2, 3);
     VARP(grgglobalstrength, 0, 0, 3);
     VAR(debuggrg, 0, 0, 7);
-    FVARP(grgshadowbias, 0.0f, 2.0f, 32.0f);
+    FVARP(grgshadowbias, 0.0f, 0.0f, 32.0f);
     FVARP(grgforwardexp, 0.25f, 5.0f, 32.0f);
+    FVARP(grgisolationradius, 0.0f, 128.0f, 256.0f);
+    FVARP(grgisolationpower, 0.01f, 0.05f, 4.0f);
+    FVARP(grgtransitionboost, 0.0f, 1.5f, 2.0f);
+    FVARP(grgdirectfill, 0.0f, 0.0f, 1.0f);
+    FVARP(grgcsmfade, 0.0f, 0.05f, 0.25f);
 
     FVAR(grgatrousalphak, 0.0f, 0.0f, 256.0f);
     FVAR(grgatrousdepth, 0.0f, 2048.0f, 8192.0f);
@@ -543,8 +548,10 @@ namespace geometry
         LOCALPARAMF(godRayGeomParams, max(grgdensity, 0.25f), clamp(grgdecay, 0.0f, 1.0f), maxdistance, max(grgforwardexp, 0.25f));
         LOCALPARAMI(godRayGeomSteps, grgsteps);
         LOCALPARAMI(godRayGeomDebug, debugmode);
-        LOCALPARAMF(godRayGeomDistanceParams, grgstrength*strengthscale(), 0.0f, 0.0f, 0.0f);
-        LOCALPARAMF(godRayGeomShapeParams, max(grgshadowbias, 0.0f), clamp(grgthreshold, 0.0f, 1.0f), 0.0f, 0.0f);
+        LOCALPARAMF(godRayGeomDistanceParams, grgstrength*strengthscale(), max(grgtransitionboost, 0.0f), max(grgdirectfill, 0.0f),
+                    max(grgisolationpower, 0.25f));
+        LOCALPARAMF(godRayGeomShapeParams, max(grgshadowbias, 0.0f), clamp(grgthreshold, 0.0f, 1.0f), max(grgisolationradius, 0.0f),
+                    clamp(grgcsmfade, 0.0f, 0.25f));
         LOCALPARAMI(csmcount, csmsplits);
         screenquad();
     }
@@ -687,8 +694,8 @@ namespace geometry
 
         static const char * const modelabels[7] =
         {
-            "raw visibility", "excess / camera transitions", "direct light fill contribution", "final shaft signal",
-            "CSM coverage (green inside, red outside)", "shadow bias (log heat map)", "local isolation mask (future / zero)"
+            "raw visibility", "excess / camera transitions", "legacy direct fill (disabled by default)", "final shaft signal",
+            "CSM coverage (green inside, red outside)", "shadow bias (log heat map)", "local isolation mask"
         };
         static const char * const stagelabels[3] = { "raw raymarch", "depth-aware upsample", "final" };
         GLuint textures[3] = { raytex, raydebugtex, debugcompositetex };
