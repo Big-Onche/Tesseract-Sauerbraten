@@ -11,6 +11,7 @@ static const int patchSize = 32, maxInstances = 1<<20, impulseMaxEvents = 64, im
 static const int IMPULSE_PLAYER = 2;
 
 VARP(grass, 0, 1, 1);
+VARP(improvedgrass, 0, 1, 1);
 VARP(grassdist, 0, 768, 10000);
 FVARP(grasstaper, 0, 0.3f, 1);
 FVARFP(grassstep, 0.5f, 3.5, 8, settingsChanged());
@@ -179,7 +180,7 @@ static void pruneImpulses()
 void addImpulse(const vec &position, const vec &direction, float radius, float strength, int lifetime, int type, float propagationSpeed,
                 float falloff, float radial)
 {
-    if(!grassimpulses || (position.x < 0 && position.y < 0 && position.z < 0) || radius <= 0 || strength <= 0 || lifetime <= 0 ||
+    if(!improvedgrass || !grassimpulses || (position.x < 0 && position.y < 0 && position.z < 0) || radius <= 0 || strength <= 0 || lifetime <= 0 ||
        (type != IMPULSE_BULLET && type != IMPULSE_EXPLOSION)) return;
 
     queueGrassParticleEvent(position, direction, radius, strength, type);
@@ -274,7 +275,7 @@ static Impulse &addPlayerImpulse(const dynent *owner, const vec &position, const
 
 static void updatePlayerImpulses()
 {
-    if(!grassimpulses || !grassplayerflatten || grassplayerflattenstrength <= 0 || grassplayerflattendist <= 0) return;
+    if(!improvedgrass || !grassimpulses || !grassplayerflatten || grassplayerflattenstrength <= 0 || grassplayerflattendist <= 0) return;
 
     loopi(game::numdynents())
     {
@@ -491,7 +492,7 @@ static void buildImpulseGrid()
     impulseGrid.recycle();
     impulseQueryVersion = 0;
 
-    if(!grassimpulses || impulseList.empty()) return;
+    if(!improvedgrass || !grassimpulses || impulseList.empty()) return;
 
     int cells = max((worldsize + IMPULSE_CELL_SIZE - 1)/IMPULSE_CELL_SIZE, 1);
 
@@ -1335,7 +1336,7 @@ static void emitGrassParticleBurst(const GrassParticleEvent &event, const vec &p
 
 static void emitGrassParticles(vtxarray *vas)
 {
-    if(!grassimpactparticles)
+    if(!improvedgrass || !grassimpactparticles)
     {
         grassParticleEvents.setsize(0);
         return;
@@ -1718,7 +1719,8 @@ void render()
 
 void renderShadow(int cascade)
 {
-    if(!grass || !grassdist || cascade < 0 || cascade >= grassshadowcascades || glversion < 400 || !glDrawElementsInstanced_ || !shadowva) return;
+    if(!improvedgrass || !grass || !grassdist || cascade < 0 || cascade >= grassshadowcascades || glversion < 400 ||
+       !glDrawElementsInstanced_ || !shadowva) return;
     renderPatches(shadowva, true, cascade, NULL);
 }
 
