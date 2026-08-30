@@ -288,6 +288,9 @@ extern void cleardeferredlightshaders();
 extern void clearshadowcache();
 extern void invalidateskyvisibility();
 extern void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax);
+extern GLuint shadowatlastex;
+extern GLenum shadowatlastarget;
+extern int csmshadowmap, csmsplits;
 
 extern void rendervolumetric();
 extern void cleanupvolumetric();
@@ -865,7 +868,14 @@ namespace volumetricClouds
 // Dedicated cloud crepuscular rays, separate from world volumetric lights.
 namespace godrays
 {
-    namespace crepuscularrays
+    // Raymarched sunlight shafts occluded by CSM world geometry.
+    namespace geometry
+    {
+        extern void render();
+        extern void cleanup();
+    }
+
+    namespace crepuscular
     {
         extern void init();
         extern bool enabled();

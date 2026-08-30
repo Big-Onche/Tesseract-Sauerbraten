@@ -2554,6 +2554,9 @@ void gl_drawview()
     rendertransparent();
     GLERROR;
 
+    godrays::geometry::render();
+    GLERROR;
+
     if(!drawtex)
     {
         renderparticles();

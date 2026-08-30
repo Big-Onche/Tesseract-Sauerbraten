@@ -893,7 +893,7 @@ namespace volumetricClouds
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
         useshaderbyname("scalelinear");
-        godrays::crepuscularrays::init();
+        godrays::crepuscular::init();
     }
 
     bool hasshadowmap()
@@ -1155,7 +1155,7 @@ namespace volumetricClouds
         GLOBALPARAMF(tvcloudatmoblend, float(vcatmoblendmin) / 100.0f, float(vcatmoblendmax) / 100.0f);
         vec4 silverscreen = calcsilverscreenparams(cloudsun.direction);
         GLOBALPARAMF(tvcloudsilvermask, silverscreen.x, silverscreen.y, silverscreen.z, silverscreen.w);
-        GLOBALPARAMF(tvcloudcrmask, godrays::crepuscularrays::enabled() ? 1.0f : 0.0f);
+        GLOBALPARAMF(tvcloudcrmask, godrays::crepuscular::enabled() ? 1.0f : 0.0f);
         GLOBALPARAMF(tvcloudsilvercontrast, max(vcsilvercontrast, 1.0f));
         GLOBALPARAMF(tvcloudsteps, float(vceffectivesteps));
         float cloudthickness = max(cloudbounds.y - cloudbounds.x, 1.0f);
@@ -1402,7 +1402,7 @@ namespace volumetricClouds
 
         if(drawclouds)
         {
-            godrays::crepuscularrays::render(crsourcetex, vcw, vch, silverscreen, cloudsun.silverWarm);
+            godrays::crepuscular::render(crsourcetex, vcw, vch, silverscreen, cloudsun.silverWarm);
 
             begindebugpass(VC_DEBUG_COMPOSITE);
             glActiveTexture_(GL_TEXTURE0);
@@ -1427,7 +1427,7 @@ namespace volumetricClouds
 
     bool debugview()
     {
-        if(godrays::crepuscularrays::debugview()) return true;
+        if(godrays::crepuscular::debugview()) return true;
         if(!debugvc) return false;
 
         polldebugtimer();
@@ -1542,7 +1542,7 @@ namespace volumetricClouds
 
     void cleanup(bool shutdown)
     {
-        godrays::crepuscularrays::cleanup();
+        godrays::crepuscular::cleanup();
         cleanupbuffers();
         cleanupshadowmap();
         cleanupweathermap();

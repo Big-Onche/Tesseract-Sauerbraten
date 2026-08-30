@@ -47,7 +47,7 @@ void loadshaders()
     nullshader->set();
 
     loadedshaders = true;
-    godrays::crepuscularrays::init();
+    godrays::crepuscular::init();
 }
 
 Shader *lookupshaderbyname(const char *name)
@@ -403,7 +403,7 @@ static void linkglslprogram(Shader &s, bool msg = true)
 
 static void findfragdatalocs(Shader &s, char *ps, const char *macroname, int index)
 {
-    int macrolen = strlen(macroname); 
+    int macrolen = strlen(macroname);
     bool clear = glslversion < 130 && !hasEGPU4;
     while((ps = strstr(ps, macroname)))
     {
@@ -1262,7 +1262,7 @@ void linkvslotshader(VSlot &s, bool load)
 bool shouldreuseparams(Slot &s, VSlot &p)
 {
     if(!s.shader) return false;
-    
+
     Shader &sh = *s.shader;
     loopv(sh.defaultparams)
     {
@@ -1272,7 +1272,7 @@ bool shouldreuseparams(Slot &s, VSlot &p)
             const float *val = findslotparam(p, param.name);
             if(val && memcmp(param.val, val, sizeof(param.val)))
             {
-                loopvj(s.params) if(s.params[j].name == param.name) goto notreused; 
+                loopvj(s.params) if(s.params[j].name == param.name) goto notreused;
                 return true;
             notreused:;
             }
