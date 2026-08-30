@@ -317,8 +317,9 @@ namespace geometry
     FVARP(grgforwardexp, 0.25f, 5.0f, 32.0f);
     FVARP(grgisolationradius, 0.0f, 128.0f, 256.0f);
     FVARP(grgisolationpower, 0.01f, 0.05f, 4.0f);
-    FVARP(grgtransitionboost, 0.0f, 1.5f, 2.0f);
-    FVARP(grgdirectfill, 0.0f, 0.0f, 1.0f);
+    FVARP(grgbaseatmosphere, 0.0f, 0.02f, 0.25f);
+    FVARP(grgshaftboost, 0.0f, 1.0f, 4.0f);
+    FVARP(grgdetailboost, 0.0f, 0.15f, 1.0f);
     FVARP(grgcsmfade, 0.0f, 0.05f, 0.25f);
 
     FVAR(grgatrousalphak, 0.0f, 0.0f, 256.0f);
@@ -549,9 +550,10 @@ namespace geometry
         LOCALPARAMF(godRayGeomParams, max(grgdensity, 0.25f), clamp(grgdecay, 0.0f, 1.0f), maxdistance, max(grgforwardexp, 0.25f));
         LOCALPARAMI(godRayGeomSteps, grgsteps);
         LOCALPARAMI(godRayGeomDebug, debugmode);
-        LOCALPARAMF(godRayGeomDistanceParams, grgstrength*strengthscale(), max(grgtransitionboost, 0.0f), max(grgdirectfill, 0.0f),
+        LOCALPARAMF(godRayGeomDistanceParams, grgstrength*strengthscale(), max(grgshaftboost, 0.0f), max(grgdetailboost, 0.0f),
                     max(grgisolationpower, 0.25f));
-        LOCALPARAMF(godRayGeomShapeParams, 0.0f, clamp(grgthreshold, 0.0f, 1.0f), max(grgisolationradius, 0.0f), clamp(grgcsmfade, 0.0f, 0.25f));
+        LOCALPARAMF(godRayGeomShapeParams, clamp(grgbaseatmosphere, 0.0f, 0.25f), clamp(grgthreshold, 0.0f, 1.0f),
+                    max(grgisolationradius, 0.0f), clamp(grgcsmfade, 0.0f, 0.25f));
         LOCALPARAMF(godRayGeomBiasParams, clamp(grgshadowbias, 0.0f, 4.0f), clamp(grgshadowbiasdist, 0.0f, 1.0f));
         LOCALPARAMI(csmcount, csmsplits);
         screenquad();
@@ -695,7 +697,7 @@ namespace geometry
 
         static const char * const modelabels[7] =
         {
-            "raw visibility", "excess / camera transitions", "legacy direct fill (disabled by default)", "final shaft signal",
+            "raw visibility", "base atmosphere", "isolated shaft + detail accent", "final volumetric signal",
             "CSM coverage (green inside, red outside)", "shadow bias (0 blue, 1 green, 2+ red)", "local isolation mask"
         };
         static const char * const stagelabels[3] = { "raw raymarch", "depth-aware upsample", "final" };
