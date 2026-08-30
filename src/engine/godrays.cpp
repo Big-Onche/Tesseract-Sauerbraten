@@ -19,19 +19,21 @@ namespace crepuscularrays
     float crdebugms = -1.0f;
 
     VARP(crepuscularrays, 0, 1, 1);
-    VARP(crsteps, 8, 40, 64);
+    VARP(crsteps, 8, 48, 128);
     FVARP(crscale, 0.125f, 0.25f, 1.0f);
     FVARP(crbilateraledge, 1e-5f, 0.02f, 1.0f);
-    FVARP(crstrength, 0.0f, 0.32f, 2.0f);
-    FVARP(crvariation, 0.0f, 0.38f, 1.0f);
-    FVARP(crfreq, 0.25f, 14.0f, 64.0f);
-    FVARP(crdetailfreq, 0.5f, 31.0f, 128.0f);
-    FVARP(craniso, 1.0f, 8.0f, 32.0f);
+
+    FVARP(crvariation, 0.0f, 0.5f, 1.0f);
+    FVARP(crfreq, 0.25f, 32.0f, 64.0f);
+    FVARP(crdetailfreq, 0.5f, 64.0f, 128.0f);
+    FVARP(craniso, 1.0f, 16.0f, 32.0f);
     FVARP(crdistortion, 0.0f, 0.08f, 0.5f);
     FVARP(crbandcontrast, 0.25f, 1.35f, 4.0f);
     FVARP(crradialfade, 0.1f, 1.0f, 4.0f);
     FVARP(crnoisejitter, 0.0f, 0.0f, 1.0f);
     VAR(debugcr, 0, 0, 1);
+
+    FVARR(crstrength, 0.0f, 0.2f, 2.0f);
 
     static void cleanupbuffer()
     {

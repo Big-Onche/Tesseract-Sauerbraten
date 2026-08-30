@@ -1115,6 +1115,7 @@ namespace volumetricClouds
         glBindTexture(GL_TEXTURE_2D, vcweathertex);
 
         GLOBALPARAMF(tvcloudbounds, cloudbounds.x, cloudbounds.y, cloudbounds.z, cloudbounds.w);
+        GLOBALPARAM(tvcloudinvcamprojmatrix, invcamprojmatrix);
         GLOBALPARAMF(tvclouddome, clouddome.x, clouddome.y, clouddome.z, clouddome.w);
         GLOBALPARAMF(tvcloudscroll, vcscrolloffset.x, vcscrolloffset.y);
         float ws = max(float(worldsize), 1.0f);
