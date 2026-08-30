@@ -862,6 +862,19 @@ namespace volumetricClouds
     extern void cleanup(bool shutdown = false);
 }
 
+// Dedicated cloud crepuscular rays, separate from world volumetric lights.
+namespace godrays
+{
+    namespace crepuscularrays
+    {
+        extern void init();
+        extern bool enabled();
+        extern void render(GLuint sourcetex, int sourcew, int sourceh, const vec4 &silverscreen, const vec &raytint);
+        extern bool debugview();
+        extern void cleanup();
+    }
+}
+
 namespace lensFlares // procedural ones
 {
     extern void addFlares(const vec &o, int r, int g, int b, bool unlimitedDistance, bool lensGhosts, int maxDistance);

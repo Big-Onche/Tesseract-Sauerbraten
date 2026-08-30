@@ -47,6 +47,7 @@ void loadshaders()
     nullshader->set();
 
     loadedshaders = true;
+    godrays::crepuscularrays::init();
 }
 
 Shader *lookupshaderbyname(const char *name)
@@ -1611,4 +1612,3 @@ void setblurshader(int pass, int size, int radius, float *weights, float *offset
     loopk(8) scaledoffsets[k] = offsets[k]/size;
     LOCALPARAMV(offsets, scaledoffsets, 8);
 }
-

@@ -90,6 +90,7 @@ CLIENT_OBJS= \
 	engine/console.o \
 	engine/dynlight.o \
 	engine/grass.o \
+	engine/godrays.o \
 	engine/heathaze.o \
 	engine/light.o \
 	engine/lensflare.o \
@@ -311,6 +312,10 @@ engine/grass.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/grass.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 engine/grass.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h
 engine/grass.o: engine/light.h engine/texture.h engine/bih.h engine/model.h
+engine/godrays.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
+engine/godrays.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
+engine/godrays.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h
+engine/godrays.o: engine/light.h engine/texture.h engine/bih.h engine/model.h
 engine/light.o: engine/engine.h shared/cube.h shared/tools.h shared/geom.h
 engine/light.o: shared/ents.h shared/command.h shared/glexts.h shared/glemu.h
 engine/light.o: shared/iengine.h shared/igame.h engine/world.h engine/octa.h

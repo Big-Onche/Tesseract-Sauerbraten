@@ -16,7 +16,7 @@ namespace volumetricClouds
         unsigned char r, g, b, a;
     };
 
-    GLuint vctex = 0, vcfbo = 0;
+    GLuint vctex = 0, crsourcetex = 0, vcfbo = 0;
     GLuint vcdepthtex = 0, vcdepthfbo = 0;
     GLuint vcatroustex = 0, vcatrousfbo = 0;
     GLuint vcbilateraltex = 0, vcbilateralfbo = 0;
@@ -893,6 +893,7 @@ namespace volumetricClouds
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
         useshaderbyname("scalelinear");
+        godrays::crepuscularrays::init();
     }
 
     bool hasshadowmap()
@@ -1000,6 +1001,11 @@ namespace volumetricClouds
             glGenTextures(1, &vctex);
             createtexture(vctex, vcw, vch, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
+        if(drawclouds && !crsourcetex)
+        {
+            glGenTextures(1, &crsourcetex);
+            createtexture(crsourcetex, vcw, vch, NULL, 3, 1, GL_R8, GL_TEXTURE_RECTANGLE);
+        }
         if(needdepthcache && !vcdepthtex)
         {
             glGenTextures(1, &vcdepthtex);
@@ -1031,6 +1037,9 @@ namespace volumetricClouds
             glGenFramebuffers_(1, &vcfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcfbo);
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vctex, 0);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, crsourcetex, 0);
+            static const GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+            glDrawBuffers_(2, drawbufs);
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
@@ -1145,6 +1154,7 @@ namespace volumetricClouds
         GLOBALPARAMF(tvcloudatmoblend, float(vcatmoblendmin) / 100.0f, float(vcatmoblendmax) / 100.0f);
         vec4 silverscreen = calcsilverscreenparams(cloudsun.direction);
         GLOBALPARAMF(tvcloudsilvermask, silverscreen.x, silverscreen.y, silverscreen.z, silverscreen.w);
+        GLOBALPARAMF(tvcloudcrmask, godrays::crepuscularrays::enabled() ? 1.0f : 0.0f);
         GLOBALPARAMF(tvcloudsilvercontrast, max(vcsilvercontrast, 1.0f));
         GLOBALPARAMF(tvcloudsteps, float(vceffectivesteps));
         float cloudthickness = max(cloudbounds.y - cloudbounds.x, 1.0f);
@@ -1391,6 +1401,8 @@ namespace volumetricClouds
 
         if(drawclouds)
         {
+            godrays::crepuscularrays::render(crsourcetex, vcw, vch, silverscreen, cloudsun.silverWarm);
+
             begindebugpass(VC_DEBUG_COMPOSITE);
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
@@ -1414,6 +1426,7 @@ namespace volumetricClouds
 
     bool debugview()
     {
+        if(godrays::crepuscularrays::debugview()) return true;
         if(!debugvc) return false;
 
         polldebugtimer();
@@ -1465,6 +1478,11 @@ namespace volumetricClouds
         {
             glDeleteTextures(1, &vctex);
             vctex = 0;
+        }
+        if(crsourcetex)
+        {
+            glDeleteTextures(1, &crsourcetex);
+            crsourcetex = 0;
         }
         if(vcdepthfbo)
         {
@@ -1523,6 +1541,7 @@ namespace volumetricClouds
 
     void cleanup(bool shutdown)
     {
+        godrays::crepuscularrays::cleanup();
         cleanupbuffers();
         cleanupshadowmap();
         cleanupweathermap();
