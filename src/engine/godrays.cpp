@@ -312,7 +312,8 @@ namespace geometry
     VARP(grgatrousiter, 1, 2, 3);
     VARP(grgglobalstrength, 0, 0, 3);
     VAR(debuggrg, 0, 0, 7);
-    FVARP(grgshadowbias, 0.0f, 0.0f, 32.0f);
+    FVARP(grgshadowbias, 0.0f, 0.0f, 4.0f);
+    FVARP(grgshadowbiasdist, 0.0f, 0.0f, 1.0f);
     FVARP(grgforwardexp, 0.25f, 5.0f, 32.0f);
     FVARP(grgisolationradius, 0.0f, 128.0f, 256.0f);
     FVARP(grgisolationpower, 0.01f, 0.05f, 4.0f);
@@ -550,8 +551,8 @@ namespace geometry
         LOCALPARAMI(godRayGeomDebug, debugmode);
         LOCALPARAMF(godRayGeomDistanceParams, grgstrength*strengthscale(), max(grgtransitionboost, 0.0f), max(grgdirectfill, 0.0f),
                     max(grgisolationpower, 0.25f));
-        LOCALPARAMF(godRayGeomShapeParams, max(grgshadowbias, 0.0f), clamp(grgthreshold, 0.0f, 1.0f), max(grgisolationradius, 0.0f),
-                    clamp(grgcsmfade, 0.0f, 0.25f));
+        LOCALPARAMF(godRayGeomShapeParams, 0.0f, clamp(grgthreshold, 0.0f, 1.0f), max(grgisolationradius, 0.0f), clamp(grgcsmfade, 0.0f, 0.25f));
+        LOCALPARAMF(godRayGeomBiasParams, clamp(grgshadowbias, 0.0f, 4.0f), clamp(grgshadowbiasdist, 0.0f, 1.0f));
         LOCALPARAMI(csmcount, csmsplits);
         screenquad();
     }
@@ -695,7 +696,7 @@ namespace geometry
         static const char * const modelabels[7] =
         {
             "raw visibility", "excess / camera transitions", "legacy direct fill (disabled by default)", "final shaft signal",
-            "CSM coverage (green inside, red outside)", "shadow bias (log heat map)", "local isolation mask"
+            "CSM coverage (green inside, red outside)", "shadow bias (0 blue, 1 green, 2+ red)", "local isolation mask"
         };
         static const char * const stagelabels[3] = { "raw raymarch", "depth-aware upsample", "final" };
         GLuint textures[3] = { raytex, raydebugtex, debugcompositetex };
