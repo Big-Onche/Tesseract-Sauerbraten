@@ -1,6 +1,7 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
+static Texture *nightsky = NULL;
 extern bvec skyboxcolour;
 extern int atmo;
 extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
@@ -708,7 +709,36 @@ FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
 FVARR(atmoalpha, 0, 1, 1);
 
-static void drawatmosphere()
+static bool loadnightsky()
+{
+    // Repeat around the horizon, but do not wrap the north/south poles together.
+    if(!nightsky) nightsky = textureload("packages/sky/night.jpg", 2, true, false);
+    return nightsky != notexture;
+}
+
+static void drawnightsky()
+{
+    if(!loadnightsky()) return;
+
+    SETSHADER(nightsky);
+
+    matrix4 nightskymatrix = invcammatrix;
+    nightskymatrix.settranslation(0, 0, 0);
+    nightskymatrix.mul(invprojmatrix);
+    LOCALPARAM(nightskymatrix, nightskymatrix);
+
+    glBindTexture(GL_TEXTURE_2D, nightsky->id);
+
+    gle::defvertex();
+    gle::begin(GL_TRIANGLE_STRIP);
+    gle::attribf(-1, 1, 1);
+    gle::attribf(1, 1, 1);
+    gle::attribf(-1, -1, 1);
+    gle::attribf(1, -1, 1);
+    xtraverts += gle::end();
+}
+
+static void drawatmosphere(float alpha = atmoalpha)
 {
     SETSHADER(atmosphere);
 
@@ -752,7 +782,7 @@ static void drawatmosphere()
     if(maxsunweight > 127) sunweight.mul(127/maxsunweight);
     sunweight.add(1e-4f);
     LOCALPARAM(sunweight, sunweight);
-    LOCALPARAM(sunlight, vec4(sunscale, atmoalpha));
+    LOCALPARAM(sunlight, vec4(sunscale, alpha));
     LOCALPARAM(sundir, sunlightdir);
 
     // invert extinction at zenith to get an approximation of how bright the sun disk should be
@@ -793,6 +823,9 @@ bool limitsky()
 void drawskybox(bool clear)
 {
     bool havefaces = haveskyfaces();
+    bool havenightsky = atmo && !havefaces && sunlightdir.z < 0 && loadnightsky();
+    float nightfade = havenightsky ? clamp(-sunlightdir.z / 0.1f, 0.0f, 1.0f) : 0.0f;
+    nightfade *= nightfade * (3.0f - 2.0f * nightfade);
     bool limited = false;
     if(limitsky()) for(vtxarray *va = visibleva; va; va = va->next)
     {
@@ -843,17 +876,20 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
+    if(havenightsky) drawnightsky();
+
     if(atmo && (!havefaces || atmoalpha < 1))
     {
-        if(atmoalpha < 1)
+        float atmospherealpha = atmoalpha * (1.0f - nightfade);
+        if(atmospherealpha < 1)
         {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         }
 
-        drawatmosphere();
+        drawatmosphere(atmospherealpha);
 
-        if(atmoalpha < 1) glDisable(GL_BLEND);
+        if(atmospherealpha < 1) glDisable(GL_BLEND);
     }
 
     if(fogdomemax && !fogdomeclouds)
@@ -925,4 +961,3 @@ bool hasskybox()
 {
     return haveskyfaces() || atmo || fogdomemax || cloudbox[0] || cloudlayer[0];
 }
-
