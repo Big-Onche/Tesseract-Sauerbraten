@@ -5537,6 +5537,7 @@ bool debuglights()
     else if(debuglightscissor) viewlightscissor();
     else if(debugrsm) viewrsm();
     else if(debugrh) viewrh();
+    else if(godrays::geometry::debugview()) {}
     else if(volumetricClouds::debugview()) {}
     else if(!debugaa()) return false;
     return true;

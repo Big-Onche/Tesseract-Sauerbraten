@@ -872,6 +872,7 @@ namespace godrays
     namespace geometry
     {
         extern void render();
+        extern bool debugview();
         extern void cleanup();
     }
 
