@@ -5,6 +5,7 @@
 
 extern GLuint hdrfbo, mshdrfbo;
 extern int atmo;
+extern int gdepthformat;
 extern float atmoplanetsize, atmoheight, atmobright, atmosunlightscale, atmohaze, atmodensity, atmoozone, atmoalpha;
 extern bvec atmosunlight;
 extern float hdrgamma;
@@ -82,16 +83,19 @@ namespace volumetricClouds
     VARP(vcsunsteps, 4, 4, 64);
     VARP(vcfbmresolution, 16, 128, 256);
     VARP(vcfbmseed, -0x100000, 0, 0x100000);
+
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowradius, 10, 100, 1000);              // shadow footprint half-width as a percentage of world size
     VARP(vcshadowmapsize, 64, 128, 4096);
     VARP(vcshadowsamples, 1, 4, 8);
     VARP(vcshadowpcf, 0, 1, 2);
+
     VARP(vcclarity, 0, 1, 1);
-    FVARP(vcclaritystrength, 0.0f, 0.22f, 1.0f);
-    FVARP(vcclarityradius, 0.5f, 16.0f, 32.0f);
-    FVARP(vcclarityalphak, 0.0f, 18.0f, 64.0f);
-    FVARP(vcclaritylumak, 0.0f, 6.0f, 32.0f);
+    FVAR(vcclaritystrength, 0.0f, 0.22f, 1.0f);
+    FVAR(vcclarityradius, 0.5f, 16.0f, 32.0f);
+    FVAR(vcclarityalphak, 0.0f, 18.0f, 64.0f);
+    FVAR(vcclaritylumak, 0.0f, 6.0f, 32.0f);
+
     VARP(vccompositedetail, 0, 1, 1);
     FVAR(vcdetailstrength, 0.0f, 0.6f, 1.0f);
     FVAR(vcdetailfrequency, 1.0f, 4.0f, 128.0f);
@@ -138,7 +142,7 @@ namespace volumetricClouds
     FVARR(vcsilvercontrast, 1.0f, 10.0f, 50.0f);
     FVARR(vcdarkness, 0.1f, 0.5f, 2.0f);
     FVARR(vcshadowstrength, 0.0f, 1.35f, 2.0f);
-    CVARR(vccolour, 0xFFFFFF);
+    CVARR(vccolour, 0xC8C8C8);
     VARR(vcnoisescale, -1000, 0, 1000);
 
     static float normalizenoise(float n)
@@ -247,6 +251,60 @@ namespace volumetricClouds
     static float noisesizemul()
     {
         return clamp(exp2f(float(vcnoisescale) / 100.0f), 1.0f / 1024.0f, 1024.0f);
+    }
+
+    static float wrapnoisephase(double phase)
+    {
+        phase = fmod(phase, double(VC_FBM_PERIOD));
+        return float(phase < 0.0 ? phase + double(VC_FBM_PERIOD) : phase);
+    }
+
+    static vec calcnoisephase(const vec &origin, float scale)
+    {
+        return vec(wrapnoisephase(double(origin.x) * scale), wrapnoisephase(double(origin.y) * scale),
+                   wrapnoisephase(double(origin.z) * scale));
+    }
+
+    static vec calcnoisephase(const vec &origin, const vec &offset, float scale)
+    {
+        return vec(wrapnoisephase((double(origin.x) + offset.x) * scale), wrapnoisephase((double(origin.y) + offset.y) * scale),
+                   wrapnoisephase((double(origin.z) + offset.z) * scale));
+    }
+
+    static vec calcshiftednoisephase(const vec &origin, float scale, const vec &offset)
+    {
+        return vec(wrapnoisephase(double(origin.x) * scale + offset.x), wrapnoisephase(double(origin.y) * scale + offset.y),
+                   wrapnoisephase(double(origin.z) * scale + offset.z));
+    }
+
+    static vec2 calcweatherphase(const vec &origin, float period)
+    {
+        double x = (double(origin.x) + double(vcscrolloffset.x) * 0.35) / period,
+               y = (double(origin.y) + double(vcscrolloffset.y) * 0.35) / period;
+        x -= floor(x);
+        y -= floor(y);
+        return vec2(float(x), float(y));
+    }
+
+    static void calccloudviewmatrices(matrix4 &raymatrix, matrix4 &relativeworldmatrix)
+    {
+        matrix4 relativeinvcammatrix = invcammatrix;
+        relativeinvcammatrix.settranslation(0.0f, 0.0f, 0.0f);
+        raymatrix.muld(relativeinvcammatrix, invprojmatrix);
+
+        matrix4 invscreenmatrix;
+        invscreenmatrix.identity();
+        invscreenmatrix.settranslation(-1.0f, -1.0f, -1.0f);
+        invscreenmatrix.setscale(2.0f/vieww, 2.0f/viewh, 2.0f);
+        if(gdepthformat)
+        {
+            matrix4 eyematrix;
+            eyematrix.muld(invprojmatrix, invscreenmatrix);
+            float xscale = eyematrix.a.x, yscale = eyematrix.b.y, xoffset = eyematrix.d.x, yoffset = eyematrix.d.y, zscale = eyematrix.d.z;
+            matrix4 depthmatrix(vec(xscale/zscale, 0, xoffset/zscale), vec(0, yscale/zscale, yoffset/zscale));
+            relativeworldmatrix.muld(relativeinvcammatrix, depthmatrix);
+        }
+        else relativeworldmatrix.muld(raymatrix, invscreenmatrix);
     }
 
     static const float VC_BUDGET_MIN_SCALE = 0.125f, VC_BUDGET_MAX_SCALE = 0.5f;
@@ -1136,9 +1194,14 @@ namespace volumetricClouds
         glActiveTexture_(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, vcweathertex);
 
+        matrix4 cloudraymatrix, cloudworldmatrix;
+        calccloudviewmatrices(cloudraymatrix, cloudworldmatrix);
         GLOBALPARAMF(tvcloudbounds, cloudbounds.x, cloudbounds.y, cloudbounds.z, cloudbounds.w);
-        GLOBALPARAM(tvcloudinvcamprojmatrix, invcamprojmatrix);
+        GLOBALPARAMF(tvcloudrelbounds, cloudbounds.x - camera1->o.z, cloudbounds.y - camera1->o.z);
+        GLOBALPARAM(tvcloudinvcamprojmatrix, cloudraymatrix);
+        GLOBALPARAM(tvcloudworldmatrix, cloudworldmatrix);
         GLOBALPARAMF(tvclouddome, clouddome.x, clouddome.y, clouddome.z, clouddome.w);
+        GLOBALPARAMF(tvcloudreldome, camera1->o.x - clouddome.y, camera1->o.y - clouddome.z);
         GLOBALPARAMF(tvcloudscroll, vcscrolloffset.x, vcscrolloffset.y);
         float ws = max(float(worldsize), 1.0f);
         float noisemul = noisesizemul();
@@ -1151,8 +1214,21 @@ namespace volumetricClouds
         float detaillodoffset = logf(max(detailnoisescale * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
         float lightlodoffset = logf(max(basenoisescale * 0.35f * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
         float silverlodoffset = logf(max(basenoisescale * 0.55f * fbmtexelsperunit, 1.0e-20f)) / M_LN2;
+        vec windoffset(vcscrolloffset.x, vcscrolloffset.y, cloudbounds.w * 2.0f);
+        vec basephase = calcnoisephase(camera1->o, windoffset, basenoisescale),
+            macrophase = calcnoisephase(camera1->o, windoffset, basenoisescale * 0.22f),
+            detailphase = calcnoisephase(camera1->o, windoffset, detailnoisescale),
+            lightphase = calcnoisephase(camera1->o, basenoisescale * 0.35f),
+            silverphase = calcnoisephase(camera1->o, basenoisescale * 0.55f);
+        vec2 weatherphase = calcweatherphase(camera1->o, max(clouddome.w * 2.0f, 1.0f));
         GLOBALPARAMF(tvcloudnoise, basenoisescale, detailnoisescale, 0.50f, 0.95f);
         GLOBALPARAMF(tvcloudfbmparams, 1.0f / float(VC_FBM_PERIOD), fbmtexelsperunit, logf(float(vcfbmtexsize)) / M_LN2);
+        GLOBALPARAM(tvcloudbasephase, basephase);
+        GLOBALPARAM(tvcloudmacrophase, macrophase);
+        GLOBALPARAM(tvclouddetailphase, detailphase);
+        GLOBALPARAM(tvcloudlightphase, lightphase);
+        GLOBALPARAM(tvcloudsilverphase, silverphase);
+        GLOBALPARAM(tvcloudweatherphase, weatherphase);
         GLOBALPARAMF(tvcloudlodoffsets, baselodoffset, macrolodoffset, detaillodoffset, lightlodoffset);
         GLOBALPARAMF(tvcloudsilverlodoffset, silverlodoffset);
         GLOBALPARAMF(tvcloudstructure, float(vcstructure) / 100.0f);
@@ -1437,6 +1513,19 @@ namespace volumetricClouds
                 glActiveTexture_(GL_TEXTURE10);
                 glBindTexture(GL_TEXTURE_3D, vcfbmtex);
                 glActiveTexture_(GL_TEXTURE0);
+                float detailfadeend = max(vcdetailfadeenddistance, 1.0f),
+                      detailfadestart = max(vcdetailfadestartdistance, detailfadeend + 1.0f),
+                      distancescalestart = max(vcdistantdetailscalestart, detailfadestart),
+                      distancescaleend = max(vcdistantdetailscaleend, distancescalestart + 1.0f),
+                      inversereferencedistance = max(vcdistantdetailmaxfrequency, 1.0f) / distancescaleend,
+                      structurescale = vcdetailfrequency * inversereferencedistance,
+                      erosionscale = vcsecondarydetailfrequency * inversereferencedistance;
+                vec scrolldirection(0.73f, 0.21f, 0.41f);
+                scrolldirection.normalize();
+                vec skyscroll = scrolldirection.mul(cloudbounds.w * vcdetailscrollspeed);
+                vec structurephase = calcshiftednoisephase(camera1->o, structurescale, skyscroll);
+                vec erosionoffset = vec(5.2f, 11.7f, 3.1f).msub(skyscroll, 1.37f);
+                vec erosionphase = calcshiftednoisephase(camera1->o, erosionscale, erosionoffset);
                 GLOBALPARAMF(tvcloudcompositedetail0, vcdetailstrength, vcdetailfrequency, vcsecondarydetailfrequency, vcdetailscrollspeed);
                 GLOBALPARAMF(tvcloudcompositedetail1, vcedgeerosionstrength, vcinternaldarkeningstrength,
                              vcsilverliningbreakupstrength, vcdetailnearscalemultiplier);
@@ -1445,6 +1534,8 @@ namespace volumetricClouds
                              vcdistantdetailmaxfrequency, vcdetailmipbias);
                 GLOBALPARAMF(tvcloudcompositedistance1, vcfinedetailfadestart, vcfinedetailfadeend,
                              vcmediumdetailfadestart, vcmediumdetailfadeend);
+                GLOBALPARAM(tvcloudcompositephase0, structurephase);
+                GLOBALPARAM(tvcloudcompositephase1, erosionphase);
                 GLOBALPARAMF(tvcloudcompositedetaildebug, float(vccompositedetaildebug));
             }
 
