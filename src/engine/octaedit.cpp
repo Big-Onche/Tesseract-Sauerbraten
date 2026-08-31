@@ -2626,11 +2626,6 @@ void replace(bool insel, int oldtex, int newtex, const char *err, bool force = f
     mpreplacetex(oldtex, newtex, insel, sel, true);
 }
 
-void replaceskycubes() // sauerract | change sky cubes with a non-alpha texture if needed
-{
-    replace(false, 0, 1, "failed to fix sky cubes", true);
-}
-
 ICOMMAND(replace, "", (), replace(false, reptex, lasttex, "can only replace after a texture edit"));
 ICOMMAND(replacesel, "", (), replace(true, reptex, lasttex, "can only replace after a texture edit"));
 ICOMMAND(replacetex, "bb", (int *n, int *o), replace(false, *o, *n, "can only replace valid texture"));
