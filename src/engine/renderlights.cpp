@@ -5193,6 +5193,7 @@ void rendertransparent()
         }
 
         transparentlayer = layer+1;
+        GLOBALPARAMF(transparentmodel, layer == 3 ? 1.0f : 0.0f);
 
         allsx1 = min(allsx1, sx1);
         allsy1 = min(allsy1, sy1);

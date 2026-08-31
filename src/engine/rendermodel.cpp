@@ -112,6 +112,13 @@ void mdlalphatest(float *cutoff)
 }
 COMMAND(mdlalphatest, "f");
 
+void mdlalphablend(int *blend)
+{
+    checkmdl;
+    loadingmodel->setalphablend(*blend != 0);
+}
+COMMAND(mdlalphablend, "i");
+
 void mdldither(int *dither)
 {
     checkmdl;
@@ -240,7 +247,6 @@ COMMAND(mdlname, "");
 
 // sauerract | dummy vars to calm down errors messages when loading Sauer's models
 VAR(mdlalphadepth, -INT_MAX, 0, INT_MAX);
-VAR(mdlalphablend, -INT_MAX, 0, INT_MAX);
 VAR(mdlambient, -INT_MAX, 0, INT_MAX);
 VAR(md3ambient, -INT_MAX, 0, INT_MAX);
 
@@ -528,11 +534,25 @@ static vector<batchedmodel> batchedmodels;
 static vector<modelbatch> batches;
 static vector<modelattach> modelattached;
 
+struct transparentmapmodel
+{
+    model *m;
+    batchedmodel b;
+};
+static vector<transparentmapmodel> transparentmapmodels;
+
+float transmdlsx1 = -1, transmdlsy1 = -1, transmdlsx2 = 1, transmdlsy2 = 1;
+uint transmdltiles[LIGHTTILE_MAXH];
+
 void resetmodelbatches()
 {
     batchedmodels.setsize(0);
     batches.setsize(0);
     modelattached.setsize(0);
+    transparentmapmodels.setsize(0);
+    transmdlsx1 = transmdlsy1 = 1;
+    transmdlsx2 = transmdlsy2 = -1;
+    memset(transmdltiles, 0, sizeof(transmdltiles));
 }
 
 void addbatchedmodel(model *m, batchedmodel &bm, int idx)
@@ -743,15 +763,8 @@ void rendermapmodelbatches()
     disableaamask();
 }
 
-float transmdlsx1 = -1, transmdlsy1 = -1, transmdlsx2 = 1, transmdlsy2 = 1;
-uint transmdltiles[LIGHTTILE_MAXH];
-
 void rendermodelbatches()
 {
-    transmdlsx1 = transmdlsy1 = 1;
-    transmdlsx2 = transmdlsy2 = -1;
-    memset(transmdltiles, 0, sizeof(transmdltiles));
-
     enableaamask();
     loopv(batches)
     {
@@ -857,11 +870,26 @@ void rendertransparentmodelbatches(int stencil)
         }
         if(rendered) b.m->endrender();
     }
+
+    model *renderedmodel = NULL;
+    loopv(transparentmapmodels)
+    {
+        transparentmapmodel &tm = transparentmapmodels[i];
+        if(tm.m != renderedmodel)
+        {
+            if(renderedmodel) renderedmodel->endrender();
+            renderedmodel = tm.m;
+            renderedmodel->startrender();
+            setaamask(renderedmodel->animated());
+        }
+        renderbatchedmodel(tm.m, tm.b);
+    }
+    if(renderedmodel) renderedmodel->endrender();
     disableaamask();
 }
 
 static occludequery *modelquery = NULL;
-static int modelquerybatches = -1, modelquerymodels = -1, modelqueryattached = -1;
+static int modelquerybatches = -1, modelquerymodels = -1, modelqueryattached = -1, modelquerytransparent = -1;
 
 void startmodelquery(occludequery *query)
 {
@@ -869,10 +897,18 @@ void startmodelquery(occludequery *query)
     modelquerybatches = batches.length();
     modelquerymodels = batchedmodels.length();
     modelqueryattached = modelattached.length();
+    modelquerytransparent = transparentmapmodels.length();
 }
 
 void endmodelquery()
 {
+    // Transparent mapmodels render after this opaque query pass, so a zero-sample result would incorrectly hide their entity group next frame.
+    if(transparentmapmodels.length() != modelquerytransparent)
+    {
+        modelquery->fragments = oqfrags;
+        modelquery = NULL;
+        return;
+    }
     if(batchedmodels.length() == modelquerymodels)
     {
         modelquery->fragments = 0;
@@ -947,7 +983,7 @@ void rendermapmodel(int idx, int anim, const vec &o, float yaw, float pitch, flo
     else if(flags&(MDL_CULL_VFC|MDL_CULL_DIST|MDL_CULL_OCCLUDED) && cullmodel(m, center, radius, flags))
         return;
 
-    batchedmodel &b = batchedmodels.add();
+    batchedmodel b;
     b.pos = o;
     b.center = center;
     b.radius = radius;
@@ -963,7 +999,27 @@ void rendermapmodel(int idx, int anim, const vec &o, float yaw, float pitch, flo
     b.visible = visible;
     b.d = NULL;
     b.attached = -1;
-    addbatchedmodel(m, b, batchedmodels.length()-1);
+
+    if(!shadowmapping && drawtex != DRAWTEX_MINIMAP && m->alphablended())
+    {
+        float sx1, sy1, sx2, sy2;
+        ivec bbmin(vec(center).sub(radius)), bbmax(vec(center).add(radius+1));
+        if(calcbbscissor(bbmin, bbmax, sx1, sy1, sx2, sy2))
+        {
+            transmdlsx1 = min(transmdlsx1, sx1);
+            transmdlsy1 = min(transmdlsy1, sy1);
+            transmdlsx2 = max(transmdlsx2, sx2);
+            transmdlsy2 = max(transmdlsy2, sy2);
+            masktiles(transmdltiles, sx1, sy1, sx2, sy2);
+        }
+        transparentmapmodel &tm = transparentmapmodels.add();
+        tm.m = m;
+        tm.b = b;
+        return;
+    }
+    batchedmodel &batched = batchedmodels.add();
+    batched = b;
+    addbatchedmodel(m, batched, batchedmodels.length()-1);
 }
 
 void rendermodel(const char *mdl, int anim, const vec &o, float yaw, float pitch, float roll, int flags, dynent *d, modelattach *a, int basetime, int basetime2, float size, const vec4 &color)

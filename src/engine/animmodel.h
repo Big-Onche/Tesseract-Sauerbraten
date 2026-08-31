@@ -114,7 +114,8 @@ struct animmodel : model
         {
             DITHER       = 1<<0,
             CULL_FACE    = 1<<1,
-            DOUBLE_SIDED = 1<<2
+            DOUBLE_SIDED = 1<<2,
+            ALPHA_BLEND  = 1<<3
         };
 
         part *owner;
@@ -124,12 +125,13 @@ struct animmodel : model
         shaderparamskey *key;
 
         skin() : owner(0), tex(notexture), decal(NULL), masks(notexture), envmap(NULL), normalmap(NULL), fpalpha(NULL), shader(NULL), rsmshader(NULL),
-                 flags(CULL_FACE), key(NULL) {}
+                 flags(CULL_FACE | ALPHA_BLEND), key(NULL) {}
 
         bool masked() const { return masks != notexture; }
         bool envmapped() const { return envmapmax>0; }
         bool bumpmapped() const { return normalmap != NULL; }
         bool alphatested() const { return alphatest > 0 && tex->type&Texture::ALPHA; }
+        bool alphablended() const { return flags&ALPHA_BLEND && tex->type&Texture::ALPHA; }
         bool dithered() const { return (flags&DITHER) != 0; }
         bool decaled() const { return decal != NULL; }
         bool firstpersonmasked() const { return fpalpha != NULL; }
@@ -204,6 +206,7 @@ struct animmodel : model
                 opts[optslen++] = 'a';
                 if(dithered()) opts[optslen++] = 'u';
             }
+            if(alphablended()) opts[optslen++] = 'l';
             if(decaled()) opts[optslen++] = decal->type&Texture::ALPHA ? 'D' : 'd';
             if(bumpmapped()) opts[optslen++] = 'n';
             if(envmapped()) { opts[optslen++] = 'm'; opts[optslen++] = 'e'; }
@@ -771,6 +774,12 @@ struct animmodel : model
         bool alphatested() const
         {
             loopv(skins) if(skins[i].alphatested()) return true;
+            return false;
+        }
+
+        bool alphablended() const
+        {
+            loopv(skins) if(skins[i].alphablended()) return true;
             return false;
         }
 
@@ -1505,6 +1514,12 @@ struct animmodel : model
         return false;
     }
 
+    bool alphablended() const
+    {
+        loopv(parts) if(parts[i]->alphablended()) return true;
+        return false;
+    }
+
     virtual bool flipy() const { return false; }
     virtual bool loadconfig() { return false; }
     virtual bool loaddefaultparts() { return false; }
@@ -1587,6 +1602,17 @@ struct animmodel : model
     {
         if(parts.empty()) loaddefaultparts();
         loopv(parts) loopvj(parts[i]->skins) parts[i]->skins[j].alphatest = alphatest;
+    }
+
+    void setalphablend(bool blend)
+    {
+        if(parts.empty()) loaddefaultparts();
+        loopv(parts) loopvj(parts[i]->skins)
+        {
+            skin &s = parts[i]->skins[j];
+            if(blend) s.flags |= skin::ALPHA_BLEND;
+            else s.flags &= ~skin::ALPHA_BLEND;
+        }
     }
 
     void setdither(bool val)
@@ -1845,6 +1871,11 @@ template<class MDL, class MESH> struct modelcommands
         loopskins(meshname, s, s.alphatest = max(0.0f, min(1.0f, *cutoff)));
     }
 
+    static void setalphablend(char *meshname, int *blend)
+    {
+        loopskins(meshname, s, { if(*blend) s.flags |= skin::ALPHA_BLEND; else s.flags &= ~skin::ALPHA_BLEND; });
+    }
+
     static void setdither(char *meshname, int *dither)
     {
         loopskins(meshname, s, { if(*dither) s.flags |= skin::DITHER; else s.flags &= ~skin::DITHER; });
@@ -1942,6 +1973,7 @@ template<class MDL, class MESH> struct modelcommands
             modelcommand(setgloss, "gloss", "si");
             modelcommand(setglow, "glow", "sfff");
             modelcommand(setalphatest, "alphatest", "sf");
+            modelcommand(setalphablend, "alphablend", "si");
             modelcommand(setdither, "dither", "si");
             modelcommand(setcullface, "cullface", "si");
             modelcommand(setcolor, "color", "sfff");

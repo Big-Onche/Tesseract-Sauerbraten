@@ -27,6 +27,7 @@ struct model
     virtual bool animated() const { return false; }
     virtual bool pitched() const { return true; }
     virtual bool alphatested() const { return false; }
+    virtual bool alphablended() const { return false; }
 
     virtual void setshader(Shader *shader) {}
     virtual void setenvmap(float envmapmin, float envmapmax, Texture *envmap) {}
@@ -34,6 +35,7 @@ struct model
     virtual void setgloss(int gloss) {}
     virtual void setglow(float glow, float glowdelta, float glowpulse) {}
     virtual void setalphatest(float alpha) {}
+    virtual void setalphablend(bool blend) {}
     virtual void setdither(bool dither) {}
     virtual void setfullbright(float fullbright) {}
     virtual void setcullface(int cullface) {}
