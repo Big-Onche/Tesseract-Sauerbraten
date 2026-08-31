@@ -707,6 +707,8 @@ FVARR(atmosundiskbright, 0, 1, 16);
 FVARR(atmohaze, 0, 0.1f, 16);
 FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
+FVARR(atmomultiscatter, 0, 1, 2);
+FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
 static bool loadnightsky()
@@ -716,7 +718,7 @@ static bool loadnightsky()
     return nightsky != notexture;
 }
 
-static void drawnightsky()
+static void drawnightsky(float alpha)
 {
     if(!loadnightsky()) return;
 
@@ -726,8 +728,15 @@ static void drawnightsky()
     nightskymatrix.settranslation(0, 0, 0);
     nightskymatrix.mul(invprojmatrix);
     LOCALPARAM(nightskymatrix, nightskymatrix);
+    LOCALPARAMF(nightskyalpha, alpha);
 
     glBindTexture(GL_TEXTURE_2D, nightsky->id);
+
+    if(alpha < 1)
+    {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
 
     gle::defvertex();
     gle::begin(GL_TRIANGLE_STRIP);
@@ -736,6 +745,8 @@ static void drawnightsky()
     gle::attribf(-1, -1, 1);
     gle::attribf(1, -1, 1);
     xtraverts += gle::end();
+
+    if(alpha < 1) glDisable(GL_BLEND);
 }
 
 static void drawatmosphere(float alpha = atmoalpha)
@@ -747,49 +758,43 @@ static void drawatmosphere(float alpha = atmoalpha)
     sunmatrix.mul(invprojmatrix);
     LOCALPARAM(sunmatrix, sunmatrix);
 
-    // optical depth scales for 3 different shells of atmosphere - air, haze, ozone
-    const float earthradius = 6371e3f, earthairheight = 8.4e3f, earthhazeheight = 1.25e3f, earthozoneheight = 50e3f;
-    float planetradius = earthradius*atmoplanetsize;
-    vec atmoshells = vec(earthairheight, earthhazeheight, earthozoneheight).mul(atmoheight).add(planetradius).square().sub(planetradius*planetradius);
-    LOCALPARAM(opticaldepthparams, vec4(atmoshells, planetradius));
+    // Hillaire's Earth atmosphere model, expressed in kilometres to retain
+    // enough precision on older GLSL implementations. atmoheight scales the
+    // whole vertical density profile while atmoplanetsize only changes the
+    // ground radius.
+    const float earthradius = 6360.0f, earthatmoheight = 100.0f;
+    float planetradius = earthradius*atmoplanetsize,
+          atmosphereheight = earthatmoheight*atmoheight;
+    LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, 8.0f*atmoheight, 1.2f*atmoheight);
+    LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, 15.0f*atmoheight, clamp(atmomultiscatter, 0.0f, 2.0f), clamp(atmomieanisotropy, -0.99f, 0.99f));
 
-    // Henyey-Greenstein approximation, 1/(4pi) * (1 - g^2)/(1 + g^2 - 2gcos)]^1.5
-    // Hoffman-Preetham variation uses (1-g)^2 instead of 1-g^2 which avoids excessive glare
-    // clamp values near 0 angle to avoid spotlight artifact inside sundisk
-    float gm = max(0.95f - 0.2f*atmohaze, 0.65f), miescale = pow((1-gm)*(1-gm)/(4*M_PI), -2.0f/3.0f);
-    LOCALPARAMF(mieparams, miescale*(1 + gm*gm), miescale*-2*gm, 1 - (1 - cosf(0.5f*atmosundisksize*(1 - atmosundiskcorona)*RAD)));
-
-    static const vec lambda(680e-9f, 550e-9f, 450e-9f),
-                     k(0.686f, 0.678f, 0.666f),
-                     ozone(3.426f, 8.298f, 0.356f);
-    vec betar = vec(lambda).square().square().recip().mul(1.241e-30f/M_LN2 * atmodensity),
-        betam = vec(lambda).recip().square().mul(k).mul(9.072e-17f/M_LN2 * atmohaze),
-        betao = vec(ozone).mul(1.5e-7f/M_LN2 * atmoozone);
+    // Scattering/absorption coefficients from Table 1 of Hillaire 2020.
+    // Coefficients are km^-1. Preserve the historic atmohaze default by
+    // mapping 0.1 to one Earth atmosphere worth of aerosols.
+    float mieamount = max(atmohaze, 0.0f)*10.0f;
+    vec betar = vec(0.005802f, 0.013558f, 0.033100f).mul(max(atmodensity, 0.0f)),
+        betam = vec(0.003996f, 0.003996f, 0.003996f).mul(mieamount),
+        betamextinction = vec(0.008396f, 0.008396f, 0.008396f).mul(mieamount),
+        betao = vec(0.000650f, 0.001881f, 0.000085f).mul(max(atmoozone, 0.0f));
     LOCALPARAM(betarayleigh, betar);
     LOCALPARAM(betamie, betam);
+    LOCALPARAM(mieextinction, betamextinction);
     LOCALPARAM(betaozone, betao);
 
-    // extinction in direction of sun
-    float sunoffset = sunlightdir.z*planetradius;
-    vec sundepth = vec(atmoshells).add(sunoffset*sunoffset).sqrt().sub(sunoffset);
-    vec sunweight = vec(betar).mul(sundepth.x).madd(betam, sundepth.y).madd(betao, sundepth.z - sundepth.x);
-    vec sunextinction = vec(sunweight).neg().exp2();
     vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale) : sunlight.tocolor().mul(sunlightscale);
-    // assume sunlight color is gamma encoded, so decode to linear light, then apply extinction
+    // Sun transmittance is evaluated at every ray-march sample. In particular,
+    // it must not be precomputed at ground level: doing so erases the illuminated
+    // upper atmosphere as soon as the sun moves below the horizon.
     extern float hdrgamma;
-    vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16).mul(sunextinction);
-    float maxsunweight = max(max(sunweight.x, sunweight.y), sunweight.z);
-    if(maxsunweight > 127) sunweight.mul(127/maxsunweight);
-    sunweight.add(1e-4f);
-    LOCALPARAM(sunweight, sunweight);
+    vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16);
     LOCALPARAM(sunlight, vec4(sunscale, alpha));
-    LOCALPARAM(sundir, sunlightdir);
+    vec normalizedsundir = sunlightdir;
+    if(normalizedsundir.squaredlen() > 1e-8f) normalizedsundir.normalize();
+    else normalizedsundir = vec(0, 0, 1);
+    LOCALPARAM(sundir, normalizedsundir);
 
-    // invert extinction at zenith to get an approximation of how bright the sun disk should be
-    vec zenithdepth = vec(atmoshells).add(planetradius*planetradius).sqrt().sub(planetradius);
-    vec zenithweight = vec(betar).mul(zenithdepth.x).madd(betam, zenithdepth.y).madd(betao, zenithdepth.z - zenithdepth.x);
-    vec zenithextinction = vec(zenithweight).sub(sunweight).exp2();
-    vec diskcolor = (!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).mul(ldrscale).pow(hdrgamma).mul(zenithextinction).mul(atmosundiskbright * 4);
+    // The shader applies camera-to-space transmittance and planet visibility.
+    vec diskcolor = (!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).mul(ldrscale).pow(hdrgamma).mul(atmosundiskbright * 4);
     LOCALPARAM(sundiskcolor, diskcolor);
 
     // convert from view cosine into mu^2 for limb darkening, where mu = sqrt(1 - sin^2) and sin^2 = 1 - cos^2, thus mu^2 = 1 - (1 - cos^2*scale)
@@ -824,8 +829,8 @@ void drawskybox(bool clear)
 {
     bool havefaces = haveskyfaces();
     bool havenightsky = atmo && !havefaces && sunlightdir.z < 0 && loadnightsky();
-    float nightfade = havenightsky ? clamp(-sunlightdir.z / 0.1f, 0.0f, 1.0f) : 0.0f;
-    nightfade *= nightfade * (3.0f - 2.0f * nightfade);
+    float nightfade = havenightsky ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
+    nightfade *= nightfade*(3.0f - 2.0f*nightfade);
     bool limited = false;
     if(limitsky()) for(vtxarray *va = visibleva; va; va = va->next)
     {
@@ -849,7 +854,10 @@ void drawskybox(bool clear)
 
     if(clampsky) glDepthRange(1, 1);
 
-    if(clear || (!havefaces && (!atmo || atmoalpha < 1)))
+    // A partially faded night texture needs a deterministic background before
+    // the atmosphere transmits it. The ordinary opaque daytime atmosphere does
+    // not: it deliberately overwrites stale HDR sky pixels below.
+    if(clear || (!havefaces && (!atmo || atmoalpha < 1 || (havenightsky && nightfade < 1))))
     {
         vec skyboxcolor = skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
@@ -876,20 +884,24 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
-    if(havenightsky) drawnightsky();
+    if(havenightsky) drawnightsky(nightfade);
 
     if(atmo && (!havefaces || atmoalpha < 1))
     {
-        float atmospherealpha = atmoalpha * (1.0f - nightfade);
-        if(atmospherealpha < 1)
+        // The atmosphere shader outputs premultiplied in-scattering in RGB and
+        // scalar view transmittance in A. This preserves the night sky behind
+        // the atmosphere and keeps twilight alive below the geometric horizon.
+        // Only use destination-transmittance blending when a valid background
+        // was drawn this frame. With no skybox/night backdrop the HDR target can
+        // contain last frame's clouds, so blending would create temporal trails.
+        bool blendatmosphere = havefaces || havenightsky || atmoalpha < 1;
+        if(blendatmosphere)
         {
             glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFunc(GL_ONE, GL_SRC_ALPHA);
         }
-
-        drawatmosphere(atmospherealpha);
-
-        if(atmospherealpha < 1) glDisable(GL_BLEND);
+        drawatmosphere(atmoalpha);
+        if(blendatmosphere) glDisable(GL_BLEND);
     }
 
     if(fogdomemax && !fogdomeclouds)
