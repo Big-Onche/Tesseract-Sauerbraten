@@ -11,7 +11,7 @@ static const int patchSize = 32, maxInstances = 1<<20, impulseMaxEvents = 64, im
 static const int IMPULSE_PLAYER = 2;
 
 VARP(grass, 0, 1, 1);
-VARP(improvedgrass, 0, 1, 1);
+VARP(improvedgrass, 0, 0, 1);
 VARP(grassdist, 0, 768, 10000);
 FVARP(grasstaper, 0, 0.3f, 1);
 FVARFP(grassstep, 0.5f, 3.5, 8, settingsChanged());
