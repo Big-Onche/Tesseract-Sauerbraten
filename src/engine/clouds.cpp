@@ -27,6 +27,7 @@ namespace volumetricClouds
     GLuint vcweathertex = 0;
     GLuint vcfbmtex = 0;
     GLuint vccompositetex = 0;
+    GLuint vcinsidefogtex = 0, vcinsidefogfbo = 0;
     int vcw = 0, vch = 0, vcfullw = 0, vcfullh = 0;
     int vcshadowsz = 0;
     vec4 vccompositetexparams(0, 0, 0, 0);
@@ -51,13 +52,16 @@ namespace volumetricClouds
         VC_DEBUG_SHADOW_MAP,
         VC_DEBUG_SHADOW_APPLY,
         VC_DEBUG_COMPOSITE,
+        VC_DEBUG_INSIDE_FOG_PROBE,
+        VC_DEBUG_INSIDE_FOG_APPLY,
         VC_DEBUG_PASS_COUNT
     };
 
     static const int VC_DEBUG_QUERY_COUNT = 3, VC_DEBUG_TIMESTAMPS = 2 + 2 * VC_DEBUG_PASS_COUNT;
     static const char * const vcdebugpassnames[VC_DEBUG_PASS_COUNT] =
     {
-        "main raymarch", "depth cache", "atrous filtering", "upscale", "bilateral blur", "clarity", "shadow map", "shadow application", "final composite"
+        "main raymarch", "depth cache", "atrous filtering", "upscale", "bilateral blur", "clarity", "shadow map", "shadow application",
+        "final composite", "in-cloud fog probe", "in-cloud fog application"
     };
     GLuint vcdebugquery[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     GLuint vcdebugtimestampquery[VC_DEBUG_QUERY_COUNT][VC_DEBUG_TIMESTAMPS] = { { 0 } };
@@ -65,7 +69,8 @@ namespace volumetricClouds
     int vcdebugtimestampcycle = 0, vcdebugtimestampwaiting = 0, vcdebugtimestampactive = -1;
     int vcdebugpassmask[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     bool vcdebuggpuquery = false, vcdebugtimestamps = false, vcdebugcputimer = false;
-    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
+    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f,
+                                                                   -1.0f, -1.0f };
 
     // graphic settings
     VARP(volumetricclouds, 0, 1, 1);
@@ -131,6 +136,15 @@ namespace volumetricClouds
     VARR(vcconfigured, 0, 0, 1);
     VARR(vcdensity, 0, 50, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
+    VARR(vcinsidefog, 0, 1, 1);
+    VARR(vcinsidefogsteps, 4, 6, 16);
+    FVAR(vcinsidefogprobedist, 1.0f, 64.0f, 1024.0f);
+    FVAR(vcinsidefogdensity, 0.0f, 32.0f, 64.0f);
+    FVAR(vcinsidefogstart, 0.0f, 0.0f, 1.0f);
+    FVAR(vcinsidefogfull, 0.0f, 0.1f, 1.0f);
+    FVAR(vcinsidefogmaxdist, 1.0f, 1024.0f, 1.0e7f);
+    FVAR(vcinsidefogmaxopacity, 0.0f, 0.98f, 1.0f);
+    FVAR(vcinsidefogcolourscale, 0.0f, 1.0f, 4.0f);
     VARR(vcheight, -1000, 400, 1000);
     VARR(vcthickness, 0, 50, 300);
     VARR(vcradius, 0, 3000, 10000);                  // 100 = worldsize, 0 disables the cloud layer
@@ -971,6 +985,7 @@ namespace volumetricClouds
         useshaderbyname("volumetriccloudcomposite");
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
+        useshaderbyname("volumetriccloudinsidefog");
         useshaderbyname("scalelinear");
         godrays::crepuscular::init();
     }
@@ -1046,6 +1061,8 @@ namespace volumetricClouds
         Shader *compositeshader = vccompositedetail ? useshaderbyname("volumetriccloudcomposite") : NULL;
         Shader *shadowmapshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowmap") : NULL;
         Shader *shadowapplyshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowapply") : NULL;
+        Shader *insidefogshader = vcinsidefog && vcinsidefogdensity > 1.0e-4f && vcinsidefogmaxopacity > 1.0e-4f ?
+                                  useshaderbyname("volumetriccloudinsidefog") : NULL;
         bool useclarity = vcclarity && clarityshader && vcclaritystrength > 1e-4f;
         bool doshadow = shadowmapshader && shadowapplyshader;
         if(!cloudshader) return;
@@ -1071,6 +1088,7 @@ namespace volumetricClouds
         bool usebilateral = drawclouds && vcblur && bilateralshader && depthshader;
         bool useupscale = drawclouds && (vcw < vieww || vch < viewh) && upscaleshader && depthshader;
         bool needdepthcache = usebilateral || useupscale;
+        bool useinsidefog = drawclouds && insidefogshader;
 
         if(!doshadow && (vcshadowtex || vcshadowfbo))
             cleanupshadowmap();
@@ -1110,6 +1128,11 @@ namespace volumetricClouds
         {
             glGenTextures(1, &vcclaritytex);
             createtexture(vcclaritytex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
+        }
+        if(useinsidefog && !vcinsidefogtex)
+        {
+            glGenTextures(1, &vcinsidefogtex);
+            createtexture(vcinsidefogtex, 1, 1, NULL, 3, 1, hasTF ? GL_RGBA16F : GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
 
         if(drawclouds && !vcfbo)
@@ -1161,6 +1184,15 @@ namespace volumetricClouds
             glBindFramebuffer_(GL_FRAMEBUFFER, vcclarityfbo);
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcclaritytex, 0);
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud clarity buffer!");
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+        }
+        if(useinsidefog && !vcinsidefogfbo)
+        {
+            glGenFramebuffers_(1, &vcinsidefogfbo);
+            glBindFramebuffer_(GL_FRAMEBUFFER, vcinsidefogfbo);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, vcinsidefogtex, 0);
+            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                fatal("Failed allocating volumetric cloud in-cloud fog probe!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
         if(doshadow)
@@ -1269,6 +1301,7 @@ namespace volumetricClouds
         maxviewstep *= budgetsteprelax;
         GLOBALPARAMF(tvcloudviewsteps, max(nearviewstep, 1.0e-3f), max(mediumviewstep, 1.0e-3f), maxviewstep, ws);
         GLOBALPARAMF(tvcloudsunsteps, float(vcsunsteps));
+        GLOBALPARAMF(tvcloudinsideprobe, 0.0f);
         GLOBALPARAM(vcloudcolour, vccolour.tocolor());
         vec4 atmoopticaldepthparams, atmosunlightparams;
         vec atmosunweight, atmomieparams, atmobetarayleigh, atmobetamie, atmobetaozone;
@@ -1285,10 +1318,33 @@ namespace volumetricClouds
 
         GLuint compositetex = 0;
         int compositetexw = 0, compositetexh = 0;
+        int multiscatoctaves = clamp(int(cloudsun.multiscatParams.z), 1, 4);
         glDisable(GL_DEPTH_TEST);
 
         if(drawclouds)
         {
+            if(useinsidefog)
+            {
+                begindebugpass(VC_DEBUG_INSIDE_FOG_PROBE);
+                glBindFramebuffer_(GL_FRAMEBUFFER, vcinsidefogfbo);
+                glViewport(0, 0, 1, 1);
+                glDisable(GL_BLEND);
+                clearcloudtarget();
+                float probedist = min(max(vcinsidefogprobedist, 1.0f), cloudbounds.z);
+                GLOBALPARAMF(tvcloudbounds, cloudbounds.x, cloudbounds.y, probedist, cloudbounds.w);
+                GLOBALPARAMF(tvcloudscale, float(vieww), float(viewh), 1.0f / float(vieww), 1.0f / float(viewh));
+                GLOBALPARAMF(tvcloudsteps, float(vcinsidefogsteps));
+                GLOBALPARAMF(tvcloudinsideprobe, 1.0f);
+                if(multiscatoctaves > 1) cloudshader->setvariant(multiscatoctaves - 2, 0);
+                else cloudshader->set();
+                screenquad(1, 1);
+                GLOBALPARAMF(tvcloudbounds, cloudbounds.x, cloudbounds.y, cloudbounds.z, cloudbounds.w);
+                GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
+                GLOBALPARAMF(tvcloudsteps, float(vceffectivesteps));
+                GLOBALPARAMF(tvcloudinsideprobe, 0.0f);
+                enddebugpass(VC_DEBUG_INSIDE_FOG_PROBE);
+            }
+
             if(needdepthcache)
             {
                 begindebugpass(VC_DEBUG_DEPTH_CACHE);
@@ -1312,7 +1368,6 @@ namespace volumetricClouds
             clearcloudtarget();
             glEnable(GL_SCISSOR_TEST);
             setcloudscissor(cloudscissor, true);
-            int multiscatoctaves = clamp(int(cloudsun.multiscatParams.z), 1, 4);
             // The base program is one lane; variant columns 0..2 are two through four lanes.
             if(multiscatoctaves > 1) cloudshader->setvariant(multiscatoctaves - 2, 0);
             else cloudshader->set();
@@ -1552,6 +1607,24 @@ namespace volumetricClouds
             glDisable(GL_SCISSOR_TEST);
             enddebugpass(VC_DEBUG_COMPOSITE);
         }
+        if(useinsidefog)
+        {
+            begindebugpass(VC_DEBUG_INSIDE_FOG_APPLY);
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+            glViewport(0, 0, vieww, viewh);
+            glDisable(GL_SCISSOR_TEST);
+            glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, vcinsidefogtex);
+            float probedist = min(max(vcinsidefogprobedist, 1.0f), cloudbounds.z);
+            GLOBALPARAMF(tvcloudinsidefogparams0, probedist, vcinsidefogdensity, vcinsidefogstart, vcinsidefogfull);
+            GLOBALPARAMF(tvcloudinsidefogparams1, vcinsidefogmaxdist, vcinsidefogmaxopacity, vcinsidefogcolourscale, 0.0f);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            insidefogshader->set();
+            screenquad(vieww, viewh);
+            glDisable(GL_BLEND);
+            enddebugpass(VC_DEBUG_INSIDE_FOG_APPLY);
+        }
         glEnable(GL_DEPTH_TEST);
 
         enddebugtimer();
@@ -1666,6 +1739,16 @@ namespace volumetricClouds
         {
             glDeleteTextures(1, &vcclaritytex);
             vcclaritytex = 0;
+        }
+        if(vcinsidefogfbo)
+        {
+            glDeleteFramebuffers_(1, &vcinsidefogfbo);
+            vcinsidefogfbo = 0;
+        }
+        if(vcinsidefogtex)
+        {
+            glDeleteTextures(1, &vcinsidefogtex);
+            vcinsidefogtex = 0;
         }
         vccompositetex = 0;
         vccompositetexparams = vec4(0, 0, 0, 0);
