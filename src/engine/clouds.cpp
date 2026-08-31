@@ -69,11 +69,10 @@ namespace volumetricClouds
     int vcdebugtimestampcycle = 0, vcdebugtimestampwaiting = 0, vcdebugtimestampactive = -1;
     int vcdebugpassmask[VC_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     bool vcdebuggpuquery = false, vcdebugtimestamps = false, vcdebugcputimer = false;
-    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f,
-                                                                   -1.0f, -1.0f };
+    float vcdebugms = -1.0f, vcdebugpassms[VC_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
 
     // graphic settings
-    VARP(volumetricclouds, 0, 1, 1);
+    VARP(volumetricclouds, 0, 0, 1);
     VAR(debugvc, 0, 0, 1);
     VARP(vcblur, 0, 0, 1);
     VARP(vcblurscale, 1, 1, 4);
@@ -89,18 +88,21 @@ namespace volumetricClouds
     VARP(vcfbmresolution, 16, 128, 256);
     VARP(vcfbmseed, -0x100000, 0, 0x100000);
 
+    // shadow map
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowradius, 10, 100, 1000);              // shadow footprint half-width as a percentage of world size
     VARP(vcshadowmapsize, 64, 128, 4096);
     VARP(vcshadowsamples, 1, 4, 8);
     VARP(vcshadowpcf, 0, 1, 2);
 
+    // clarity filter
     VARP(vcclarity, 0, 1, 1);
     FVAR(vcclaritystrength, 0.0f, 0.22f, 1.0f);
     FVAR(vcclarityradius, 0.5f, 16.0f, 32.0f);
     FVAR(vcclarityalphak, 0.0f, 18.0f, 64.0f);
     FVAR(vcclaritylumak, 0.0f, 6.0f, 32.0f);
 
+    // detailer
     VARP(vccompositedetail, 0, 1, 1);
     FVAR(vcdetailstrength, 0.0f, 0.6f, 1.0f);
     FVAR(vcdetailfrequency, 1.0f, 4.0f, 128.0f);
@@ -122,10 +124,21 @@ namespace volumetricClouds
     FVAR(vcdetailmipbias, -4.0f, 0.0f, 4.0f);
     VAR(vccompositedetaildebug, 0, 0, 5);
 
+    // inside fog
+    VARR(vcinsidefog, 0, 1, 1);
+    VARR(vcinsidefogsteps, 4, 6, 16);
+    FVAR(vcinsidefogprobedist, 1.0f, 64.0f, 1024.0f);
+    FVAR(vcinsidefogdensity, 0.0f, 32.0f, 64.0f);
+    FVAR(vcinsidefogstart, 0.0f, 0.0f, 1.0f);
+    FVAR(vcinsidefogfull, 0.0f, 0.1f, 1.0f);
+    FVAR(vcinsidefogmaxdist, 1.0f, 1024.0f, 1.0e7f);
+    FVAR(vcinsidefogmaxopacity, 0.0f, 0.98f, 1.0f);
+    FVAR(vcinsidefogcolourscale, 0.0f, 1.0f, 4.0f);
+
     // map settings
     VARP(vcmultiscatoctaves, 1, 3, 4);
     FVAR(vcmultiscat, 0.0f, 1.0f, 1.0f);            // a: scattering attenuation per octave
-    FVAR(vcmultiscatext, 0.0f, 1.0f, 1.0f);         // b: extinction attenuation per octave
+    FVAR(vcmultiscatext, 0.0f, 0.8f, 1.0f);         // b: extinction attenuation per octave
     FVAR(vcmultiscatphase, 0.0f, 0.0f, 1.0f);       // c: phase-angle attenuation per octave
     FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
     FVAR(vcphaseg2, -0.95f, -0.25f, 0.95f);
@@ -136,15 +149,6 @@ namespace volumetricClouds
     VARR(vcconfigured, 0, 0, 1);
     VARR(vcdensity, 0, 50, 200);
     FVARR(vcalpha, 0.0f, 0.75f, 1.0f);
-    VARR(vcinsidefog, 0, 1, 1);
-    VARR(vcinsidefogsteps, 4, 6, 16);
-    FVAR(vcinsidefogprobedist, 1.0f, 64.0f, 1024.0f);
-    FVAR(vcinsidefogdensity, 0.0f, 32.0f, 64.0f);
-    FVAR(vcinsidefogstart, 0.0f, 0.0f, 1.0f);
-    FVAR(vcinsidefogfull, 0.0f, 0.1f, 1.0f);
-    FVAR(vcinsidefogmaxdist, 1.0f, 1024.0f, 1.0e7f);
-    FVAR(vcinsidefogmaxopacity, 0.0f, 0.98f, 1.0f);
-    FVAR(vcinsidefogcolourscale, 0.0f, 1.0f, 4.0f);
     VARR(vcheight, -1000, 400, 1000);
     VARR(vcthickness, 0, 50, 300);
     VARR(vcradius, 0, 3000, 10000);                  // 100 = worldsize, 0 disables the cloud layer
