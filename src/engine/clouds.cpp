@@ -74,13 +74,13 @@ namespace volumetricClouds
     VARP(vcatrous, 0, 1, 1);
     VARP(vcatrousiter, 1, 2, 3);
     FVARP(vcatrousalphak, 0.0f, 16.0f, 256.0f);
-    FVARP(vcscale, 0.125f, 0.25f, 0.5f);
+    FVARP(vcscale, 0.125f, 0.25f, 1.0f);
     FVARP(vcbudget, 0.0f, 0.0f, 2000.0f);          // target GPU time in milliseconds, 0 disables adaptation
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
-    VARP(vcsteps, 4, 32, 48);
+    VARP(vcsteps, 4, 24, 48);
     FVARP(vcmaxviewstep, 0.0f, 0.0f, 1.0e7f);       // maximum far-view step in world units, 0 derives it from cloud/world scale
     VARP(vcsunsteps, 4, 4, 64);
-    VARP(vcfbmresolution, 64, 128, 128);
+    VARP(vcfbmresolution, 16, 128, 256);
     VARP(vcfbmseed, -0x100000, 0, 0x100000);
     VARP(vcshadow, 0, 1, 1);
     VARP(vcshadowradius, 10, 100, 1000);              // shadow footprint half-width as a percentage of world size
@@ -92,6 +92,17 @@ namespace volumetricClouds
     FVARP(vcclarityradius, 0.5f, 16.0f, 32.0f);
     FVARP(vcclarityalphak, 0.0f, 18.0f, 64.0f);
     FVARP(vcclaritylumak, 0.0f, 6.0f, 32.0f);
+    VARP(vccompositedetail, 0, 1, 1);
+    FVAR(vcdetailstrength, 0.0f, 0.6f, 1.0f);
+    FVAR(vcdetailfrequency, 1.0f, 4.0f, 128.0f);
+    FVAR(vcsecondarydetailfrequency, 1.0f, 24.0f, 256.0f);
+    FVAR(vcdetailscrollspeed, 0.0f, 0.2f, 1.0f);
+    FVAR(vcedgeerosionstrength, 0.0f, 0.6f, 1.0f);
+    FVAR(vcinternaldarkeningstrength, 0.0f, 0.6f, 1.0f);
+    FVAR(vcsilverliningbreakupstrength, 0.0f, 0.5f, 1.0f);
+    FVAR(vcdetailnearscalemultiplier, 1.0f, 3.0f, 4.0f);
+    FVAR(vcdetailfadestartdistance, 0.0f, 16384.0f, 1.0e7f);
+    FVAR(vcdetailfadeenddistance, 0.0f, 8192.0f, 1.0e7f);
 
     // map settings
     VARP(vcmultiscatoctaves, 1, 3, 4);
@@ -185,7 +196,7 @@ namespace volumetricClouds
 
     static void ensurefbmtexture()
     {
-        int size = clamp(vcfbmresolution, 64, 128);
+        int size = clamp(vcfbmresolution, 16, 256);
         if(vcfbmtex && (vcfbmtexseed != vcfbmseed || vcfbmtexsize != size))
         {
             glDeleteTextures(1, &vcfbmtex);
@@ -230,7 +241,7 @@ namespace volumetricClouds
     }
 
     static const float VC_BUDGET_MIN_SCALE = 0.125f, VC_BUDGET_MAX_SCALE = 0.5f;
-    static const int VC_BUDGET_MIN_STEPS = 4, VC_BUDGET_MAX_STEPS = 48;
+    static const int VC_BUDGET_MIN_STEPS = 8, VC_BUDGET_MAX_STEPS = 128;
     static bool vcbudgetinitialized = false;
     static float vcbudgetscale = 0.25f, vcbudgetsteps = 32.0f;
     static float vcbudgetfilteredms = -1.0f, vcbudgetlasttarget = -1.0f;
@@ -890,6 +901,7 @@ namespace volumetricClouds
         useshaderbyname("volumetriccloudsupscale");
         useshaderbyname("volumetriccloudsbilateral");
         useshaderbyname("volumetriccloudclarity");
+        useshaderbyname("volumetriccloudcomposite");
         useshaderbyname("volumetriccloudshadowmap");
         useshaderbyname("volumetriccloudshadowapply");
         useshaderbyname("scalelinear");
@@ -964,6 +976,7 @@ namespace volumetricClouds
         Shader *upscaleshader = useshaderbyname("volumetriccloudsupscale");
         Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
         Shader *clarityshader = vcclarity ? useshaderbyname("volumetriccloudclarity") : NULL;
+        Shader *compositeshader = vccompositedetail ? useshaderbyname("volumetriccloudcomposite") : NULL;
         Shader *shadowmapshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowmap") : NULL;
         Shader *shadowapplyshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowapply") : NULL;
         bool useclarity = vcclarity && clarityshader && vcclaritystrength > 1e-4f;
@@ -1408,12 +1421,26 @@ namespace volumetricClouds
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
 
+            if(compositeshader && vcdetailstrength > 1.0e-4f)
+            {
+                // Reuse the raymarch's periodic FBM volume. The final pass only
+                // consumes cloud RGBA, so no additional cloud render target is needed.
+                glActiveTexture_(GL_TEXTURE10);
+                glBindTexture(GL_TEXTURE_3D, vcfbmtex);
+                glActiveTexture_(GL_TEXTURE0);
+                GLOBALPARAMF(tvcloudcompositedetail0, vcdetailstrength, vcdetailfrequency, vcsecondarydetailfrequency, vcdetailscrollspeed);
+                GLOBALPARAMF(tvcloudcompositedetail1, vcedgeerosionstrength, vcinternaldarkeningstrength,
+                             vcsilverliningbreakupstrength, vcdetailnearscalemultiplier);
+                GLOBALPARAMF(tvcloudcompositedetail2, vcdetailfadestartdistance, vcdetailfadeenddistance);
+            }
+
             glEnable(GL_SCISSOR_TEST);
             setcloudscissor(cloudscissor, false, 2);
             glEnable(GL_BLEND);
             // Cloud shader output is premultiplied (rgb already multiplied by alpha/transmittance).
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-            SETSHADER(scalelinear);
+            if(compositeshader && vcdetailstrength > 1.0e-4f) compositeshader->set();
+            else SETSHADER(scalelinear);
             screenquad(compositetexw, compositetexh);
 
             glDisable(GL_BLEND);
