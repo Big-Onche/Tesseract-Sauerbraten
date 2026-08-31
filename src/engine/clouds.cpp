@@ -96,13 +96,22 @@ namespace volumetricClouds
     FVAR(vcdetailstrength, 0.0f, 0.6f, 1.0f);
     FVAR(vcdetailfrequency, 1.0f, 4.0f, 128.0f);
     FVAR(vcsecondarydetailfrequency, 1.0f, 24.0f, 256.0f);
-    FVAR(vcdetailscrollspeed, 0.0f, 0.2f, 1.0f);
+    FVAR(vcdetailscrollspeed, 0.0f, 0.1f, 1.0f);
     FVAR(vcedgeerosionstrength, 0.0f, 0.6f, 1.0f);
     FVAR(vcinternaldarkeningstrength, 0.0f, 0.6f, 1.0f);
     FVAR(vcsilverliningbreakupstrength, 0.0f, 0.5f, 1.0f);
     FVAR(vcdetailnearscalemultiplier, 1.0f, 3.0f, 4.0f);
     FVAR(vcdetailfadestartdistance, 0.0f, 16384.0f, 1.0e7f);
     FVAR(vcdetailfadeenddistance, 0.0f, 8192.0f, 1.0e7f);
+    FVAR(vcdistantdetailscalestart, 0.0f, 32768.0f, 1.0e7f);
+    FVAR(vcdistantdetailscaleend, 0.0f, 131072.0f, 1.0e7f);
+    FVAR(vcdistantdetailmaxfrequency, 1.0f, 4.0f, 8.0f);
+    FVAR(vcfinedetailfadestart, 0.0f, 32768.0f, 1.0e7f);
+    FVAR(vcfinedetailfadeend, 0.0f, 131072.0f, 1.0e7f);
+    FVAR(vcmediumdetailfadestart, 0.0f, 131072.0f, 1.0e7f);
+    FVAR(vcmediumdetailfadeend, 0.0f, 524288.0f, 1.0e7f);
+    FVAR(vcdetailmipbias, -4.0f, 0.0f, 4.0f);
+    VAR(vccompositedetaildebug, 0, 0, 5);
 
     // map settings
     VARP(vcmultiscatoctaves, 1, 3, 4);
@@ -1432,6 +1441,11 @@ namespace volumetricClouds
                 GLOBALPARAMF(tvcloudcompositedetail1, vcedgeerosionstrength, vcinternaldarkeningstrength,
                              vcsilverliningbreakupstrength, vcdetailnearscalemultiplier);
                 GLOBALPARAMF(tvcloudcompositedetail2, vcdetailfadestartdistance, vcdetailfadeenddistance);
+                GLOBALPARAMF(tvcloudcompositedistance0, vcdistantdetailscalestart, vcdistantdetailscaleend,
+                             vcdistantdetailmaxfrequency, vcdetailmipbias);
+                GLOBALPARAMF(tvcloudcompositedistance1, vcfinedetailfadestart, vcfinedetailfadeend,
+                             vcmediumdetailfadestart, vcmediumdetailfadeend);
+                GLOBALPARAMF(tvcloudcompositedetaildebug, float(vccompositedetaildebug));
             }
 
             glEnable(GL_SCISSOR_TEST);
