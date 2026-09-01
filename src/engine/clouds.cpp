@@ -82,6 +82,7 @@ namespace volumetricClouds
     FVARP(vcscale, 0.125f, 0.25f, 1.0f);
     FVARP(vcbudget, 0.0f, 0.0f, 2000.0f);          // target GPU time in milliseconds, 0 disables adaptation
     FVARP(vcbilateraledge, 1e-5f, 0.02f, 1.0f);
+    VARP(vcupscaleedgefix, 0, 0, 1);
     VARP(vcsteps, 4, 24, 48);
     FVARP(vcmaxviewstep, 0.0f, 0.0f, 1.0e7f);       // maximum far-view step in world units, 0 derives it from cloud/world scale
     VARP(vcsunsteps, 4, 4, 64);
@@ -1468,7 +1469,8 @@ namespace volumetricClouds
                 glActiveTexture_(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_RECTANGLE, lowrestex);
                 GLOBALPARAMF(tvcloudscale, float(vieww)/vcw, float(viewh)/vch, float(vcw)/vieww, float(vch)/viewh);
-                upscaleshader->set();
+                if(vcupscaleedgefix) upscaleshader->setvariant(0, 0);
+                else upscaleshader->set();
                 screenquad(vieww, viewh);
 
                 compositetex = vcbilateraltex;
