@@ -1311,7 +1311,10 @@ namespace sound
 
             if(inrange)
             {
-                play(e.attr1, NULL, &e, SND_MAP, -1, mapSoundFadeMillis(maxdist), -1, 0, -1);
+                // A map sound entity owns one looping channel. Without this guard,
+                // sounds registered with unlimited maxuses start another copy every
+                // frame and quickly exhaust all available OpenAL sources.
+                if(!(e.flags&EF_SOUND)) play(e.attr1, NULL, &e, SND_MAP, -1, mapSoundFadeMillis(maxdist), -1, 0, -1);
             }
             else if(e.flags&EF_SOUND) stopMapSound(&e, mapSoundFadeMillis(maxdist));
         }
