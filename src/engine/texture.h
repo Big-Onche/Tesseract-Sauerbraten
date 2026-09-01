@@ -847,6 +847,7 @@ extern void savepng(const char *filename, ImageData &image, bool flip = false);
 extern void savetga(const char *filename, ImageData &image, bool flip = false);
 extern bool loaddds(const char *filename, ImageData &image, int force = 0);
 extern bool loadimage(const char *filename, ImageData &image);
+extern bool loadtexturedata(const char *name, ImageData &image, bool msg = true);
 
 extern MatSlot &lookupmaterialslot(int slot, bool load = true);
 extern Slot &lookupslot(int slot, bool load = true);
@@ -863,4 +864,3 @@ extern VSlot dummyvslot;
 extern DecalSlot dummydecalslot;
 extern vector<Slot *> slots;
 extern vector<VSlot *> vslots;
-

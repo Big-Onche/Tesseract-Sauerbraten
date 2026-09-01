@@ -1700,6 +1700,11 @@ static bool texturedata(ImageData &d, const char *tname, bool msg = true, int *c
     return true;
 }
 
+bool loadtexturedata(const char *name, ImageData &image, bool msg)
+{
+    return texturedata(image, name, msg);
+}
+
 static inline bool texturedata(ImageData &d, Slot &slot, Slot::Tex &tex, bool msg = true, int *compress = NULL, int *wrap = NULL)
 {
     return texturedata(d, tex.name, msg, compress, wrap, slot.texturedir(), tex.type);

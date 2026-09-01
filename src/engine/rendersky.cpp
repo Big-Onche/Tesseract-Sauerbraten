@@ -261,7 +261,10 @@ namespace skyboxtint
         bool anyloaded = false;
         loopi(6) if(sky[i] && sky[i] != notexture && sky[i]->name && sky[i]->w > 0 && sky[i]->h > 0)
         {
-            faceloaded[i] = loadimage(sky[i]->name, faceimg[i]) && faceimg[i].data && !faceimg[i].compressed;
+            // Texture names can contain inline commands (for example
+            // <nocompress>). Use the texture-data path so those commands are
+            // parsed instead of being mistaken for part of the file name.
+            faceloaded[i] = loadtexturedata(sky[i]->name, faceimg[i], false) && faceimg[i].data && !faceimg[i].compressed;
             anyloaded = anyloaded || faceloaded[i];
         }
 
