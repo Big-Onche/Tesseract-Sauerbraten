@@ -305,32 +305,37 @@ namespace geometry
 {
     void cleanup();
 
+    // settings
     VARFP(godraysgeom, 0, 1, 1, if(!godraysgeom) cleanup());
-    VARP(grgsteps, 1, 12, 64);
+    VARP(grgsteps, 1, 8, 64);
     FVARP(grgscale, 0.125f, 0.5f, 1.0f);
     VARP(grgatrous, 0, 1, 1);
-    VARP(grgatrousiter, 1, 2, 3);
+    VARP(grgatrousiter, 1, 1, 3);
     VARP(grgglobalstrength, 0, 0, 3);
-    VAR(debuggrg, 0, 0, 7);
-    FVARP(grgshadowbias, 0.0f, 0.0f, 4.0f);
-    FVARP(grgshadowbiasdist, 0.0f, 0.0f, 1.0f);
-    FVARP(grgforwardexp, 0.25f, 5.0f, 32.0f);
-    FVARP(grgisolationradius, 0.0f, 128.0f, 256.0f);
-    FVARP(grgisolationpower, 0.01f, 0.05f, 4.0f);
-    FVARP(grgbaseatmosphere, 0.0f, 0.02f, 0.25f);
-    FVARP(grgshaftboost, 0.0f, 1.0f, 4.0f);
-    FVARP(grgdetailboost, 0.0f, 0.15f, 1.0f);
-    FVARP(grgcsmfade, 0.0f, 0.05f, 0.25f);
 
-    FVAR(grgatrousalphak, 0.0f, 0.0f, 256.0f);
-    FVAR(grgatrousdepth, 0.0f, 2048.0f, 8192.0f);
+    // tunables
+    FVAR(grgshadowbias, 0.0f, 0.0f, 4.0f);
+    FVAR(grgshadowbiasdist, 0.0f, 0.0f, 1.0f);
+    FVAR(grgforwardexp, 0.25f, 0.25f, 32.0f);
+    FVAR(grgisolationradius, 0.0f, 128.0f, 256.0f);
+    FVAR(grgisolationpower, 0.01f, 1.0f, 4.0f);
+    FVAR(grgbaseatmosphere, 0.0f, 0.02f, 0.25f);
+    FVAR(grgshaftboost, 0.0f, 1.0f, 4.0f);
+    FVAR(grgdetailboost, 0.0f, 0.0f, 1.0f);
+    FVAR(grgcsmfade, 0.0f, 0.05f, 0.25f);
+    FVAR(grgatrousalphak, 0.0f, 2.0f, 256.0f);
+    FVAR(grgatrousdepth, 0.0f, 4096.0f, 8192.0f);
     FVAR(grgupscaleedge, 0.0f, 0.02f, 1.0f);
     FVAR(grgdecay, 0.0f, 0.93f, 1.0f);
     FVAR(grgthreshold, 0.0f, 0.05f, 1.0f);
 
+    // map vars
     FVARR(grgstrength, 0.0f, 2.0f, 4.0f);
-    FVARR(grgdensity, 0.25f, 1.0f, 4.0f);
+    FVARR(grgdensity, 0.25f, 2.0f, 4.0f);
     FVARR(grgmaxdist, 0.01f, 0.8f, 1.0f);
+    CVARR(grgcolour, 0);
+
+    VAR(debuggrg, 0, 0, 7);
 
     static int bufferwidth = -1, bufferheight = -1, reconstructionwidth = -1, reconstructionheight = -1;
     static GLuint rayfbo = 0, raytex = 0, rayupsamplefbo = 0, rayupsampletex = 0;
@@ -770,10 +775,11 @@ namespace geometry
            grgsteps <= 0 || grgmaxdist <= 0.0f)
             return;
 
-        if(sunlight.iszero() || sunlightscale <= 0.0f || sunlightdir.z <= 1.0e-4f || !ensurebuffers())
+        const bool customcolour = _grgcolour != 0;
+        if((!customcolour && sunlight.iszero()) || sunlightscale <= 0.0f || sunlightdir.z <= 1.0e-4f || !ensurebuffers())
             return;
 
-        vec suncolor = sunlight.tocolor().mul(max(sunlightscale, 0.0f)).mul(ldrscale * 2.0f);
+        vec suncolor = (customcolour ? grgcolour.tocolor() : sunlight.tocolor()).mul(max(sunlightscale, 0.0f)).mul(ldrscale * 2.0f);
 
         if(suncolor.squaredlen() <= 1.0e-8f) return;
 
