@@ -334,18 +334,36 @@ namespace geometry
 
     static int bufferwidth = -1, bufferheight = -1, reconstructionwidth = -1, reconstructionheight = -1;
     static GLuint rayfbo = 0, raytex = 0, rayupsamplefbo = 0, rayupsampletex = 0;
-    static GLuint rayfilterfbo = 0, rayfiltertex = 0, rayguidefbo = 0, rayguidetex = 0;
+    static GLuint rayfilterfbo[2] = { 0, 0 }, rayfiltertex[2] = { 0, 0 }, rayguidefbo = 0, rayguidetex = 0;
     static GLuint raydebugfbo = 0, raydebugtex = 0;
     static GLenum passformat = GL_RGBA8, guideformat = GL_RGBA8;
     static GLuint debugcompositetex = 0;
     static bool debugrendered = false;
 
-    static const int GRG_DEBUG_QUERY_COUNT = 3;
-    static GLuint grgdebugquery[GRG_DEBUG_QUERY_COUNT][2] = { { 0 } };
+    enum GRGDebugPass
+    {
+        GRG_DEBUG_SETUP = 0,
+        GRG_DEBUG_CLEAR,
+        GRG_DEBUG_RAYMARCH,
+        GRG_DEBUG_FILTER,
+        GRG_DEBUG_UPSCALE,
+        GRG_DEBUG_COMPOSITE,
+        GRG_DEBUG_RESTORE,
+        GRG_DEBUG_PASS_COUNT
+    };
+
+    static const int GRG_DEBUG_QUERY_COUNT = 3, GRG_DEBUG_TIMESTAMPS = 2 + 2 * GRG_DEBUG_PASS_COUNT;
+    static const char * const grgdebugpassnames[GRG_DEBUG_PASS_COUNT] =
+    {
+        "FBO/setup", "clear", "raymarch draw", "a-trous filter (ray res)", "upscale", "composite", "framebuffer restore"
+    };
+    static GLuint grgdebugquery[GRG_DEBUG_QUERY_COUNT][GRG_DEBUG_TIMESTAMPS] = { { 0 } };
     static int grgdebugquerycycle = 0, grgdebugquerywaiting = 0, grgdebugqueryactive = -1;
+    static int grgdebugpassmask[GRG_DEBUG_QUERY_COUNT] = { 0, 0, 0 };
     static int grgdebugcpustart = 0;
     static bool grgdebugcputimer = false;
     static float grgdebugms = -1.0f;
+    static float grgdebugpassms[GRG_DEBUG_PASS_COUNT] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
 
     static void polldebugtimer()
     {
@@ -360,6 +378,14 @@ namespace geometry
             glGetQueryObjectui64v_(grgdebugquery[i][0], GL_QUERY_RESULT, &start);
             glGetQueryObjectui64v_(grgdebugquery[i][1], GL_QUERY_RESULT, &end);
             grgdebugms = max(float(end - start) * 1.0e-6f, 0.0f);
+            loopj(GRG_DEBUG_PASS_COUNT) if(grgdebugpassmask[i]&(1<<j))
+            {
+                GLuint64EXT passstart = 0, passend = 0;
+                glGetQueryObjectui64v_(grgdebugquery[i][2 + 2*j], GL_QUERY_RESULT, &passstart);
+                glGetQueryObjectui64v_(grgdebugquery[i][2 + 2*j + 1], GL_QUERY_RESULT, &passend);
+                grgdebugpassms[j] = max(float(passend - passstart) * 1.0e-6f, 0.0f);
+            }
+            else grgdebugpassms[j] = 0.0f;
             grgdebugquerywaiting &= ~(1<<i);
         }
     }
@@ -373,10 +399,11 @@ namespace geometry
         polldebugtimer();
         if(hasTQ && glQueryCounter_)
         {
-            if(!grgdebugquery[0][0]) glGenQueries_(GRG_DEBUG_QUERY_COUNT * 2, &grgdebugquery[0][0]);
+            if(!grgdebugquery[0][0]) glGenQueries_(GRG_DEBUG_QUERY_COUNT * GRG_DEBUG_TIMESTAMPS, &grgdebugquery[0][0]);
             if(!(grgdebugquerywaiting&(1<<grgdebugquerycycle)))
             {
                 grgdebugqueryactive = grgdebugquerycycle;
+                grgdebugpassmask[grgdebugqueryactive] = 0;
                 glQueryCounter_(grgdebugquery[grgdebugqueryactive][0], GL_TIMESTAMP);
             }
             return;
@@ -384,6 +411,19 @@ namespace geometry
 
         grgdebugcpustart = getclockmillis();
         grgdebugcputimer = true;
+    }
+
+    static void begindebugpass(GRGDebugPass pass)
+    {
+        if(grgdebugqueryactive < 0) return;
+        grgdebugpassmask[grgdebugqueryactive] |= 1<<pass;
+        glQueryCounter_(grgdebugquery[grgdebugqueryactive][2 + 2*pass], GL_TIMESTAMP);
+    }
+
+    static void enddebugpass(GRGDebugPass pass)
+    {
+        if(grgdebugqueryactive < 0) return;
+        glQueryCounter_(grgdebugquery[grgdebugqueryactive][2 + 2*pass + 1], GL_TIMESTAMP);
     }
 
     static void enddebugtimer()
@@ -404,13 +444,15 @@ namespace geometry
 
     static void cleanupdebugtimer()
     {
-        if(grgdebugquery[0][0]) glDeleteQueries_(GRG_DEBUG_QUERY_COUNT * 2, &grgdebugquery[0][0]);
+        if(grgdebugquery[0][0]) glDeleteQueries_(GRG_DEBUG_QUERY_COUNT * GRG_DEBUG_TIMESTAMPS, &grgdebugquery[0][0]);
         memset(grgdebugquery, 0, sizeof(grgdebugquery));
         grgdebugquerycycle = 0;
         grgdebugquerywaiting = 0;
         grgdebugqueryactive = -1;
+        memset(grgdebugpassmask, 0, sizeof(grgdebugpassmask));
         grgdebugcputimer = false;
         grgdebugms = -1.0f;
+        loopi(GRG_DEBUG_PASS_COUNT) grgdebugpassms[i] = -1.0f;
     }
 
     static bool disable(const char *msg)
@@ -422,6 +464,21 @@ namespace geometry
         return false;
     }
 
+    static int filteriterations(int targetwidth, int targetheight)
+    {
+        return targetwidth < vieww || targetheight < viewh ? 3 : clamp(grgatrousiter, 1, 3);
+    }
+
+    static bool needsupsamplebuffer(int targetwidth, int targetheight)
+    {
+        return debuggrg && (targetwidth < vieww || targetheight < viewh);
+    }
+
+    static bool needssecondfilterbuffer(int targetwidth, int targetheight)
+    {
+        return grgatrous && filteriterations(targetwidth, targetheight) > 1;
+    }
+
     static bool setupbuffers(int targetwidth, int targetheight, GLenum targetpassformat, GLenum targetguideformat)
     {
         bufferwidth = targetwidth;
@@ -431,15 +488,20 @@ namespace geometry
         passformat = targetpassformat;
         guideformat = targetguideformat;
         const int passfilter = bufferwidth < vieww || bufferheight < viewh ? 1 : 0;
+        const bool needupsample = needsupsamplebuffer(bufferwidth, bufferheight), needfilter = grgatrous != 0,
+                   needsecondfilter = needssecondfilterbuffer(bufferwidth, bufferheight);
 
         if(!raytex) glGenTextures(1, &raytex);
         if(!rayfbo) glGenFramebuffers_(1, &rayfbo);
-        if(!rayupsampletex) glGenTextures(1, &rayupsampletex);
-        if(!rayupsamplefbo) glGenFramebuffers_(1, &rayupsamplefbo);
-        if(!rayfiltertex) glGenTextures(1, &rayfiltertex);
-        if(!rayfilterfbo) glGenFramebuffers_(1, &rayfilterfbo);
-        if(!rayguidetex) glGenTextures(1, &rayguidetex);
-        if(!rayguidefbo) glGenFramebuffers_(1, &rayguidefbo);
+        if(needupsample && !rayupsampletex) glGenTextures(1, &rayupsampletex);
+        if(needupsample && !rayupsamplefbo) glGenFramebuffers_(1, &rayupsamplefbo);
+        loopi(needsecondfilter ? 2 : 1)
+        {
+            if(needfilter && !rayfiltertex[i]) glGenTextures(1, &rayfiltertex[i]);
+            if(needfilter && !rayfilterfbo[i]) glGenFramebuffers_(1, &rayfilterfbo[i]);
+        }
+        if(needfilter && !rayguidetex) glGenTextures(1, &rayguidetex);
+        if(needfilter && !rayguidefbo) glGenFramebuffers_(1, &rayguidefbo);
         if(debuggrg && !raydebugtex) glGenTextures(1, &raydebugtex);
         if(debuggrg && !raydebugfbo) glGenFramebuffers_(1, &raydebugfbo);
 
@@ -449,28 +511,37 @@ namespace geometry
         if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             return disable("failed allocating geometry god rays buffer");
 
-        glBindFramebuffer_(GL_FRAMEBUFFER, rayupsamplefbo);
-        createtexture(rayupsampletex, reconstructionwidth, reconstructionheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayupsampletex, 0);
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            return disable("failed allocating geometry god rays reconstruction buffer");
+        if(needupsample)
+        {
+            glBindFramebuffer_(GL_FRAMEBUFFER, rayupsamplefbo);
+            createtexture(rayupsampletex, reconstructionwidth, reconstructionheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayupsampletex, 0);
+            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                return disable("failed allocating geometry god rays reconstruction buffer");
+        }
 
-        glBindFramebuffer_(GL_FRAMEBUFFER, rayfilterfbo);
-        createtexture(rayfiltertex, reconstructionwidth, reconstructionheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayfiltertex, 0);
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            return disable("failed allocating geometry god rays filter buffer");
+        if(needfilter)
+        {
+            loopi(needsecondfilter ? 2 : 1)
+            {
+                glBindFramebuffer_(GL_FRAMEBUFFER, rayfilterfbo[i]);
+                createtexture(rayfiltertex[i], bufferwidth, bufferheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
+                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayfiltertex[i], 0);
+                if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                    return disable("failed allocating geometry god rays filter buffer");
+            }
 
-        glBindFramebuffer_(GL_FRAMEBUFFER, rayguidefbo);
-        createtexture(rayguidetex, reconstructionwidth, reconstructionheight, NULL, 3, 0, guideformat, GL_TEXTURE_RECTANGLE);
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayguidetex, 0);
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            return disable("failed allocating geometry god rays depth guide");
+            glBindFramebuffer_(GL_FRAMEBUFFER, rayguidefbo);
+            createtexture(rayguidetex, bufferwidth, bufferheight, NULL, 3, 0, guideformat, GL_TEXTURE_RECTANGLE);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rayguidetex, 0);
+            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+                return disable("failed allocating geometry god rays depth guide");
+        }
 
         if(debuggrg)
         {
             glBindFramebuffer_(GL_FRAMEBUFFER, raydebugfbo);
-            createtexture(raydebugtex, reconstructionwidth, reconstructionheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
+            createtexture(raydebugtex, bufferwidth, bufferheight, NULL, 3, 1, passformat, GL_TEXTURE_RECTANGLE);
             glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, raydebugtex, 0);
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 return disable("failed allocating geometry god rays debug snapshot");
@@ -487,9 +558,14 @@ namespace geometry
 
         const int targetwidth = max(int(ceilf(vieww*grgscale)), 1), targetheight = max(int(ceilf(viewh*grgscale)), 1);
         const GLenum targetpassformat = hasAFBO && hasTF ? GL_RGBA16F : GL_RGBA8;
-        const GLenum targetguideformat = hasAFBO && hasTF ? GL_RGBA16F : GL_RGBA8;
+        // A scalar float guide preserves linear depth while halving bandwidth versus RGBA16F.
+        const GLenum targetguideformat = hasAFBO && hasTF && hasTRG ? GL_R32F : (hasAFBO && hasTF ? GL_RGBA16F : GL_RGBA8);
+        const bool needupsample = needsupsamplebuffer(targetwidth, targetheight), needfilter = grgatrous != 0,
+                   needsecondfilter = needssecondfilterbuffer(targetwidth, targetheight);
 
-        if(raytex && rayfbo && rayupsampletex && rayupsamplefbo && rayfiltertex && rayfilterfbo && rayguidetex && rayguidefbo &&
+        if(raytex && rayfbo && (!needupsample || (rayupsampletex && rayupsamplefbo)) &&
+           (!needfilter || (rayfiltertex[0] && rayfilterfbo[0] && (!needsecondfilter || (rayfiltertex[1] && rayfilterfbo[1])) &&
+                            rayguidetex && rayguidefbo)) &&
            (!debuggrg || (raydebugtex && raydebugfbo)) &&
            bufferwidth == targetwidth && bufferheight == targetheight && reconstructionwidth == vieww && reconstructionheight == viewh &&
            passformat == targetpassformat && guideformat == targetguideformat) return true;
@@ -506,8 +582,11 @@ namespace geometry
         if(raytex) { glDeleteTextures(1, &raytex); raytex = 0; }
         if(rayupsamplefbo) { glDeleteFramebuffers_(1, &rayupsamplefbo); rayupsamplefbo = 0; }
         if(rayupsampletex) { glDeleteTextures(1, &rayupsampletex); rayupsampletex = 0; }
-        if(rayfilterfbo) { glDeleteFramebuffers_(1, &rayfilterfbo); rayfilterfbo = 0; }
-        if(rayfiltertex) { glDeleteTextures(1, &rayfiltertex); rayfiltertex = 0; }
+        loopi(2)
+        {
+            if(rayfilterfbo[i]) { glDeleteFramebuffers_(1, &rayfilterfbo[i]); rayfilterfbo[i] = 0; }
+            if(rayfiltertex[i]) { glDeleteTextures(1, &rayfiltertex[i]); rayfiltertex[i] = 0; }
+        }
         if(rayguidefbo) { glDeleteFramebuffers_(1, &rayguidefbo); rayguidefbo = 0; }
         if(rayguidetex) { glDeleteTextures(1, &rayguidetex); rayguidetex = 0; }
         if(raydebugfbo) { glDeleteFramebuffers_(1, &raydebugfbo); raydebugfbo = 0; }
@@ -528,18 +607,19 @@ namespace geometry
     {
         glBindFramebuffer_(GL_FRAMEBUFFER, rayfbo);
         glViewport(0, 0, bufferwidth, bufferheight);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
+        // The full-screen raymarch shader overwrites every pixel, so no clear is needed.
 
         glActiveTexture_(GL_TEXTURE0);
         if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
         else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
         glActiveTexture_(GL_TEXTURE2);
         glBindTexture(shadowatlastarget, shadowatlastex);
-        glTexParameteri(shadowatlastarget, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-        glTexParameteri(shadowatlastarget, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-        glTexParameteri(shadowatlastarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(shadowatlastarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        if(shadowatlastarget == GL_TEXTURE_2D)
+        {
+            glTexParameteri(shadowatlastarget, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+            glTexParameteri(shadowatlastarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(shadowatlastarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        }
         glActiveTexture_(GL_TEXTURE0);
 
         if(shadowatlastarget == GL_TEXTURE_2D) SETSHADER(geometryGodRays2D);
@@ -556,72 +636,97 @@ namespace geometry
                     max(grgisolationradius, 0.0f), clamp(grgcsmfade, 0.0f, 0.25f));
         LOCALPARAMF(godRayGeomBiasParams, clamp(grgshadowbias, 0.0f, 4.0f), clamp(grgshadowbiasdist, 0.0f, 1.0f));
         LOCALPARAMI(csmcount, csmsplits);
+        enddebugpass(GRG_DEBUG_SETUP);
+
+        begindebugpass(GRG_DEBUG_RAYMARCH);
         screenquad();
+        enddebugpass(GRG_DEBUG_RAYMARCH);
     }
 
-    static GLuint reconstruct(bool snapshot)
+    static GLuint reconstruct(bool snapshot, bool directcomposite)
     {
-        glBindFramebuffer_(GL_FRAMEBUFFER, rayupsamplefbo);
-        glViewport(0, 0, reconstructionwidth, reconstructionheight);
-        glDisable(GL_BLEND);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glActiveTexture_(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_RECTANGLE, raytex);
-        glActiveTexture_(GL_TEXTURE1);
-        if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
-        else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
-        glActiveTexture_(GL_TEXTURE0);
-        SETSHADER(geometrygodraysupsample);
-        LOCALPARAMF(godrayScale, float(vieww)/bufferwidth, float(viewh)/bufferheight, float(bufferwidth)/vieww, float(bufferheight)/viewh);
-        LOCALPARAMF(bilateralDepthScale, grgupscaleedge);
-        screenquad(bufferwidth, bufferheight, vieww, viewh);
+        const bool reducedresolution = bufferwidth < vieww || bufferheight < viewh;
+        GLuint compositetex = raytex;
+
+        if(grgatrous)
+        {
+            begindebugpass(GRG_DEBUG_FILTER);
+            glBindFramebuffer_(GL_FRAMEBUFFER, rayguidefbo);
+            glViewport(0, 0, bufferwidth, bufferheight);
+            // The depth-guide shader overwrites the complete ray-resolution attachment.
+            glActiveTexture_(GL_TEXTURE0);
+            if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
+            else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
+            if(guideformat == GL_R32F) SETSHADER(geometrygodraysdepthguidefloat);
+            else SETSHADER(geometrygodraysdepthguide);
+            screenquad(vieww, viewh);
+
+            const int iterations = filteriterations(bufferwidth, bufferheight);
+            loopi(iterations)
+            {
+                const int targetindex = i&1;
+                glBindFramebuffer_(GL_FRAMEBUFFER, rayfilterfbo[targetindex]);
+                glViewport(0, 0, bufferwidth, bufferheight);
+                glActiveTexture_(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
+                glActiveTexture_(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_RECTANGLE, rayguidetex);
+                glActiveTexture_(GL_TEXTURE0);
+                if(guideformat == GL_R32F) SETSHADER(geometrygodraysatrousfloat);
+                else SETSHADER(geometrygodraysatrous);
+                LOCALPARAMF(aTrousSize, float(bufferwidth), float(bufferheight));
+                LOCALPARAMF(aTrousParams, float(1<<i), grgatrousalphak, grgatrousdepth, 0.0f);
+                screenquad(bufferwidth, bufferheight);
+                compositetex = rayfiltertex[targetindex];
+            }
+            enddebugpass(GRG_DEBUG_FILTER);
+        }
 
         if(snapshot)
         {
             glBindFramebuffer_(GL_FRAMEBUFFER, raydebugfbo);
-            glViewport(0, 0, reconstructionwidth, reconstructionheight);
+            glViewport(0, 0, bufferwidth, bufferheight);
             glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, rayupsampletex);
-            SETSHADER(geometrygodraysupsample);
-            LOCALPARAMF(godrayScale, 1.0f, 1.0f, 1.0f, 1.0f);
-            screenquad(reconstructionwidth, reconstructionheight);
+            glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
+            SETSHADER(geometrygodrayscomposite);
+            screenquad(bufferwidth, bufferheight);
         }
 
-        GLuint compositetex = rayupsampletex;
-
-        if(grgatrous)
+        if(reducedresolution)
         {
-            glBindFramebuffer_(GL_FRAMEBUFFER, rayguidefbo);
+            begindebugpass(GRG_DEBUG_UPSCALE);
+            // The normal pass upscales directly into HDR, avoiding a full-resolution write/read/composite dependency chain.
+            glBindFramebuffer_(GL_FRAMEBUFFER, directcomposite ? (msaalight ? mshdrfbo : hdrfbo) : rayupsamplefbo);
             glViewport(0, 0, reconstructionwidth, reconstructionheight);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
+            if(directcomposite)
+            {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_ONE, GL_ONE);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+            }
+            else
+            {
+                glDisable(GL_BLEND);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            }
             glActiveTexture_(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
+            glActiveTexture_(GL_TEXTURE1);
             if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
             else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
-            SETSHADER(geometrygodraysdepthguide);
-            screenquad(vieww, viewh);
-
-            GLuint filtertex[2] = { rayupsampletex, rayfiltertex };
-            GLuint filterfbo[2] = { rayupsamplefbo, rayfilterfbo };
-            int sourceindex = 0, targetindex = 1;
-            const bool reducedresolution = bufferwidth < vieww || bufferheight < viewh;
-            const int filteriterations = reducedresolution ? 3 : clamp(grgatrousiter, 1, 3);
-            loopi(filteriterations)
+            glActiveTexture_(GL_TEXTURE0);
+            SETSHADER(geometrygodraysupsample);
+            LOCALPARAMF(godrayScale, float(vieww)/bufferwidth, float(viewh)/bufferheight, float(bufferwidth)/vieww, float(bufferheight)/viewh);
+            LOCALPARAMF(bilateralDepthScale, grgupscaleedge);
+            screenquad(bufferwidth, bufferheight, vieww, viewh);
+            if(directcomposite)
             {
-                glBindFramebuffer_(GL_FRAMEBUFFER, filterfbo[targetindex]);
-                glViewport(0, 0, reconstructionwidth, reconstructionheight);
-                glActiveTexture_(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_RECTANGLE, filtertex[sourceindex]);
-                glActiveTexture_(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_RECTANGLE, rayguidetex);
-                glActiveTexture_(GL_TEXTURE0);
-                SETSHADER(geometrygodraysatrous);
-                LOCALPARAMF(aTrousSize, float(reconstructionwidth), float(reconstructionheight));
-                LOCALPARAMF(aTrousParams, float(1<<i), grgatrousalphak, grgatrousdepth, 0.0f);
-                screenquad(reconstructionwidth, reconstructionheight);
-                swap(sourceindex, targetindex);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glDisable(GL_BLEND);
+                compositetex = 0;
             }
-            compositetex = filtertex[sourceindex];
+            else compositetex = rayupsampletex;
+            enddebugpass(GRG_DEBUG_UPSCALE);
         }
 
         return compositetex;
@@ -629,6 +734,7 @@ namespace geometry
 
     static void composite(GLuint compositetex)
     {
+        begindebugpass(GRG_DEBUG_COMPOSITE);
         glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         glViewport(0, 0, vieww, viewh);
         glEnable(GL_BLEND);
@@ -636,11 +742,25 @@ namespace geometry
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         glActiveTexture_(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_RECTANGLE, compositetex);
-        SETSHADER(geometrygodraysupsample);
-        LOCALPARAMF(godrayScale, 1.0f, 1.0f, 1.0f, 1.0f);
+        SETSHADER(geometrygodrayscomposite);
         screenquad();
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glDisable(GL_BLEND);
+        enddebugpass(GRG_DEBUG_COMPOSITE);
+    }
+
+    static void restoreframebuffer(bool rebind)
+    {
+        begindebugpass(GRG_DEBUG_RESTORE);
+        if(rebind)
+        {
+            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
+            glViewport(0, 0, vieww, viewh);
+        }
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+        glActiveTexture_(GL_TEXTURE0);
+        enddebugpass(GRG_DEBUG_RESTORE);
     }
 
     void render()
@@ -660,28 +780,29 @@ namespace geometry
         const float maxdistance = clamp(float(farplane)*max(grgmaxdist, 0.01f), 1.0f, float(farplane));
         timer *raytimer = debuggrg ? NULL : begintimer("geometry god rays");
         begindebugtimer();
+        begindebugpass(GRG_DEBUG_SETUP);
 
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
         glDepthMask(GL_FALSE);
 
         renderraw(0, maxdistance, suncolor);
-        composite(reconstruct(false));
+        GLuint compositetex = reconstruct(false, true);
+        if(compositetex) composite(compositetex);
+        restoreframebuffer(false);
         enddebugtimer();
         endtimer(raytimer);
 
         if(debuggrg)
         {
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            glDepthMask(GL_FALSE);
             renderraw(debuggrg, maxdistance, suncolor);
-            debugcompositetex = reconstruct(true);
+            debugcompositetex = reconstruct(true, false);
             debugrendered = true;
-            glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
-            glViewport(0, 0, vieww, viewh);
+            restoreframebuffer(true);
         }
-
-        glDepthMask(GL_TRUE);
-        glEnable(GL_DEPTH_TEST);
-        glActiveTexture_(GL_TEXTURE0);
     }
 
     bool debugview()
@@ -700,10 +821,11 @@ namespace geometry
             "raw visibility", "base atmosphere", "isolated shaft + detail accent", "final volumetric signal",
             "CSM coverage (green inside, red outside)", "shadow bias (0 blue, 1 green, 2+ red)", "local isolation mask"
         };
-        static const char * const stagelabels[3] = { "raw raymarch", "depth-aware upsample", "final" };
+        const char *stagelabels[3] = { "raw raymarch", grgatrous ? "a-trous filtered" : "raymarch source", "final reconstruction" };
         GLuint textures[3] = { raytex, raydebugtex, debugcompositetex };
-        int widths[3] = { bufferwidth, reconstructionwidth, reconstructionwidth };
-        int heights[3] = { bufferheight, reconstructionheight, reconstructionheight };
+        int widths[3] = { bufferwidth, bufferwidth, reconstructionwidth };
+        int heights[3] = { bufferheight, bufferheight, reconstructionheight };
+        const int statsheight = (2 + GRG_DEBUG_PASS_COUNT) * FONTH;
         int gap = FONTH, tilew = max((hudw - 2*gap) / 3, 1);
         int tileh = max(int(ceilf(tilew * float(viewh) / max(float(vieww), 1.0f))), 1);
 
@@ -714,12 +836,17 @@ namespace geometry
             glActiveTexture_(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_RECTANGLE, textures[i]);
             SETSHADER(hudrect);
-            debugquad(x, FONTH*2, tilew, tileh, 0, 0, widths[i], heights[i]);
-            draw_text(stagelabels[i], x, FONTH*2 + tileh + FONTH/4);
+            debugquad(x, statsheight, tilew, tileh, 0, 0, widths[i], heights[i]);
+            draw_text(stagelabels[i], x, statsheight + tileh + FONTH/4);
         }
         draw_textf("geometry god rays debug %d: %s", 0, 0, debuggrg, modelabels[debuggrg - 1]);
         if(grgdebugms >= 0.0f) draw_textf("geometry god rays %.3f ms", 0, FONTH, grgdebugms);
         else draw_text("geometry god rays n/a", 0, FONTH);
+        loopi(GRG_DEBUG_PASS_COUNT)
+        {
+            if(grgdebugpassms[i] >= 0.0f) draw_textf("%s %.3f ms", 0, (2 + i) * FONTH, grgdebugpassnames[i], grgdebugpassms[i]);
+            else draw_textf("%s n/a", 0, (2 + i) * FONTH, grgdebugpassnames[i]);
+        }
         return true;
     }
 }
