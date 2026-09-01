@@ -4685,7 +4685,13 @@ void rendercsmshadowmaps()
 
         shadowside = i;
 
+        // Sauerbraten sunlight traces cube geometry from the receiver without
+        // discarding the inward-facing boundary surface. Render static world
+        // geometry two-sided so deformed map-edge rock faces still occlude the
+        // sun while their sky-textured outer faces remain excluded.
+        glDisable(GL_CULL_FACE);
         rendershadowmapworld();
+        glEnable(GL_CULL_FACE);
         grass::renderShadow(i);
         rendershadowmodelbatches();
     }

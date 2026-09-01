@@ -1059,7 +1059,9 @@ void rendershadowmapworld()
         prev = va;
     }
 
-    if(skyshadow)
+    // Sky faces are sunlight portals in Sauerbraten. They may close local
+    // point-light shadow maps, but must never become CSM sun occluders.
+    if(skyshadow && shadowmapping != SM_CASCADE)
     {
         prev = NULL;
         for(vtxarray *va = shadowva; va; va = va->rnext) if(va->sky && va->shadowmask&(1<<shadowside))
