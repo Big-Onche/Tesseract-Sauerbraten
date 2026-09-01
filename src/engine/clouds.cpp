@@ -325,7 +325,7 @@ namespace volumetricClouds
         else relativeworldmatrix.muld(raymatrix, invscreenmatrix);
     }
 
-    static const float VC_BUDGET_MIN_SCALE = 0.125f, VC_BUDGET_MAX_SCALE = 0.5f;
+    static const float VC_BUDGET_MIN_SCALE = 0.125f, VC_BUDGET_MAX_SCALE = 1.0f;
     static const int VC_BUDGET_MIN_STEPS = 8, VC_BUDGET_MAX_STEPS = 128;
     static bool vcbudgetinitialized = false;
     static float vcbudgetscale = 0.25f, vcbudgetsteps = 32.0f;
@@ -341,7 +341,8 @@ namespace volumetricClouds
             vcbudgetinitialized = false;
             vcbudgetfilteredms = -1.0f;
             vcbudgetlasttarget = vcbudget;
-            vceffectivescale = clamp(vcscale, VC_BUDGET_MIN_SCALE, VC_BUDGET_MAX_SCALE);
+            // With no controller, honor the user-selected render scale exactly.
+            vceffectivescale = vcscale;
             vceffectivesteps = clamp(vcsteps, VC_BUDGET_MIN_STEPS, VC_BUDGET_MAX_STEPS);
             return;
         }
@@ -1056,11 +1057,15 @@ namespace volumetricClouds
         float shadowstrength = vcshadowstrength * clamp(vcalpha, 0.0f, 1.0f);
         float shadowamount = clamp(shadowstrength * cloudsun.shadowHorizonFade, 0.0f, 1.0f);
 
+        int targetw = max(int(ceilf(vieww * vceffectivescale)), 1),
+            targeth = max(int(ceilf(viewh * vceffectivescale)), 1);
+        bool reducedresolution = targetw < vieww || targeth < viewh;
+
         Shader *cloudshader = useshaderbyname("volumetricclouds");
-        Shader *depthshader = useshaderbyname("volumetricclouddepth");
+        Shader *depthshader = vcblur || reducedresolution ? useshaderbyname("volumetricclouddepth") : NULL;
         Shader *atrousshader = vcatrous ? useshaderbyname("atrousfilter") : NULL;
-        Shader *upscaleshader = useshaderbyname("volumetriccloudsupscale");
-        Shader *bilateralshader = useshaderbyname("volumetriccloudsbilateral");
+        Shader *upscaleshader = reducedresolution ? useshaderbyname("volumetriccloudsupscale") : NULL;
+        Shader *bilateralshader = vcblur ? useshaderbyname("volumetriccloudsbilateral") : NULL;
         Shader *clarityshader = vcclarity ? useshaderbyname("volumetriccloudclarity") : NULL;
         Shader *compositeshader = vccompositedetail ? useshaderbyname("volumetriccloudcomposite") : NULL;
         Shader *shadowmapshader = vcshadow && shadowamount > 1.0e-4f ? useshaderbyname("volumetriccloudshadowmap") : NULL;
@@ -1071,8 +1076,6 @@ namespace volumetricClouds
         bool doshadow = shadowmapshader && shadowapplyshader;
         if(!cloudshader) return;
 
-        int targetw = max(int(ceilf(vieww * vceffectivescale)), 1),
-            targeth = max(int(ceilf(viewh * vceffectivescale)), 1);
         if(targetw != vcw || targeth != vch || vieww != vcfullw || viewh != vcfullh)
         {
             cleanupbuffers();
@@ -1090,7 +1093,7 @@ namespace volumetricClouds
         CloudScissor cloudscissor;
         bool drawclouds = calccloudscissor(cloudbounds, clouddome, vcw, vch, cloudscissor);
         bool usebilateral = drawclouds && vcblur && bilateralshader && depthshader;
-        bool useupscale = drawclouds && (vcw < vieww || vch < viewh) && upscaleshader && depthshader;
+        bool useupscale = drawclouds && reducedresolution && upscaleshader && depthshader;
         bool needdepthcache = usebilateral || useupscale;
         bool useinsidefog = drawclouds && insidefogshader;
 
@@ -1118,12 +1121,12 @@ namespace volumetricClouds
             glGenTextures(1, &vcatroustex);
             createtexture(vcatroustex, vcw, vch, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(drawclouds && !vcbilateraltex)
+        if(drawclouds && (usebilateral || useupscale) && !vcbilateraltex)
         {
             glGenTextures(1, &vcbilateraltex);
             createtexture(vcbilateraltex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
         }
-        if(drawclouds && !vcbilateraltemptex)
+        if(drawclouds && usebilateral && !vcbilateraltemptex)
         {
             glGenTextures(1, &vcbilateraltemptex);
             createtexture(vcbilateraltemptex, vieww, viewh, NULL, 3, 1, GL_RGBA8, GL_TEXTURE_RECTANGLE);
@@ -1166,7 +1169,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud atrous buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(drawclouds && !vcbilateralfbo)
+        if(drawclouds && (usebilateral || useupscale) && !vcbilateralfbo)
         {
             glGenFramebuffers_(1, &vcbilateralfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateralfbo);
@@ -1174,7 +1177,7 @@ namespace volumetricClouds
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating volumetric cloud bilateral buffer!");
             glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
         }
-        if(drawclouds && !vcbilateraltempfbo)
+        if(drawclouds && usebilateral && !vcbilateraltempfbo)
         {
             glGenFramebuffers_(1, &vcbilateraltempfbo);
             glBindFramebuffer_(GL_FRAMEBUFFER, vcbilateraltempfbo);
