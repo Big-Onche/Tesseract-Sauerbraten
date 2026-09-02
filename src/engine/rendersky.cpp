@@ -700,8 +700,19 @@ void getskycubetints(vec colors[6], vec2 &front)
     }
 }
 
+static void reloadatmosphereshader()
+{
+    Shader *shader = lookupshaderbyname("atmosphere");
+    if(!shader) return;
+
+    shader->cleanup(true);
+    execfile("config/glsl/sky.cfg", false);
+}
+
 VARR(atmo, 0, 0, 1);
 VARP(debugatmo, 0, 0, 1);
+VARFP(atmoviewsteps, 1, 24, 64, reloadatmosphereshader());
+VARFP(atmosunsteps, 1, 8, 32, reloadatmosphereshader());
 FVARR(atmoplanetsize, 1e-3f, 1, 1e3f);
 FVARR(atmoheight, 1e-3f, 1, 1e3f);
 FVARR(atmobright, 0, 1, 16);
@@ -718,7 +729,7 @@ FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
-static const int ATMOSPHERE_VIEW_STEPS = 24, ATMOSPHERE_SUN_STEPS = 8, ATMOSPHERE_DEBUG_QUERY_COUNT = 3;
+static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3;
 static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][2] = { { 0 } };
 static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
 static Uint64 atmosphereDebugCPUStart = 0;
@@ -804,9 +815,9 @@ void atmosphereDebugView()
     y += FONTH;
     draw_textf("CPU submit: %.2f ms", 0, y, atmosphereDebugCPUMillis);
     y += FONTH;
-    draw_textf("View steps: %d", 0, y, ATMOSPHERE_VIEW_STEPS);
+    draw_textf("View steps: %d", 0, y, atmoviewsteps);
     y += FONTH;
-    draw_textf("Sun steps: %d", 0, y, ATMOSPHERE_SUN_STEPS);
+    draw_textf("Sun steps: %d", 0, y, atmosunsteps);
     y += FONTH;
     draw_textf("Render resolution: %d x %d", 0, y, vieww, viewh);
     y += FONTH;
