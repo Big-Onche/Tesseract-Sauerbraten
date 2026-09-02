@@ -7,6 +7,8 @@ extern int atmo;
 extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
 extern bvec atmosunlight;
 
+static void cleanupAtmosphereDebugTimer();
+
 namespace skyboxtint
 {
     static bool valid = false;
@@ -682,6 +684,7 @@ void cleanupsky()
 {
     skyboxtint::valid = false;
     fogdome::cleanup();
+    cleanupAtmosphereDebugTimer();
 }
 
 void getskycubetints(vec colors[6], vec2 &front)
@@ -698,6 +701,7 @@ void getskycubetints(vec colors[6], vec2 &front)
 }
 
 VARR(atmo, 0, 0, 1);
+VARP(debugatmo, 0, 0, 1);
 FVARR(atmoplanetsize, 1e-3f, 1, 1e3f);
 FVARR(atmoheight, 1e-3f, 1, 1e3f);
 FVARR(atmobright, 0, 1, 16);
@@ -713,6 +717,103 @@ FVARR(atmoozone, 0, 1, 16);
 FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
+
+static const int ATMOSPHERE_VIEW_STEPS = 24, ATMOSPHERE_SUN_STEPS = 8, ATMOSPHERE_DEBUG_QUERY_COUNT = 3;
+static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][2] = { { 0 } };
+static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
+static Uint64 atmosphereDebugCPUStart = 0;
+static float atmosphereDebugGPUMillis = -1.0f, atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
+
+static void pollAtmosphereDebugTimer()
+{
+    if(!debugatmo || !atmosphereDebugQueries[0][0]) return;
+
+    loopi(ATMOSPHERE_DEBUG_QUERY_COUNT) if(atmosphereDebugQueryWaiting & (1 << i))
+    {
+        GLint available = 0;
+        glGetQueryObjectiv_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+        if(!available) continue;
+
+        GLuint64EXT start = 0, end = 0;
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][0], GL_QUERY_RESULT, &start);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT, &end);
+        atmosphereDebugGPUMillis = end >= start ? float(end - start) * 1.0e-6f : 0.0f;
+        atmosphereDebugQueryWaiting &= ~(1 << i);
+    }
+}
+
+static void beginAtmosphereDebugTimer()
+{
+    atmosphereDebugQueryActive = -1;
+    atmosphereDebugCPUStart = 0;
+    if(!debugatmo) return;
+
+    pollAtmosphereDebugTimer();
+    atmosphereDebugCPUStart = SDL_GetPerformanceCounter();
+    if(hasTQ && glQueryCounter_)
+    {
+        if(!atmosphereDebugQueries[0][0])
+            glGenQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * 2, &atmosphereDebugQueries[0][0]);
+        if(!(atmosphereDebugQueryWaiting & (1 << atmosphereDebugQueryCycle)))
+        {
+            atmosphereDebugQueryActive = atmosphereDebugQueryCycle;
+            glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][0], GL_TIMESTAMP);
+        }
+    }
+}
+
+static void endAtmosphereDebugTimer()
+{
+    if(atmosphereDebugQueryActive >= 0)
+    {
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][1], GL_TIMESTAMP);
+        atmosphereDebugQueryWaiting |= 1 << atmosphereDebugQueryActive;
+        atmosphereDebugQueryCycle = (atmosphereDebugQueryActive + 1) % ATMOSPHERE_DEBUG_QUERY_COUNT;
+        atmosphereDebugQueryActive = -1;
+    }
+    if(atmosphereDebugCPUStart)
+    {
+        Uint64 frequency = SDL_GetPerformanceFrequency();
+        atmosphereDebugCPUMillis = frequency ? float((SDL_GetPerformanceCounter() - atmosphereDebugCPUStart) * 1000.0 / frequency) : 0.0f;
+        atmosphereDebugCPUStart = 0;
+    }
+}
+
+static void cleanupAtmosphereDebugTimer()
+{
+    if(atmosphereDebugQueries[0][0]) glDeleteQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * 2, &atmosphereDebugQueries[0][0]);
+    memset(atmosphereDebugQueries, 0, sizeof(atmosphereDebugQueries));
+    atmosphereDebugQueryCycle = 0;
+    atmosphereDebugQueryWaiting = 0;
+    atmosphereDebugQueryActive = -1;
+    atmosphereDebugCPUStart = 0;
+    atmosphereDebugGPUMillis = -1.0f;
+    atmosphereDebugCPUMillis = 0.0f;
+}
+
+void atmosphereDebugView()
+{
+    if(!debugatmo) return;
+
+    pollAtmosphereDebugTimer();
+    int y = 0;
+    draw_text("Atmosphere", 0, y);
+    y += FONTH;
+    if(atmosphereDebugGPUMillis >= 0.0f) draw_textf("GPU total: %.2f ms", 0, y, atmosphereDebugGPUMillis);
+    else draw_text("GPU total: n/a", 0, y);
+    y += FONTH;
+    draw_textf("CPU submit: %.2f ms", 0, y, atmosphereDebugCPUMillis);
+    y += FONTH;
+    draw_textf("View steps: %d", 0, y, ATMOSPHERE_VIEW_STEPS);
+    y += FONTH;
+    draw_textf("Sun steps: %d", 0, y, ATMOSPHERE_SUN_STEPS);
+    y += FONTH;
+    draw_textf("Render resolution: %d x %d", 0, y, vieww, viewh);
+    y += FONTH;
+    draw_text("Scale: 1.00", 0, y);
+    y += FONTH;
+    draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
+}
 
 static bool loadnightsky()
 {
@@ -903,7 +1004,9 @@ void drawskybox(bool clear)
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_SRC_ALPHA);
         }
+        beginAtmosphereDebugTimer();
         drawatmosphere(atmoalpha);
+        endAtmosphereDebugTimer();
         if(blendatmosphere) glDisable(GL_BLEND);
     }
 

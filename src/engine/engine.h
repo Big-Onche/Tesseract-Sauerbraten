@@ -742,6 +742,7 @@ extern void genstainmmtri(stainrenderer *s, const vec v[3]);
 extern int skytexture, skyshadow, explicitsky;
 
 extern void drawskybox(bool clear = false);
+extern void atmosphereDebugView();
 extern bool hasskybox();
 extern bool limitsky();
 extern bool renderexplicitsky(bool outline = false);
