@@ -310,7 +310,7 @@ namespace geometry
     VARP(grgsteps, 1, 8, 64);
     FVARP(grgscale, 0.125f, 0.5f, 1.0f);
     VARP(grgatrous, 0, 1, 1);
-    VARP(grgatrousiter, 1, 1, 3);
+    VARP(grgatrousiter, 1, 3, 3);
     VARP(grgglobalstrength, 0, 0, 3);
 
     // tunables
@@ -469,11 +469,6 @@ namespace geometry
         return false;
     }
 
-    static int filteriterations(int targetwidth, int targetheight)
-    {
-        return targetwidth < vieww || targetheight < viewh ? 3 : clamp(grgatrousiter, 1, 3);
-    }
-
     static bool needsupsamplebuffer(int targetwidth, int targetheight)
     {
         return debuggrg && (targetwidth < vieww || targetheight < viewh);
@@ -481,7 +476,7 @@ namespace geometry
 
     static bool needssecondfilterbuffer(int targetwidth, int targetheight)
     {
-        return grgatrous && filteriterations(targetwidth, targetheight) > 1;
+        return grgatrous && grgatrousiter > 1;
     }
 
     static bool setupbuffers(int targetwidth, int targetheight, GLenum targetpassformat, GLenum targetguideformat)
@@ -666,7 +661,7 @@ namespace geometry
             else SETSHADER(geometrygodraysdepthguide);
             screenquad(vieww, viewh);
 
-            const int iterations = filteriterations(bufferwidth, bufferheight);
+            const int iterations = grgatrousiter;
             loopi(iterations)
             {
                 const int targetindex = i&1;
@@ -719,8 +714,20 @@ namespace geometry
             glActiveTexture_(GL_TEXTURE1);
             if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
             else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
+            if(grgatrous)
+            {
+                // The a-trous pass already populated this ray-resolution depth guide;
+                // reuse it instead of resampling full-resolution depth four times.
+                glActiveTexture_(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_RECTANGLE, rayguidetex);
+            }
             glActiveTexture_(GL_TEXTURE0);
-            SETSHADER(geometrygodraysupsample);
+            if(grgatrous)
+            {
+                if(guideformat == GL_R32F) SETSHADER(geometrygodraysupsampleguidefloat);
+                else SETSHADER(geometrygodraysupsampleguide);
+            }
+            else SETSHADER(geometrygodraysupsample);
             LOCALPARAMF(godrayScale, float(vieww)/bufferwidth, float(viewh)/bufferheight, float(bufferwidth)/vieww, float(bufferheight)/viewh);
             LOCALPARAMF(bilateralDepthScale, grgupscaleedge);
             screenquad(bufferwidth, bufferheight, vieww, viewh);
