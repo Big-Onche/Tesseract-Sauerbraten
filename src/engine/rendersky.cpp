@@ -1203,7 +1203,7 @@ static bool loadAtmosphereMoon()
     return atmosphereMoonTexture != notexture;
 }
 
-static void drawAtmosphereMoon(const matrix4 &celestialmatrix, float planetradius, float atmosphereradius, float alpha)
+static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundirection, const vec &suncolor, float planetradius, float atmosphereradius, float alpha)
 {
     float halfangle = 0.5f*atmomoonsize*RAD, sinhalf = sinf(halfangle);
     if(!atmomoon || alpha <= 0.0f || sinhalf <= 0.0f) return;
@@ -1213,6 +1213,18 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, float planetradiu
         moonup(sinf(yaw)*sinf(pitch), -cosf(yaw)*sinf(pitch), cosf(pitch));
     float coshalf = cosf(halfangle), horizontal = sqrtf(max(1.0f - direction.z*direction.z, 0.0f));
     if(direction.z*coshalf + horizontal*sinhalf <= 0.0f || !loadAtmosphereMoon()) return;
+
+    // Moon radiance is constant, but its apparent contrast collapses against a
+    // daylight atmosphere. Keep a trace of night-side earthshine near new moon.
+    float daylight = clamp((sundirection.z + 0.08f)/0.20f, 0.0f, 1.0f);
+    daylight *= daylight*(3.0f - 2.0f*daylight);
+    daylight *= clamp(atmobright*alpha, 0.0f, 1.0f);
+    float apparentbrightness = 1.4f + (0.18f - 1.4f)*daylight, earthshine = 0.012f*(1.0f - daylight);
+    vec moonlightcolor = suncolor;
+    float maxsuncolor = max(max(moonlightcolor.x, moonlightcolor.y), moonlightcolor.z);
+    if(maxsuncolor > 1.0e-4f) moonlightcolor.mul(1.0f/maxsuncolor);
+    else moonlightcolor = vec(1);
+
     GLboolean hadscissor = GL_FALSE;
     GLint oldscissor[4] = { 0, 0, vieww, viewh };
     if(!beginAtmosphereCelestialScissor(direction, atmomoonsize, hadscissor, oldscissor)) return;
@@ -1225,7 +1237,9 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, float planetradiu
     LOCALPARAM(moondir, direction);
     LOCALPARAM(moonright, moonright);
     LOCALPARAM(moonup, moonup);
-    LOCALPARAMF(moonparams, 0.5f/sinhalf, cosf(halfangle));
+    LOCALPARAM(sundir, sundirection);
+    LOCALPARAM(moonlightcolor, moonlightcolor);
+    LOCALPARAMF(moonparams, 0.5f/sinhalf, coshalf, apparentbrightness, earthshine);
     glActiveTexture_(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, atmosphereMoonTexture->id);
     glActiveTexture_(GL_TEXTURE0);
@@ -1333,7 +1347,7 @@ static void drawatmosphere(float alpha = atmoalpha)
 
     drawAtmosphereSun(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
     endAtmosphereSunDebugTimer();
-    drawAtmosphereMoon(sunmatrix, planetradius, planetradius + atmosphereheight, alpha);
+    drawAtmosphereMoon(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
 }
 
 VAR(showsky, 0, 1, 1);
