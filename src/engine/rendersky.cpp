@@ -8,6 +8,7 @@ extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlig
 extern bvec atmosunlight;
 
 static void cleanupAtmosphereDebugTimer();
+static void cleanupAtmosphereTransmittanceLUT();
 
 namespace skyboxtint
 {
@@ -684,6 +685,7 @@ void cleanupsky()
 {
     skyboxtint::valid = false;
     fogdome::cleanup();
+    cleanupAtmosphereTransmittanceLUT();
     cleanupAtmosphereDebugTimer();
 }
 
@@ -702,10 +704,12 @@ void getskycubetints(vec colors[6], vec2 &front)
 
 static void reloadatmosphereshader()
 {
-    Shader *shader = lookupshaderbyname("atmosphere");
-    if(!shader) return;
+    Shader *atmosphereshader = lookupshaderbyname("atmosphere"),
+           *transmittanceshader = lookupshaderbyname("atmospheretransmittance");
+    if(!atmosphereshader && !transmittanceshader) return;
 
-    shader->cleanup(true);
+    if(atmosphereshader) atmosphereshader->cleanup(true);
+    if(transmittanceshader) transmittanceshader->cleanup(true);
     execfile("config/glsl/sky.cfg", false);
 }
 
@@ -713,6 +717,7 @@ VARR(atmo, 0, 0, 1);
 VARP(debugatmo, 0, 0, 1);
 VARFP(atmoviewsteps, 1, 24, 64, reloadatmosphereshader());
 VARFP(atmosunsteps, 1, 8, 32, reloadatmosphereshader());
+VARFP(atmosunlut, 0, 2, 2, cleanupAtmosphereTransmittanceLUT()); // 0 = 64x64, 1 = 128x32, 2 = 128x64
 FVARR(atmoplanetsize, 1e-3f, 1, 1e3f);
 FVARR(atmoheight, 1e-3f, 1, 1e3f);
 FVARR(atmobright, 0, 1, 16);
@@ -734,6 +739,126 @@ static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][2] = { { 0 } 
 static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
 static Uint64 atmosphereDebugCPUStart = 0;
 static float atmosphereDebugGPUMillis = -1.0f, atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
+
+static GLuint atmosphereTransmittanceTex = 0, atmosphereTransmittanceFBO = 0;
+static int atmosphereTransmittanceWidth = 0, atmosphereTransmittanceHeight = 0;
+
+struct AtmosphereTransmittanceLUTCache
+{
+    bool valid;
+    int sunsteps;
+    float planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight, ozonecenter, inverseOzoneHalfWidth;
+    vec betarayleigh, mieextinction, betaozone;
+
+    AtmosphereTransmittanceLUTCache() : valid(false), sunsteps(0), planetradius(0), atmosphereradius(0), inverseRayleighScaleHeight(0),
+                                       inverseMieScaleHeight(0), ozonecenter(0), inverseOzoneHalfWidth(0), betarayleigh(0, 0, 0),
+                                       mieextinction(0, 0, 0), betaozone(0, 0, 0)
+    {
+    }
+
+    bool matches(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight,
+                 float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction,
+                 const vec &newbetaozone) const
+    {
+        return valid && sunsteps == atmosunsteps && planetradius == newplanetradius && atmosphereradius == newatmosphereradius &&
+               inverseRayleighScaleHeight == newinverseRayleighScaleHeight && inverseMieScaleHeight == newinverseMieScaleHeight &&
+               ozonecenter == newozonecenter && inverseOzoneHalfWidth == newinverseOzoneHalfWidth && betarayleigh == newbetarayleigh &&
+               mieextinction == newmieextinction && betaozone == newbetaozone;
+    }
+
+    void update(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight,
+                float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction,
+                const vec &newbetaozone)
+    {
+        valid = true;
+        sunsteps = atmosunsteps;
+        planetradius = newplanetradius;
+        atmosphereradius = newatmosphereradius;
+        inverseRayleighScaleHeight = newinverseRayleighScaleHeight;
+        inverseMieScaleHeight = newinverseMieScaleHeight;
+        ozonecenter = newozonecenter;
+        inverseOzoneHalfWidth = newinverseOzoneHalfWidth;
+        betarayleigh = newbetarayleigh;
+        mieextinction = newmieextinction;
+        betaozone = newbetaozone;
+    }
+};
+
+static AtmosphereTransmittanceLUTCache atmosphereTransmittanceCache;
+
+static void getAtmosphereTransmittanceLUTSize(int &width, int &height)
+{
+    switch(atmosunlut)
+    {
+        case 0: width = 64; height = 64; break;
+        case 1: width = 128; height = 32; break;
+        default: width = 128; height = 64; break;
+    }
+}
+
+static void cleanupAtmosphereTransmittanceLUT()
+{
+    if(atmosphereTransmittanceFBO) { glDeleteFramebuffers_(1, &atmosphereTransmittanceFBO); atmosphereTransmittanceFBO = 0; }
+    if(atmosphereTransmittanceTex) { glDeleteTextures(1, &atmosphereTransmittanceTex); atmosphereTransmittanceTex = 0; }
+    atmosphereTransmittanceWidth = atmosphereTransmittanceHeight = 0;
+    atmosphereTransmittanceCache.valid = false;
+    atmosphereLUTRebuildMillis = 0.0f;
+}
+
+static void updateAtmosphereTransmittanceLUT(float planetradius, float atmosphereradius, float inverseRayleighScaleHeight,
+                                            float inverseMieScaleHeight, float ozonecenter, float inverseOzoneHalfWidth,
+                                            const vec &betarayleigh, const vec &mieextinction, const vec &betaozone)
+{
+    int width, height;
+    getAtmosphereTransmittanceLUTSize(width, height);
+    bool resize = width != atmosphereTransmittanceWidth || height != atmosphereTransmittanceHeight;
+    if(!resize && atmosphereTransmittanceCache.matches(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight,
+                                                       ozonecenter, inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone)) return;
+
+    Uint64 start = SDL_GetPerformanceCounter();
+    if(resize)
+    {
+        if(atmosphereTransmittanceTex) glDeleteTextures(1, &atmosphereTransmittanceTex);
+        glGenTextures(1, &atmosphereTransmittanceTex);
+        createtexture(atmosphereTransmittanceTex, width, height, NULL, 3, 1, GL_RGB16F, GL_TEXTURE_2D);
+        atmosphereTransmittanceWidth = width;
+        atmosphereTransmittanceHeight = height;
+    }
+    if(!atmosphereTransmittanceFBO) glGenFramebuffers_(1, &atmosphereTransmittanceFBO);
+
+    GLint previousFBO = 0, previousViewport[4];
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFBO);
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+    GLboolean blend = glIsEnabled(GL_BLEND), depthtest = glIsEnabled(GL_DEPTH_TEST), scissortest = glIsEnabled(GL_SCISSOR_TEST);
+
+    glBindFramebuffer_(GL_FRAMEBUFFER, atmosphereTransmittanceFBO);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, atmosphereTransmittanceTex, 0);
+    if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating atmosphere transmittance LUT!");
+    glViewport(0, 0, width, height);
+    if(blend) glDisable(GL_BLEND);
+    if(depthtest) glDisable(GL_DEPTH_TEST);
+    if(scissortest) glDisable(GL_SCISSOR_TEST);
+
+    SETSHADER(atmospheretransmittance);
+    LOCALPARAMF(atmosphereparams, planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight);
+    LOCALPARAMF(atmosphereparams2, ozonecenter, inverseOzoneHalfWidth, 0.0f, 0.0f);
+    LOCALPARAM(betarayleigh, betarayleigh);
+    LOCALPARAM(mieextinction, mieextinction);
+    LOCALPARAM(betaozone, betaozone);
+    LOCALPARAMF(atmospherelutsize, float(width), float(height));
+    screenquad();
+
+    glBindFramebuffer_(GL_FRAMEBUFFER, previousFBO);
+    glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+    if(blend) glEnable(GL_BLEND);
+    if(depthtest) glEnable(GL_DEPTH_TEST);
+    if(scissortest) glEnable(GL_SCISSOR_TEST);
+
+    atmosphereTransmittanceCache.update(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight, ozonecenter,
+                                        inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone);
+    Uint64 frequency = SDL_GetPerformanceFrequency();
+    atmosphereLUTRebuildMillis = frequency ? float((SDL_GetPerformanceCounter() - start) * 1000.0 / frequency) : 0.0f;
+}
 
 static void pollAtmosphereDebugTimer()
 {
@@ -817,7 +942,11 @@ void atmosphereDebugView()
     y += FONTH;
     draw_textf("View steps: %d", 0, y, atmoviewsteps);
     y += FONTH;
-    draw_textf("Sun steps: %d", 0, y, atmosunsteps);
+    draw_textf("LUT sun steps: %d", 0, y, atmosunsteps);
+    y += FONTH;
+    int lutwidth, lutheight;
+    getAtmosphereTransmittanceLUTSize(lutwidth, lutheight);
+    draw_textf("Solar LUT: %d x %d RGB16F", 0, y, lutwidth, lutheight);
     y += FONTH;
     draw_textf("Render resolution: %d x %d", 0, y, vieww, viewh);
     y += FONTH;
@@ -866,13 +995,6 @@ static void drawnightsky(float alpha)
 
 static void drawatmosphere(float alpha = atmoalpha)
 {
-    SETSHADER(atmosphere);
-
-    matrix4 sunmatrix = invcammatrix;
-    sunmatrix.settranslation(0, 0, 0);
-    sunmatrix.mul(invprojmatrix);
-    LOCALPARAM(sunmatrix, sunmatrix);
-
     // Hillaire's Earth atmosphere model, expressed in kilometres to retain
     // enough precision on older GLSL implementations. atmoheight scales the
     // whole vertical density profile while atmoplanetsize only changes the
@@ -883,9 +1005,6 @@ static void drawatmosphere(float alpha = atmoalpha)
           inverseRayleighScaleHeight = 1.0f/max(8.0f*atmoheight, 1.0e-3f),
           inverseMieScaleHeight = 1.0f/max(1.2f*atmoheight, 1.0e-3f),
           inverseOzoneHalfWidth = 1.0f/max(15.0f*atmoheight, 1.0e-3f);
-    LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight);
-    LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, inverseOzoneHalfWidth, clamp(atmomultiscatter, 0.0f, 2.0f),
-                clamp(atmomieanisotropy, -0.99f, 0.99f));
 
     // Scattering/absorption coefficients from Table 1 of Hillaire 2020.
     // Coefficients are km^-1. Preserve the historic atmohaze default by
@@ -895,15 +1014,29 @@ static void drawatmosphere(float alpha = atmoalpha)
         betam = vec(0.003996f, 0.003996f, 0.003996f).mul(mieamount),
         betamextinction = vec(0.008396f, 0.008396f, 0.008396f).mul(mieamount),
         betao = vec(0.000650f, 0.001881f, 0.000085f).mul(max(atmoozone, 0.0f));
+    updateAtmosphereTransmittanceLUT(planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight,
+                                    25.0f*atmoheight, inverseOzoneHalfWidth, betar, betamextinction, betao);
+
+    SETSHADER(atmosphere);
+
+    matrix4 sunmatrix = invcammatrix;
+    sunmatrix.settranslation(0, 0, 0);
+    sunmatrix.mul(invprojmatrix);
+    LOCALPARAM(sunmatrix, sunmatrix);
+    LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight);
+    LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, inverseOzoneHalfWidth, clamp(atmomultiscatter, 0.0f, 2.0f),
+                clamp(atmomieanisotropy, -0.99f, 0.99f));
     LOCALPARAM(betarayleigh, betar);
     LOCALPARAM(betamie, betam);
     LOCALPARAM(mieextinction, betamextinction);
     LOCALPARAM(betaozone, betao);
+    LOCALPARAMF(atmospherelutparams, float(atmosphereTransmittanceWidth - 1)/atmosphereTransmittanceWidth,
+                float(atmosphereTransmittanceHeight - 1)/atmosphereTransmittanceHeight, 0.5f/atmosphereTransmittanceWidth,
+                0.5f/atmosphereTransmittanceHeight);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, atmosphereTransmittanceTex);
 
     vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale) : sunlight.tocolor().mul(sunlightscale);
-    // Sun transmittance is evaluated at every ray-march sample. In particular,
-    // it must not be precomputed at ground level: doing so erases the illuminated
-    // upper atmosphere as soon as the sun moves below the horizon.
     extern float hdrgamma;
     vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16);
     LOCALPARAM(sunlight, vec4(sunscale, alpha));
