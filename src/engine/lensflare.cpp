@@ -40,13 +40,15 @@ namespace lensFlares
     {
         Uint64 renderStart;
         float totalMillis, averageMillis;
+        double estimatedPixelsBefore, estimatedPixelsAfter;
         int queued, rendered, rejected;
         int queriesIssued, queriesResolved, queriesPending, fallbackHits;
         int visibilityPrecomputed, visibilityPerPixel, visibilityFallback;
         int rejects[FLARE_REJECT_COUNT];
         bool sunQueued, sunRendered;
 
-        flareProfile() : renderStart(0), totalMillis(0.0f), averageMillis(-1.0f), queued(0), rendered(0), rejected(0),
+        flareProfile() : renderStart(0), totalMillis(0.0f), averageMillis(-1.0f), estimatedPixelsBefore(0.0), estimatedPixelsAfter(0.0),
+                         queued(0), rendered(0), rejected(0),
                          queriesIssued(0), queriesResolved(0), queriesPending(0), fallbackHits(0), visibilityPrecomputed(0), visibilityPerPixel(0),
                          visibilityFallback(0), sunQueued(false), sunRendered(false)
         {
@@ -76,6 +78,7 @@ namespace lensFlares
         profile.renderStart = SDL_GetPerformanceCounter();
         profile.queued = queuedFlares.length();
         profile.rendered = profile.rejected = 0;
+        profile.estimatedPixelsBefore = profile.estimatedPixelsAfter = 0.0;
         profile.queriesIssued = profile.queriesResolved = profile.queriesPending = profile.fallbackHits = 0;
         profile.visibilityPrecomputed = profile.visibilityPerPixel = profile.visibilityFallback = 0;
         memset(profile.rejects, 0, sizeof(profile.rejects));
@@ -757,9 +760,114 @@ namespace lensFlares
         cloudOcclusionLast = 0.0f;
     }
 
+    struct flareScreenBounds
+    {
+        float minx, miny, maxx, maxy;
+        bool valid;
+
+        flareScreenBounds() : minx(0.0f), miny(0.0f), maxx(0.0f), maxy(0.0f), valid(false) {}
+
+        void add(float x, float y, float radiusx, float radiusy)
+        {
+            if(!valid)
+            {
+                minx = x - radiusx;
+                miny = y - radiusy;
+                maxx = x + radiusx;
+                maxy = y + radiusy;
+                valid = true;
+                return;
+            }
+            minx = min(minx, x - radiusx);
+            miny = min(miny, y - radiusy);
+            maxx = max(maxx, x + radiusx);
+            maxy = max(maxy, y + radiusy);
+        }
+    };
+
+    static void addLocalBounds(flareScreenBounds &bounds, const vec4 &screen, float radius, float fovScale, float shrinkScale, float aspect)
+    {
+        bounds.add(screen.x, screen.y, radius * fovScale * shrinkScale / aspect, radius * fovScale * shrinkScale);
+    }
+
+    static bool flareScissorBounds(const vec4 &screen, const vec4 &layerWeights, float ghostStrength, const vec4 &visibilityOverride,
+                                   int &x, int &y, int &w, int &h)
+    {
+        if(vieww <= 0 || viewh <= 0) return false;
+
+        flareScreenBounds bounds;
+        float fovScale = max(getFovScale(), 0.01f);
+        float aspect = max(float(vieww) / max(float(viewh), 1.0f), 1.0e-4f);
+        float shrinkScale = visibilityOverride.w <= 0.0f && visibilityOverride.x >= 0.0f ?
+                            max(clamp(visibilityOverride.x, 0.0f, 1.0f), 1.0e-3f) : 1.0f;
+
+        if(layerWeights.x > 1.0e-4f) addLocalBounds(bounds, screen, 0.25f, fovScale, shrinkScale, aspect);
+        if(layerWeights.y > 1.0e-4f) addLocalBounds(bounds, screen, 1.15f, fovScale, shrinkScale, aspect);
+        if(layerWeights.z > 1.0e-4f)
+        {
+            float shaftScale = max(screen.w, 0.01f);
+            float radialExtent = max(2.75f * shaftScale, 0.5f);
+            addLocalBounds(bounds, screen, radialExtent, fovScale, shrinkScale, aspect);
+
+            const float diagx = 0.8762159f, diagy = 0.4819187f;
+            float alongExtent = max(6.0f * shaftScale, 1.0f);
+            float acrossExtent = max(0.32f, 0.08f * shaftScale);
+            float localx = diagx * alongExtent + diagy * acrossExtent;
+            float localy = diagy * alongExtent + diagx * acrossExtent;
+            bounds.add(screen.x, screen.y, localx * fovScale * shrinkScale / aspect, localy * fovScale * shrinkScale);
+        }
+
+        if(layerWeights.w > 1.0e-4f && ghostStrength > 1.0e-4f)
+        {
+            static const float ghostPositions[5] = { -0.18f, 0.35f, 0.78f, 1.24f, 1.75f };
+            loopi(5)
+            {
+                float t = ghostPositions[i];
+                float centerx = 0.5f + (0.5f - screen.x) * t;
+                float centery = 0.5f + (0.5f - screen.y) * t;
+                float radius = (0.05f + 0.11f * clamp(fabsf(t) / 1.8f, 0.0f, 1.0f)) * fovScale * 1.75f;
+                bounds.add(centerx, centery, radius / aspect, radius);
+            }
+        }
+
+        if(!bounds.valid) return false;
+        int margin = max(int(ceilf(min(vieww, viewh) * 0.005f)), 8);
+        int left = clamp(int(floorf(bounds.minx * vieww)) - margin, 0, vieww);
+        int bottom = clamp(int(floorf(bounds.miny * viewh)) - margin, 0, viewh);
+        int right = clamp(int(ceilf(bounds.maxx * vieww)) + margin, 0, vieww);
+        int top = clamp(int(ceilf(bounds.maxy * viewh)) + margin, 0, viewh);
+        x = left;
+        y = bottom;
+        w = max(right - left, 0);
+        h = max(top - bottom, 0);
+        return w > 0 && h > 0;
+    }
+
     static void drawFlare(Shader *flareShader, const vec4 &screen, const vec4 &params, const vec &color, float ghostStrength,
                           const vec4 &layerWeights, const vec4 &visibilities, const vec4 &visibilityOverride)
     {
+        int scissorx = 0, scissory = 0, scissorw = 0, scissorh = 0;
+        if(!flareScissorBounds(screen, layerWeights, ghostStrength, visibilityOverride, scissorx, scissory, scissorw, scissorh)) return;
+
+        bool hadScissor = glIsEnabled(GL_SCISSOR_TEST) != 0;
+        GLint oldScissor[4] = { 0, 0, vieww, viewh };
+        if(hadScissor)
+        {
+            glGetIntegerv(GL_SCISSOR_BOX, oldScissor);
+            int right = min(scissorx + scissorw, oldScissor[0] + oldScissor[2]);
+            int top = min(scissory + scissorh, oldScissor[1] + oldScissor[3]);
+            scissorx = max(scissorx, oldScissor[0]);
+            scissory = max(scissory, oldScissor[1]);
+            scissorw = max(right - scissorx, 0);
+            scissorh = max(top - scissory, 0);
+        }
+
+        if(debugflares)
+        {
+            profile.estimatedPixelsBefore += double(vieww) * viewh;
+            profile.estimatedPixelsAfter += double(scissorw) * scissorh;
+        }
+
         GLOBALPARAMF(sunFlareScreen, screen.x, screen.y, screen.z, screen.w);
         GLOBALPARAMF(sunFlareParams, params.x, params.y, params.z, params.w);
         GLOBALPARAMF(sunFlareGhostStrength, ghostStrength);
@@ -767,8 +875,12 @@ namespace lensFlares
         GLOBALPARAMF(sunFlareVisibilities, visibilities.x, visibilities.y, visibilities.z, visibilities.w);
         GLOBALPARAMF(sunFlareVisibilityOverride, visibilityOverride.x, visibilityOverride.y, visibilityOverride.z, visibilityOverride.w);
         GLOBALPARAM(sunFlareColor, color);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(scissorx, scissory, scissorw, scissorh);
         flareShader->set();
         screenquad(vieww, viewh);
+        if(hadScissor) glScissor(oldScissor[0], oldScissor[1], oldScissor[2], oldScissor[3]);
+        else glDisable(GL_SCISSOR_TEST);
     }
 
     static float projectedRadiusPixels(const vec &center, const vec2 &centerNdc, float worldRadius)
@@ -1069,6 +1181,12 @@ namespace lensFlares
         draw_textf("render total: %.3f ms", 0, y, profile.totalMillis);
         y += FONTH;
         draw_textf("render average: %.3f ms", 0, y, max(profile.averageMillis, 0.0f));
+        y += FONTH;
+        draw_textf("estimated pixels before/after: %.0f / %.0f", 0, y, profile.estimatedPixelsBefore, profile.estimatedPixelsAfter);
+        y += FONTH;
+        double pixelReduction = profile.estimatedPixelsBefore > 0.0 ?
+                                100.0 * (1.0 - profile.estimatedPixelsAfter / profile.estimatedPixelsBefore) : 0.0;
+        draw_textf("estimated pixel reduction: %.1f%%", 0, y, pixelReduction);
         y += FONTH;
         draw_textf("queued: %d", 0, y, profile.queued);
         y += FONTH;
