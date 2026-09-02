@@ -1,7 +1,7 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
-static Texture *nightsky = NULL;
+static Texture *nightsky = NULL, *atmosphereMoonTexture = NULL;
 extern bvec skyboxcolour;
 extern int atmo;
 extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
@@ -730,6 +730,10 @@ CVAR1R(atmosundisk, 0);
 FVARR(atmosundisksize, 0, 12, 90);
 FVARR(atmosundiskcorona, 0, 0.4f, 1);
 FVARR(atmosundiskbright, 0, 1, 16);
+VARR(atmomoon, 0, 0, 1);
+FVARR(atmomoonyaw, 0, 0, 360);
+FVARR(atmomoonpitch, -90, 45, 90);
+FVARR(atmomoonsize, 0, 5, 90);
 FVARR(atmohaze, 0, 0.1f, 16);
 FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
@@ -737,12 +741,12 @@ FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
-static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3, ATMOSPHERE_DEBUG_TIMESTAMP_COUNT = 3;
+static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3, ATMOSPHERE_DEBUG_TIMESTAMP_COUNT = 4;
 static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][ATMOSPHERE_DEBUG_TIMESTAMP_COUNT] = { { 0 } };
 static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
 static Uint64 atmosphereDebugCPUStart = 0;
 static float atmosphereDebugGPUMillis = -1.0f, atmosphereDebugRaymarchGPUMillis = -1.0f, atmosphereDebugUpscaleGPUMillis = -1.0f,
-             atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
+             atmosphereDebugSunGPUMillis = -1.0f, atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
 
 static GLuint atmosphereTransmittanceTex = 0, atmosphereTransmittanceFBO = 0;
 static int atmosphereTransmittanceWidth = 0, atmosphereTransmittanceHeight = 0;
@@ -903,16 +907,18 @@ static void pollAtmosphereDebugTimer()
     loopi(ATMOSPHERE_DEBUG_QUERY_COUNT) if(atmosphereDebugQueryWaiting & (1 << i))
     {
         GLint available = 0;
-        glGetQueryObjectiv_(atmosphereDebugQueries[i][2], GL_QUERY_RESULT_AVAILABLE, &available);
+        glGetQueryObjectiv_(atmosphereDebugQueries[i][3], GL_QUERY_RESULT_AVAILABLE, &available);
         if(!available) continue;
 
-        GLuint64EXT start = 0, split = 0, end = 0;
+        GLuint64EXT start = 0, rayend = 0, upscaleend = 0, end = 0;
         glGetQueryObjectui64v_(atmosphereDebugQueries[i][0], GL_QUERY_RESULT, &start);
-        glGetQueryObjectui64v_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT, &split);
-        glGetQueryObjectui64v_(atmosphereDebugQueries[i][2], GL_QUERY_RESULT, &end);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT, &rayend);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][2], GL_QUERY_RESULT, &upscaleend);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][3], GL_QUERY_RESULT, &end);
         atmosphereDebugGPUMillis = end >= start ? float(end - start) * 1.0e-6f : 0.0f;
-        atmosphereDebugRaymarchGPUMillis = split >= start ? float(split - start) * 1.0e-6f : 0.0f;
-        atmosphereDebugUpscaleGPUMillis = end >= split ? float(end - split) * 1.0e-6f : 0.0f;
+        atmosphereDebugRaymarchGPUMillis = rayend >= start ? float(rayend - start) * 1.0e-6f : 0.0f;
+        atmosphereDebugUpscaleGPUMillis = upscaleend >= rayend ? float(upscaleend - rayend) * 1.0e-6f : 0.0f;
+        atmosphereDebugSunGPUMillis = end >= upscaleend ? float(end - upscaleend) * 1.0e-6f : 0.0f;
         atmosphereDebugQueryWaiting &= ~(1 << i);
     }
 }
@@ -946,11 +952,22 @@ static void endAtmosphereRaymarchDebugTimer()
         glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][1], GL_TIMESTAMP);
 }
 
+static void endAtmosphereUpscaleDebugTimer()
+{
+    if(atmosphereDebugQueryActive >= 0)
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][2], GL_TIMESTAMP);
+}
+
+static void endAtmosphereSunDebugTimer()
+{
+    if(atmosphereDebugQueryActive >= 0)
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][3], GL_TIMESTAMP);
+}
+
 static void endAtmosphereDebugTimer()
 {
     if(atmosphereDebugQueryActive >= 0)
     {
-        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][2], GL_TIMESTAMP);
         atmosphereDebugQueryWaiting |= 1 << atmosphereDebugQueryActive;
         atmosphereDebugQueryCycle = (atmosphereDebugQueryActive + 1) % ATMOSPHERE_DEBUG_QUERY_COUNT;
         atmosphereDebugQueryActive = -1;
@@ -975,6 +992,7 @@ static void cleanupAtmosphereDebugTimer()
     atmosphereDebugGPUMillis = -1.0f;
     atmosphereDebugRaymarchGPUMillis = -1.0f;
     atmosphereDebugUpscaleGPUMillis = -1.0f;
+    atmosphereDebugSunGPUMillis = -1.0f;
     atmosphereDebugCPUMillis = 0.0f;
 }
 
@@ -994,6 +1012,9 @@ void atmosphereDebugView()
     y += FONTH;
     if(atmosphereDebugUpscaleGPUMillis >= 0.0f) draw_textf("GPU upscale/composite: %.2f ms", 0, y, atmosphereDebugUpscaleGPUMillis);
     else draw_text("GPU upscale/composite: n/a", 0, y);
+    y += FONTH;
+    if(atmosphereDebugSunGPUMillis >= 0.0f) draw_textf("GPU sun disk: %.2f ms", 0, y, atmosphereDebugSunGPUMillis);
+    else draw_text("GPU sun disk: n/a", 0, y);
     y += FONTH;
     draw_textf("CPU submit: %.2f ms", 0, y, atmosphereDebugCPUMillis);
     y += FONTH;
@@ -1048,6 +1069,170 @@ static void drawnightsky(float alpha)
     xtraverts += gle::end();
 
     if(alpha < 1) glDisable(GL_BLEND);
+}
+
+static bool calcAtmosphereCelestialScissor(const vec &direction, float angularsize, int &x, int &y, int &w, int &h)
+{
+    float halfangle = clamp(0.5f*angularsize*RAD, 1.0e-5f, 0.49f*float(M_PI)), coshalf = cosf(halfangle), sinhalf = sinf(halfangle);
+    vec tangent = fabsf(direction.z) < 0.999f ? vec(-direction.y, direction.x, 0).normalize() : vec(1, 0, 0),
+        bitangent = vec().cross(direction, tangent).normalize();
+    float minx = 1.0e16f, miny = 1.0e16f, maxx = -1.0e16f, maxy = -1.0e16f;
+    bool projected = false, clipped = false;
+    const int edgepoints = 16;
+    loopi(edgepoints + 1)
+    {
+        vec sampledir = direction;
+        if(i)
+        {
+            float angle = 2.0f*M_PI*float(i - 1)/edgepoints;
+            sampledir.mul(coshalf).madd(tangent, sinhalf*cosf(angle)).madd(bitangent, sinhalf*sinf(angle));
+        }
+        vec samplepoint(camera1->o);
+        samplepoint.madd(sampledir, max(nearplane*4.0f, 1.0f));
+        vec4 clip;
+        camprojmatrix.transform(samplepoint, clip);
+        if(clip.w <= 1.0e-4f)
+        {
+            clipped = true;
+            continue;
+        }
+        float ndcx = clip.x/clip.w, ndcy = clip.y/clip.w;
+        minx = min(minx, ndcx);
+        miny = min(miny, ndcy);
+        maxx = max(maxx, ndcx);
+        maxy = max(maxy, ndcy);
+        projected = true;
+    }
+    if(!projected) return false;
+    if(clipped) { minx = miny = -1.0f; maxx = maxy = 1.0f; }
+
+    const int margin = 3;
+    int left = clamp(int(floorf((minx*0.5f + 0.5f)*vieww)) - margin, 0, vieww),
+        bottom = clamp(int(floorf((miny*0.5f + 0.5f)*viewh)) - margin, 0, viewh),
+        right = clamp(int(ceilf((maxx*0.5f + 0.5f)*vieww)) + margin, 0, vieww),
+        top = clamp(int(ceilf((maxy*0.5f + 0.5f)*viewh)) + margin, 0, viewh);
+    x = left;
+    y = bottom;
+    w = max(right - left, 0);
+    h = max(top - bottom, 0);
+    return w > 0 && h > 0;
+}
+
+static bool beginAtmosphereCelestialScissor(const vec &direction, float angularsize, GLboolean &hadscissor, GLint oldscissor[4])
+{
+    int x, y, w, h;
+    if(!calcAtmosphereCelestialScissor(direction, angularsize, x, y, w, h)) return false;
+    hadscissor = glIsEnabled(GL_SCISSOR_TEST);
+    if(hadscissor)
+    {
+        glGetIntegerv(GL_SCISSOR_BOX, oldscissor);
+        int right = min(x + w, oldscissor[0] + oldscissor[2]), top = min(y + h, oldscissor[1] + oldscissor[3]);
+        x = max(x, oldscissor[0]);
+        y = max(y, oldscissor[1]);
+        w = max(right - x, 0);
+        h = max(top - y, 0);
+        if(!w || !h) return false;
+    }
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, y, w, h);
+    return true;
+}
+
+static void endAtmosphereCelestialScissor(GLboolean hadscissor, const GLint oldscissor[4])
+{
+    if(hadscissor) glScissor(oldscissor[0], oldscissor[1], oldscissor[2], oldscissor[3]);
+    else glDisable(GL_SCISSOR_TEST);
+}
+
+static void drawAtmosphereCelestialQuad()
+{
+    gle::defvertex();
+    gle::begin(GL_TRIANGLE_STRIP);
+    gle::attribf(-1, 1, 1);
+    gle::attribf(1, 1, 1);
+    gle::attribf(-1, -1, 1);
+    gle::attribf(1, -1, 1);
+    xtraverts += gle::end();
+}
+
+static void setAtmosphereCelestialParams(const matrix4 &celestialmatrix, float planetradius, float atmosphereradius, float alpha)
+{
+    LOCALPARAM(celestialmatrix, celestialmatrix);
+    LOCALPARAMF(atmosphereparams, planetradius, atmosphereradius, 0.0f, 0.0f);
+    LOCALPARAMF(atmospherelutparams, float(atmosphereTransmittanceWidth - 1)/atmosphereTransmittanceWidth,
+                float(atmosphereTransmittanceHeight - 1)/atmosphereTransmittanceHeight, 0.5f/atmosphereTransmittanceWidth,
+                0.5f/atmosphereTransmittanceHeight);
+    LOCALPARAMF(celestialalpha, alpha);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, atmosphereTransmittanceTex);
+}
+
+static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &direction, const vec &suncolor, float planetradius,
+                              float atmosphereradius, float alpha)
+{
+    float sundiskscale = sinf(0.5f*atmosundisksize*RAD);
+    if(alpha <= 0.0f || sundiskscale <= 0.0f || atmosundiskbright <= 0.0f) return;
+
+    extern float hdrgamma;
+    vec diskcolor = vec(!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).mul(ldrscale).pow(hdrgamma).mul(atmosundiskbright*4);
+    float coshalf = sqrtf(max(1.0f - sundiskscale*sundiskscale, 0.0f)), horizontal = sqrtf(max(1.0f - direction.z*direction.z, 0.0f));
+    if(diskcolor.iszero() || direction.z*coshalf + horizontal*sundiskscale <= 0.0f) return;
+
+    GLboolean hadscissor = GL_FALSE;
+    GLint oldscissor[4] = { 0, 0, vieww, viewh };
+    if(!beginAtmosphereCelestialScissor(direction, atmosundisksize, hadscissor, oldscissor)) return;
+
+    float coronamu = 1 - (1-atmosundiskcorona)*(1-atmosundiskcorona);
+    GLboolean hadblend = glIsEnabled(GL_BLEND);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    SETSHADER(atmospheresundisk);
+    setAtmosphereCelestialParams(celestialmatrix, planetradius, atmosphereradius, alpha);
+    LOCALPARAM(sundir, direction);
+    LOCALPARAM(sundiskcolor, diskcolor);
+    LOCALPARAMF(sundiskparams, 1.0f/(sundiskscale*sundiskscale), 1.0f/max(coronamu, 1e-3f));
+    drawAtmosphereCelestialQuad();
+    if(hadblend) glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+    else glDisable(GL_BLEND);
+    endAtmosphereCelestialScissor(hadscissor, oldscissor);
+}
+
+static bool loadAtmosphereMoon()
+{
+    if(!atmosphereMoonTexture) atmosphereMoonTexture = textureload("packages/sky/moon.png", 3, true, false);
+    return atmosphereMoonTexture != notexture;
+}
+
+static void drawAtmosphereMoon(const matrix4 &celestialmatrix, float planetradius, float atmosphereradius, float alpha)
+{
+    float halfangle = 0.5f*atmomoonsize*RAD, sinhalf = sinf(halfangle);
+    if(!atmomoon || alpha <= 0.0f || sinhalf <= 0.0f) return;
+
+    float yaw = atmomoonyaw*RAD, pitch = atmomoonpitch*RAD;
+    vec direction(yaw, pitch), moonright(cosf(yaw), sinf(yaw), 0),
+        moonup(sinf(yaw)*sinf(pitch), -cosf(yaw)*sinf(pitch), cosf(pitch));
+    float coshalf = cosf(halfangle), horizontal = sqrtf(max(1.0f - direction.z*direction.z, 0.0f));
+    if(direction.z*coshalf + horizontal*sinhalf <= 0.0f || !loadAtmosphereMoon()) return;
+    GLboolean hadscissor = GL_FALSE;
+    GLint oldscissor[4] = { 0, 0, vieww, viewh };
+    if(!beginAtmosphereCelestialScissor(direction, atmomoonsize, hadscissor, oldscissor)) return;
+
+    GLboolean hadblend = glIsEnabled(GL_BLEND);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    SETSHADER(atmospheremoon);
+    setAtmosphereCelestialParams(celestialmatrix, planetradius, atmosphereradius, alpha);
+    LOCALPARAM(moondir, direction);
+    LOCALPARAM(moonright, moonright);
+    LOCALPARAM(moonup, moonup);
+    LOCALPARAMF(moonparams, 0.5f/sinhalf, cosf(halfangle));
+    glActiveTexture_(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, atmosphereMoonTexture->id);
+    glActiveTexture_(GL_TEXTURE0);
+    drawAtmosphereCelestialQuad();
+    if(hadblend) glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+    else glDisable(GL_BLEND);
+    endAtmosphereCelestialScissor(hadscissor, oldscissor);
 }
 
 static void drawatmosphere(float alpha = atmoalpha)
@@ -1114,17 +1299,6 @@ static void drawatmosphere(float alpha = atmoalpha)
     else normalizedsundir = vec(0, 0, 1);
     LOCALPARAM(sundir, normalizedsundir);
 
-    // The shader applies camera-to-space transmittance and planet visibility.
-    vec diskcolor = (!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).mul(ldrscale).pow(hdrgamma).mul(atmosundiskbright * 4);
-    LOCALPARAM(sundiskcolor, diskcolor);
-
-    // convert from view cosine into mu^2 for limb darkening, where mu = sqrt(1 - sin^2) and sin^2 = 1 - cos^2, thus mu^2 = 1 - (1 - cos^2*scale)
-    // convert corona offset into scale for mu^2, where sin = (1-corona) and thus mu^2 = 1 - (1-corona^2)
-    float sundiskscale = sinf(0.5f*atmosundisksize*RAD);
-    float coronamu = 1 - (1-atmosundiskcorona)*(1-atmosundiskcorona);
-    if(sundiskscale > 0) LOCALPARAMF(sundiskparams, 1.0f/(sundiskscale*sundiskscale), 1.0f/max(coronamu, 1e-3f));
-    else LOCALPARAMF(sundiskparams, 0, 0);
-
     beginAtmosphereRaymarchDebugTimer();
     gle::defvertex();
     gle::begin(GL_TRIANGLE_STRIP);
@@ -1155,6 +1329,11 @@ static void drawatmosphere(float alpha = atmoalpha)
     gle::attribf(-1, -1, 1);
     gle::attribf(1, -1, 1);
     xtraverts += gle::end();
+    endAtmosphereUpscaleDebugTimer();
+
+    drawAtmosphereSun(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
+    endAtmosphereSunDebugTimer();
+    drawAtmosphereMoon(sunmatrix, planetradius, planetradius + atmosphereheight, alpha);
 }
 
 VAR(showsky, 0, 1, 1);
