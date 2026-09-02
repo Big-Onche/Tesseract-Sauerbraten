@@ -27,13 +27,15 @@ namespace lensFlares
         Uint64 renderStart;
         float totalMillis, averageMillis;
         int queued, rendered, rejected;
+        int queriesIssued, queriesResolved, queriesPending, fallbackHits;
         bool sunQueued, sunRendered;
 
         flareProfile() : renderStart(0), totalMillis(0.0f), averageMillis(-1.0f), queued(0), rendered(0), rejected(0),
-                         sunQueued(false), sunRendered(false) {}
+                         queriesIssued(0), queriesResolved(0), queriesPending(0), fallbackHits(0), sunQueued(false), sunRendered(false) {}
     };
 
     static flareProfile profile;
+    static int pendingQueryCount();
 
     // Settings
     VARP(flares, 0, 1, 1);
@@ -54,6 +56,7 @@ namespace lensFlares
         profile.renderStart = SDL_GetPerformanceCounter();
         profile.queued = queuedFlares.length();
         profile.rendered = profile.rejected = 0;
+        profile.queriesIssued = profile.queriesResolved = profile.queriesPending = profile.fallbackHits = 0;
         profile.sunQueued = profile.sunRendered = false;
     }
 
@@ -66,17 +69,193 @@ namespace lensFlares
         profile.averageMillis = profile.averageMillis < 0.0f ? profile.totalMillis :
                                 profile.averageMillis + (profile.totalMillis - profile.averageMillis) * 0.1f;
         profile.rejected = max(profile.queued - profile.rendered, 0);
+        profile.queriesPending = pendingQueryCount();
         profile.renderStart = 0;
     }
 
-    static GLuint sunOcclusionQuery = 0;
-    static GLuint hardOcclusionQuery = 0;
-    static bool sunOcclusionPending = false;
-    static float sunOcclusionTotal = 1.0f, sunGeometryVisibilityTarget = 1.0f, sunOcclusionTarget = 1.0f, sunOcclusionSmoothed = 1.0f;
+    struct occlusionQuery
+    {
+        GLuint id;
+        int issuedFrame;
+        float total;
+        bool pending;
+
+        occlusionQuery() : id(0), issuedFrame(-1), total(1.0f), pending(false) {}
+    };
+
+    static const int SUN_QUERY_COUNT = 3;
+    static const int CLOUD_QUERY_COUNT = 3;
+    static const int CLOUD_QUERY_INTERVAL = 2;
+    static const int LOCAL_QUERY_COUNT = 16;
+    static const int LOCAL_CACHE_COUNT = 32;
+    static const int LOCAL_VISIBILITY_MILLIS = 350;
+    static occlusionQuery sunOcclusionQueries[SUN_QUERY_COUNT];
+    static occlusionQuery cloudOcclusionQueries[CLOUD_QUERY_COUNT];
+    struct localOcclusionQuery : occlusionQuery
+    {
+        vec source;
+        bool area, sun;
+
+        localOcclusionQuery() : source(0, 0, 0), area(false), sun(false) {}
+    };
+
+    struct localVisibility
+    {
+        vec source;
+        float center, area;
+        int centerMillis, areaMillis, lastUsedMillis;
+        bool sun;
+
+        localVisibility(const vec &source, bool sun) : source(source), center(1.0f), area(1.0f), centerMillis(0), areaMillis(0),
+                                                        lastUsedMillis(0), sun(sun) {}
+    };
+
+    static localOcclusionQuery localOcclusionQueries[LOCAL_QUERY_COUNT];
+    static vector<localVisibility> localVisibilityCache;
+    static int flareQueryFrame = 0, sunLastResolvedFrame = -1;
+    static int cloudLastIssuedFrame = -CLOUD_QUERY_INTERVAL, cloudLastResolvedFrame = -1;
+    static float cloudOcclusionLast = 0.0f;
+    static float sunGeometryVisibilityTarget = 1.0f, sunOcclusionTarget = 1.0f, sunOcclusionSmoothed = 1.0f;
     static int sunOcclusionMillis = 0, sunOcclusionDebugMillis = 0;
     static vec lastCameraPos(0, 0, 0);
     static int lastCameraMillis = 0;
     static float cameraVelocityBias = 0.0f;
+
+    static int pendingQueryCount()
+    {
+        int pending = 0;
+        loopi(SUN_QUERY_COUNT) if(sunOcclusionQueries[i].pending) pending++;
+        loopi(CLOUD_QUERY_COUNT) if(cloudOcclusionQueries[i].pending) pending++;
+        loopi(LOCAL_QUERY_COUNT) if(localOcclusionQueries[i].pending) pending++;
+        return pending;
+    }
+
+    static occlusionQuery *availableQuery(occlusionQuery *queries, int count)
+    {
+        loopi(count) if(!queries[i].pending)
+        {
+            if(!queries[i].id) glGenQueries_(1, &queries[i].id);
+            if(queries[i].id) return &queries[i];
+        }
+        return NULL;
+    }
+
+    static void pollSunOcclusionQueries()
+    {
+        loopi(SUN_QUERY_COUNT)
+        {
+            occlusionQuery &query = sunOcclusionQueries[i];
+            if(!query.pending || query.issuedFrame >= flareQueryFrame) continue;
+
+            GLint available = 0;
+            glGetQueryObjectiv_(query.id, GL_QUERY_RESULT_AVAILABLE, &available);
+            if(!available) continue;
+
+            GLuint samples = 0;
+            glGetQueryObjectuiv_(query.id, GL_QUERY_RESULT, &samples);
+            if(query.issuedFrame > sunLastResolvedFrame)
+            {
+                sunGeometryVisibilityTarget = clamp(samples / max(query.total, 1.0f), 0.0f, 1.0f);
+                sunLastResolvedFrame = query.issuedFrame;
+            }
+            query.pending = false;
+            if(debugflares) profile.queriesResolved++;
+        }
+    }
+
+    static void pollCloudOcclusionQueries()
+    {
+        loopi(CLOUD_QUERY_COUNT)
+        {
+            occlusionQuery &query = cloudOcclusionQueries[i];
+            if(!query.pending || query.issuedFrame >= flareQueryFrame) continue;
+
+            GLint available = 0;
+            glGetQueryObjectiv_(query.id, GL_QUERY_RESULT_AVAILABLE, &available);
+            if(!available) continue;
+
+            GLuint samples = 0;
+            glGetQueryObjectuiv_(query.id, GL_QUERY_RESULT, &samples);
+            if(query.issuedFrame > cloudLastResolvedFrame)
+            {
+                cloudOcclusionLast = clamp(samples / max(query.total, 1.0f), 0.0f, 1.0f);
+                cloudLastResolvedFrame = query.issuedFrame;
+            }
+            query.pending = false;
+            if(debugflares) profile.queriesResolved++;
+        }
+    }
+
+    static bool sameSource(const vec &a, const vec &b)
+    {
+        return a.squaredist(b) <= 1.0e-6f;
+    }
+
+    static localVisibility *findLocalVisibility(const vec &source, bool sun, bool create = false)
+    {
+        loopv(localVisibilityCache) if(localVisibilityCache[i].sun == sun && sameSource(localVisibilityCache[i].source, source))
+            return &localVisibilityCache[i];
+        if(!create) return NULL;
+
+        if(localVisibilityCache.length() < LOCAL_CACHE_COUNT) return &localVisibilityCache.add(localVisibility(source, sun));
+
+        int oldest = 0;
+        loopv(localVisibilityCache) if(localVisibilityCache[i].lastUsedMillis < localVisibilityCache[oldest].lastUsedMillis) oldest = i;
+        localVisibilityCache[oldest] = localVisibility(source, sun);
+        return &localVisibilityCache[oldest];
+    }
+
+    static bool localQueryPending(const vec &source, bool sun, bool area)
+    {
+        loopi(LOCAL_QUERY_COUNT)
+        {
+            const localOcclusionQuery &query = localOcclusionQueries[i];
+            if(query.pending && query.sun == sun && query.area == area && sameSource(query.source, source)) return true;
+        }
+        return false;
+    }
+
+    static localOcclusionQuery *availableLocalQuery()
+    {
+        loopi(LOCAL_QUERY_COUNT) if(!localOcclusionQueries[i].pending)
+        {
+            localOcclusionQuery &query = localOcclusionQueries[i];
+            if(!query.id) glGenQueries_(1, &query.id);
+            if(query.id) return &query;
+        }
+        return NULL;
+    }
+
+    static void pollLocalOcclusionQueries()
+    {
+        int millis = totalmillis ? totalmillis : lastmillis;
+        loopi(LOCAL_QUERY_COUNT)
+        {
+            localOcclusionQuery &query = localOcclusionQueries[i];
+            if(!query.pending || query.issuedFrame >= flareQueryFrame) continue;
+
+            GLint available = 0;
+            glGetQueryObjectiv_(query.id, GL_QUERY_RESULT_AVAILABLE, &available);
+            if(!available) continue;
+
+            GLuint samples = 0;
+            glGetQueryObjectuiv_(query.id, GL_QUERY_RESULT, &samples);
+            localVisibility *visibility = findLocalVisibility(query.source, query.sun, true);
+            float result = clamp(samples / max(query.total, 1.0f), 0.0f, 1.0f);
+            if(query.area)
+            {
+                visibility->area = result;
+                visibility->areaMillis = millis;
+            }
+            else
+            {
+                visibility->center = result;
+                visibility->centerMillis = millis;
+            }
+            query.pending = false;
+            if(debugflares) profile.queriesResolved++;
+        }
+    }
 
     static bool shouldRender(bool sun = false)
     {
@@ -125,11 +304,11 @@ namespace lensFlares
         gle::end();
     }
 
-    static float queryDepthCircleVisibility(const vec4 &screen, float radiusPixels, float ndcDepth)
+    static void issueLocalOcclusionQuery(const vec &source, bool sun, bool area, const vec4 &screen, float radiusPixels, float ndcDepth)
     {
-        if(!glGenQueries_ || !glBeginQuery_) return 1.0f;
-        if(!hardOcclusionQuery) glGenQueries_(1, &hardOcclusionQuery);
-        if(!hardOcclusionQuery) return 1.0f;
+        if(!glGenQueries_ || !glBeginQuery_ || localQueryPending(source, sun, area)) return;
+        localOcclusionQuery *query = availableLocalQuery();
+        if(!query) return;
 
         bool hadDepth = glIsEnabled(GL_DEPTH_TEST) != 0, hadBlend = glIsEnabled(GL_BLEND) != 0;
         GLboolean oldDepthMask = GL_TRUE, oldColorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
@@ -147,12 +326,9 @@ namespace lensFlares
         if(hadBlend) glDisable(GL_BLEND);
 
         nullshader->set();
-        glBeginQuery_(GL_SAMPLES_PASSED, hardOcclusionQuery);
+        glBeginQuery_(GL_SAMPLES_PASSED, query->id);
         drawOcclusionCircle(screen, radiusPixels, true, ndcDepth);
         glEndQuery_(GL_SAMPLES_PASSED);
-
-        GLuint samples = 0;
-        glGetQueryObjectuiv_(hardOcclusionQuery, GL_QUERY_RESULT, &samples);
 
         glDepthFunc(oldDepthFunc);
         glDepthMask(oldDepthMask);
@@ -160,19 +336,34 @@ namespace lensFlares
         if(!hadDepth) glDisable(GL_DEPTH_TEST);
         if(hadBlend) glEnable(GL_BLEND);
 
-        float total = float(M_PI) * radiusPixels * radiusPixels * max(msaalight ? msaasamples : 1, 1);
-        return clamp(samples / max(total, 1.0f), 0.0f, 1.0f);
+        query->source = source;
+        query->sun = sun;
+        query->area = area;
+        query->total = float(M_PI) * radiusPixels * radiusPixels * max(msaalight ? msaasamples : 1, 1);
+        query->issuedFrame = flareQueryFrame;
+        query->pending = true;
+        if(debugflares) profile.queriesIssued++;
     }
 
-    static bool hardCenterVisible(const vec4 &screen, float ndcDepth)
+    static bool hardCenterVisible(const vec &source, bool sun, const vec4 &screen, float ndcDepth)
     {
         if(screen.x < 0.0f || screen.x > 1.0f || screen.y < 0.0f || screen.y > 1.0f) return false;
 
+        int millis = totalmillis ? totalmillis : lastmillis;
+        localVisibility *visibility = findLocalVisibility(source, sun, true);
+        visibility->lastUsedMillis = millis;
         float biasedDepth = clamp(ndcDepth + min(0.0025f + cameraVelocityBias * 0.00035f, 0.02f), -1.0f, 1.0f);
-        if(queryDepthCircleVisibility(screen, 0.75f, biasedDepth) <= 0.0f) return false;
+        issueLocalOcclusionQuery(source, sun, false, screen, 0.75f, biasedDepth);
 
         float conservativeRadius = 1.5f + cameraVelocityBias;
-        if(conservativeRadius > 1.5f && queryDepthCircleVisibility(screen, conservativeRadius, biasedDepth) < 0.35f) return false;
+        bool needsArea = conservativeRadius > 1.5f;
+        if(needsArea) issueLocalOcclusionQuery(source, sun, true, screen, conservativeRadius, biasedDepth);
+
+        bool centerValid = visibility->centerMillis && millis - visibility->centerMillis <= LOCAL_VISIBILITY_MILLIS;
+        bool areaValid = visibility->areaMillis && millis - visibility->areaMillis <= LOCAL_VISIBILITY_MILLIS;
+        if(centerValid && visibility->center <= 0.0f) return false;
+        if(needsArea && areaValid && visibility->area < 0.35f) return false;
+        if(debugflares && (!centerValid || (needsArea && !areaValid))) profile.fallbackHits++;
 
         return true;
     }
@@ -206,10 +397,16 @@ namespace lensFlares
 
     static float queryCloudCircleOcclusion(const vec4 &screen, float radiusPixels, Shader *cloudOcclusionShader)
     {
-        if(!cloudOcclusionShader || !glGenQueries_ || !glBeginQuery_) return 0.0f;
-        if(!hardOcclusionQuery) glGenQueries_(1, &hardOcclusionQuery);
-        if(!hardOcclusionQuery) return 0.0f;
-        if(!volumetricClouds::bindcomposite(0)) return 0.0f;
+        if(!cloudOcclusionShader || !glGenQueries_ || !glBeginQuery_) return cloudOcclusionLast;
+        if(!volumetricClouds::bindcomposite(0))
+        {
+            cloudOcclusionLast = 0.0f;
+            return cloudOcclusionLast;
+        }
+        if(flareQueryFrame - cloudLastIssuedFrame < CLOUD_QUERY_INTERVAL) return cloudOcclusionLast;
+
+        occlusionQuery *query = availableQuery(cloudOcclusionQueries, CLOUD_QUERY_COUNT);
+        if(!query) return cloudOcclusionLast;
 
         const vec4 &cloudParams = volumetricClouds::compositetexparams();
         bool hadDepth = glIsEnabled(GL_DEPTH_TEST) != 0, hadBlend = glIsEnabled(GL_BLEND) != 0;
@@ -226,12 +423,9 @@ namespace lensFlares
 
         GLOBALPARAMF(sunFlareCloudTex, cloudParams.x, cloudParams.y, cloudParams.z, cloudParams.w);
         cloudOcclusionShader->set();
-        glBeginQuery_(GL_SAMPLES_PASSED, hardOcclusionQuery);
+        glBeginQuery_(GL_SAMPLES_PASSED, query->id);
         drawOcclusionCircle(screen, radiusPixels, true);
         glEndQuery_(GL_SAMPLES_PASSED);
-
-        GLuint samples = 0;
-        glGetQueryObjectuiv_(hardOcclusionQuery, GL_QUERY_RESULT, &samples);
 
         glDepthMask(oldDepthMask);
         glColorMask(oldColorMask[0], oldColorMask[1], oldColorMask[2], oldColorMask[3]);
@@ -239,8 +433,12 @@ namespace lensFlares
         if(hadBlend) glEnable(GL_BLEND);
         glActiveTexture_(GL_TEXTURE0);
 
-        float total = float(M_PI) * radiusPixels * radiusPixels * max(msaalight ? msaasamples : 1, 1);
-        return clamp(samples / max(total, 1.0f), 0.0f, 1.0f);
+        query->total = float(M_PI) * radiusPixels * radiusPixels * max(msaalight ? msaasamples : 1, 1);
+        query->issuedFrame = flareQueryFrame;
+        query->pending = true;
+        cloudLastIssuedFrame = flareQueryFrame;
+        if(debugflares) profile.queriesIssued++;
+        return cloudOcclusionLast;
     }
 
     static void reportDebugOcclusion(float occlusion, float geometryOcclusion = -1.0f, float cloudOcclusion = -1.0f)
@@ -260,19 +458,6 @@ namespace lensFlares
     static float updateSunOcclusion(const vec4 &screen, Shader *debugShader, Shader *cloudOcclusionShader)
     {
         float radiusPixels = occlusionRadiusPixels();
-
-        if(sunOcclusionPending)
-        {
-            GLint available = 0;
-            glGetQueryObjectiv_(sunOcclusionQuery, GL_QUERY_RESULT_AVAILABLE, &available);
-            if(available)
-            {
-                GLuint samples = 0;
-                glGetQueryObjectuiv_(sunOcclusionQuery, GL_QUERY_RESULT, &samples);
-                sunGeometryVisibilityTarget = clamp(samples / max(sunOcclusionTotal, 1.0f), 0.0f, 1.0f);
-                sunOcclusionPending = false;
-            }
-        }
 
         float cloudOcclusion = queryCloudCircleOcclusion(screen, radiusPixels, cloudOcclusionShader);
         float cloudVisibility = 1.0f - clamp(cloudOcclusion / max(lensflarecloudocclusionthreshold, 1.0e-4f), 0.0f, 1.0f);
@@ -298,10 +483,10 @@ namespace lensFlares
 
         reportDebugOcclusion(1.0f - sunOcclusionTarget, 1.0f - sunGeometryVisibilityTarget, cloudOcclusion);
 
-        if(!sunOcclusionPending && glGenQueries_ && glBeginQuery_)
+        if(glGenQueries_ && glBeginQuery_)
         {
-            if(!sunOcclusionQuery) glGenQueries_(1, &sunOcclusionQuery);
-            if(sunOcclusionQuery)
+            occlusionQuery *query = availableQuery(sunOcclusionQueries, SUN_QUERY_COUNT);
+            if(query)
             {
                 bool hadDepth = glIsEnabled(GL_DEPTH_TEST) != 0, hadBlend = glIsEnabled(GL_BLEND) != 0;
                 GLboolean oldDepthMask = GL_TRUE, oldColorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
@@ -319,7 +504,7 @@ namespace lensFlares
                 if(hadBlend) glDisable(GL_BLEND);
 
                 nullshader->set();
-                glBeginQuery_(GL_SAMPLES_PASSED, sunOcclusionQuery);
+                glBeginQuery_(GL_SAMPLES_PASSED, query->id);
                 drawOcclusionCircle(screen, radiusPixels, true);
                 glEndQuery_(GL_SAMPLES_PASSED);
 
@@ -330,8 +515,10 @@ namespace lensFlares
                 if(hadBlend) glEnable(GL_BLEND);
 
                 int samples = max(msaalight ? msaasamples : 1, 1);
-                sunOcclusionTotal = float(M_PI) * radiusPixels * radiusPixels * samples;
-                sunOcclusionPending = true;
+                query->total = float(M_PI) * radiusPixels * radiusPixels * samples;
+                query->issuedFrame = flareQueryFrame;
+                query->pending = true;
+                if(debugflares) profile.queriesIssued++;
             }
         }
 
@@ -355,17 +542,18 @@ namespace lensFlares
     {
         queuedFlares.setsize(0);
         profile = flareProfile();
-        if(sunOcclusionQuery)
-        {
-            glDeleteQueries_(1, &sunOcclusionQuery);
-            sunOcclusionQuery = 0;
-        }
-        if(hardOcclusionQuery)
-        {
-            glDeleteQueries_(1, &hardOcclusionQuery);
-            hardOcclusionQuery = 0;
-        }
-        sunOcclusionPending = false;
+        loopi(SUN_QUERY_COUNT) if(sunOcclusionQueries[i].id) glDeleteQueries_(1, &sunOcclusionQueries[i].id);
+        loopi(SUN_QUERY_COUNT) sunOcclusionQueries[i] = occlusionQuery();
+        loopi(CLOUD_QUERY_COUNT) if(cloudOcclusionQueries[i].id) glDeleteQueries_(1, &cloudOcclusionQueries[i].id);
+        loopi(CLOUD_QUERY_COUNT) cloudOcclusionQueries[i] = occlusionQuery();
+        loopi(LOCAL_QUERY_COUNT) if(localOcclusionQueries[i].id) glDeleteQueries_(1, &localOcclusionQueries[i].id);
+        loopi(LOCAL_QUERY_COUNT) localOcclusionQueries[i] = localOcclusionQuery();
+        localVisibilityCache.setsize(0);
+        flareQueryFrame = 0;
+        sunLastResolvedFrame = -1;
+        cloudLastIssuedFrame = -CLOUD_QUERY_INTERVAL;
+        cloudLastResolvedFrame = -1;
+        cloudOcclusionLast = 0.0f;
     }
 
     static void drawFlare(Shader *flareShader, const vec4 &screen, const vec4 &params, const vec &color, float ghostStrength, const vec4 &layerWeights, const vec4 &visibilityOverride)
@@ -510,6 +698,10 @@ namespace lensFlares
     void render()
     {
         beginProfile();
+        flareQueryFrame++;
+        pollSunOcclusionQueries();
+        pollCloudOcclusionQueries();
+        pollLocalOcclusionQueries();
 
         vec4 sunScreen, sunParams, sunLayerWeights, sunVisibilityOverride;
         vec sunColor;
@@ -537,7 +729,7 @@ namespace lensFlares
 
         if(renderSun)
         {
-            if(!hardCenterVisible(sunScreen, 1.0f))
+            if(!hardCenterVisible(sunlightdir, true, sunScreen, 1.0f))
             {
                 sunGeometryVisibilityTarget = sunOcclusionTarget = sunOcclusionSmoothed = 0.0f;
                 reportDebugOcclusion(1.0f, 1.0f, 0.0f);
@@ -596,7 +788,7 @@ namespace lensFlares
             float ghostStrength = 0.0f;
             float centerDepth = 1.0f;
             if(initFlare(queuedFlares[i], flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride, centerDepth) &&
-               hardCenterVisible(flareScreen, centerDepth))
+               hardCenterVisible(queuedFlares[i].o, false, flareScreen, centerDepth))
             {
                 drawFlare(flareShader, flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride);
                 if(debugflares) profile.rendered++;
@@ -630,5 +822,9 @@ namespace lensFlares
         draw_textf("rejected: %d", 0, y, profile.rejected);
         y += FONTH;
         draw_textf("sun: %s", 0, y, profile.sunQueued ? (profile.sunRendered ? "rendered" : "rejected") : "inactive");
+        y += FONTH;
+        draw_textf("queries issued/resolved: %d / %d", 0, y, profile.queriesIssued, profile.queriesResolved);
+        y += FONTH;
+        draw_textf("queries pending/fallbacks: %d / %d", 0, y, profile.queriesPending, profile.fallbackHits);
     }
 }
