@@ -890,6 +890,7 @@ namespace lensFlares // procedural ones
 {
     extern void addFlares(const vec &o, int r, int g, int b, bool unlimitedDistance, bool lensGhosts, int maxDistance);
     extern void render();
+    extern void debugview();
     extern void cleanup();
 }
 

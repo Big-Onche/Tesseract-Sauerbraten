@@ -22,17 +22,52 @@ namespace lensFlares
 
     static vector<queuedFlare> queuedFlares;
 
+    struct flareProfile
+    {
+        Uint64 renderStart;
+        float totalMillis, averageMillis;
+        int queued, rendered, rejected;
+        bool sunQueued, sunRendered;
+
+        flareProfile() : renderStart(0), totalMillis(0.0f), averageMillis(-1.0f), queued(0), rendered(0), rejected(0),
+                         sunQueued(false), sunRendered(false) {}
+    };
+
+    static flareProfile profile;
+
     // Settings
     VARP(flares, 0, 1, 1);
     VARP(flareghosts, 0, 1, 1);
     VARP(sunflares, 0, 1, 1);
-    VAR(debuglensflare, 0, 0, 1);
+    VAR(debugflares, 0, 0, 1);
     FVARP(lensflareocclusionradians, 0.001f, 0.05236f, 0.2f);
     VARP(lensflareocclusionlerp, 0, 25, 5000);
     FVARP(lensflarecloudocclusionthreshold, 0.05f, 0.60f, 1.0f);
     // Map vars
     VARR(sunflareshaftsize, 1, 75, 400);
     VARR(sunflarestrength, 0, 25, 200);
+
+    static void beginProfile()
+    {
+        if(!debugflares) return;
+
+        profile.renderStart = SDL_GetPerformanceCounter();
+        profile.queued = queuedFlares.length();
+        profile.rendered = profile.rejected = 0;
+        profile.sunQueued = profile.sunRendered = false;
+    }
+
+    static void endProfile()
+    {
+        if(!debugflares || !profile.renderStart) return;
+
+        Uint64 frequency = SDL_GetPerformanceFrequency();
+        profile.totalMillis = frequency ? float((SDL_GetPerformanceCounter() - profile.renderStart) * 1000.0 / frequency) : 0.0f;
+        profile.averageMillis = profile.averageMillis < 0.0f ? profile.totalMillis :
+                                profile.averageMillis + (profile.totalMillis - profile.averageMillis) * 0.1f;
+        profile.rejected = max(profile.queued - profile.rendered, 0);
+        profile.renderStart = 0;
+    }
 
     static GLuint sunOcclusionQuery = 0;
     static GLuint hardOcclusionQuery = 0;
@@ -144,7 +179,7 @@ namespace lensFlares
 
     static void drawDebugCircle(Shader *debugShader, const vec4 &screen, float radiusPixels)
     {
-        if(!debuglensflare || !debugShader) return;
+        if(!debugflares || !debugShader) return;
 
         bool hadDepth = glIsEnabled(GL_DEPTH_TEST) != 0, hadBlend = glIsEnabled(GL_BLEND) != 0;
         GLint oldBlendSrcRGB, oldBlendDstRGB, oldBlendSrcAlpha, oldBlendDstAlpha;
@@ -210,7 +245,7 @@ namespace lensFlares
 
     static void reportDebugOcclusion(float occlusion, float geometryOcclusion = -1.0f, float cloudOcclusion = -1.0f)
     {
-        if(!debuglensflare) return;
+        if(!debugflares) return;
         int millis = totalmillis ? totalmillis : lastmillis;
         if(millis - sunOcclusionDebugMillis < 1000) return;
         sunOcclusionDebugMillis = millis;
@@ -319,6 +354,7 @@ namespace lensFlares
     void cleanup()
     {
         queuedFlares.setsize(0);
+        profile = flareProfile();
         if(sunOcclusionQuery)
         {
             glDeleteQueries_(1, &sunOcclusionQuery);
@@ -473,24 +509,29 @@ namespace lensFlares
 
     void render()
     {
+        beginProfile();
+
         vec4 sunScreen, sunParams, sunLayerWeights, sunVisibilityOverride;
         vec sunColor;
         float sunGhostStrength = 0.0f;
         bool renderSun = initSun(sunScreen, sunParams, sunColor, sunGhostStrength, sunLayerWeights, sunVisibilityOverride);
+        if(debugflares) profile.sunQueued = renderSun;
         updateCameraVelocityBias();
 
         if(!renderSun && queuedFlares.empty())
         {
             queuedFlares.setsize(0);
+            endProfile();
             return;
         }
 
         Shader *flareShader = useshaderbyname("lensflare");
-        Shader *debugShader = debuglensflare ? useshaderbyname("lensflaredebug") : NULL;
+        Shader *debugShader = debugflares ? useshaderbyname("lensflaredebug") : NULL;
         Shader *cloudOcclusionShader = useshaderbyname("lensflarecloudocclusion");
         if(!flareShader)
         {
             queuedFlares.setsize(0);
+            endProfile();
             return;
         }
 
@@ -543,7 +584,11 @@ namespace lensFlares
 
         GLOBALPARAMF(sunFlareFovScale, getFovScale());
         GLOBALPARAMF(sunFlareCloudTex, cloudCompositeParams.x, cloudCompositeParams.y, cloudCompositeParams.z, cloudCompositeParams.w);
-        if(renderSun) drawFlare(flareShader, sunScreen, sunParams, sunColor, sunGhostStrength, sunLayerWeights, sunVisibilityOverride);
+        if(renderSun)
+        {
+            drawFlare(flareShader, sunScreen, sunParams, sunColor, sunGhostStrength, sunLayerWeights, sunVisibilityOverride);
+            if(debugflares) profile.sunRendered = true;
+        }
         loopv(queuedFlares)
         {
             vec4 flareScreen, flareParams, layerWeights, visibilityOverride;
@@ -552,7 +597,10 @@ namespace lensFlares
             float centerDepth = 1.0f;
             if(initFlare(queuedFlares[i], flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride, centerDepth) &&
                hardCenterVisible(flareScreen, centerDepth))
+            {
                 drawFlare(flareShader, flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride);
+                if(debugflares) profile.rendered++;
+            }
         }
 
         if(glBlendFuncSeparate_) glBlendFuncSeparate_(oldBlendSrcRGB, oldBlendDstRGB, oldBlendSrcAlpha, oldBlendDstAlpha);
@@ -561,5 +609,26 @@ namespace lensFlares
         if(hadDepth) glEnable(GL_DEPTH_TEST);
         if(hadScissor) glEnable(GL_SCISSOR_TEST);
         queuedFlares.setsize(0);
+        endProfile();
+    }
+
+    void debugview()
+    {
+        if(!debugflares) return;
+
+        int y = 0;
+        draw_text("lens flares", 0, y);
+        y += FONTH;
+        draw_textf("render total: %.3f ms", 0, y, profile.totalMillis);
+        y += FONTH;
+        draw_textf("render average: %.3f ms", 0, y, max(profile.averageMillis, 0.0f));
+        y += FONTH;
+        draw_textf("queued: %d", 0, y, profile.queued);
+        y += FONTH;
+        draw_textf("rendered: %d", 0, y, profile.rendered);
+        y += FONTH;
+        draw_textf("rejected: %d", 0, y, profile.rejected);
+        y += FONTH;
+        draw_textf("sun: %s", 0, y, profile.sunQueued ? (profile.sunRendered ? "rendered" : "rejected") : "inactive");
     }
 }
