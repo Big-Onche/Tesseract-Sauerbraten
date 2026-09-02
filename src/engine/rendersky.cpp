@@ -879,9 +879,13 @@ static void drawatmosphere(float alpha = atmoalpha)
     // ground radius.
     const float earthradius = 6360.0f, earthatmoheight = 100.0f;
     float planetradius = earthradius*atmoplanetsize,
-          atmosphereheight = earthatmoheight*atmoheight;
-    LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, 8.0f*atmoheight, 1.2f*atmoheight);
-    LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, 15.0f*atmoheight, clamp(atmomultiscatter, 0.0f, 2.0f), clamp(atmomieanisotropy, -0.99f, 0.99f));
+          atmosphereheight = earthatmoheight*atmoheight,
+          inverseRayleighScaleHeight = 1.0f/max(8.0f*atmoheight, 1.0e-3f),
+          inverseMieScaleHeight = 1.0f/max(1.2f*atmoheight, 1.0e-3f),
+          inverseOzoneHalfWidth = 1.0f/max(15.0f*atmoheight, 1.0e-3f);
+    LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight);
+    LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, inverseOzoneHalfWidth, clamp(atmomultiscatter, 0.0f, 2.0f),
+                clamp(atmomieanisotropy, -0.99f, 0.99f));
 
     // Scattering/absorption coefficients from Table 1 of Hillaire 2020.
     // Coefficients are km^-1. Preserve the historic atmohaze default by
