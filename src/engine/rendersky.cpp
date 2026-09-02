@@ -727,7 +727,7 @@ FVARR(atmobright, 0, 1, 16);
 CVAR1R(atmosunlight, 0);
 FVARR(atmosunlightscale, 0, 1, 16);
 CVAR1R(atmosundisk, 0);
-FVARR(atmosundisksize, 0, 12, 90);
+FVARR(atmosundisksize, 0, 6, 90);
 FVARR(atmosundiskcorona, 0, 0.4f, 1);
 FVARR(atmosundiskbright, 0, 1, 16);
 VARR(atmomoon, 0, 0, 1);
@@ -1203,7 +1203,8 @@ static bool loadAtmosphereMoon()
     return atmosphereMoonTexture != notexture;
 }
 
-static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundirection, const vec &suncolor, float planetradius, float atmosphereradius, float alpha)
+static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundirection, const vec &suncolor, float planetradius,
+                               float atmosphereradius, float alpha)
 {
     float halfangle = 0.5f*atmomoonsize*RAD, sinhalf = sinf(halfangle);
     if(!atmomoon || alpha <= 0.0f || sinhalf <= 0.0f) return;
@@ -1231,7 +1232,7 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundir
 
     GLboolean hadblend = glIsEnabled(GL_BLEND);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     SETSHADER(atmospheremoon);
     setAtmosphereCelestialParams(celestialmatrix, planetradius, atmosphereradius, alpha);
     LOCALPARAM(moondir, direction);
@@ -1329,6 +1330,11 @@ static void drawatmosphere(float alpha = atmoalpha)
     if(depthtest) glEnable(GL_DEPTH_TEST);
     if(scissortest) glEnable(GL_SCISSOR_TEST);
 
+    // The moon is an opaque celestial foreground over the night-sky texture.
+    // Draw it before the atmosphere so stars are occluded first, then apply
+    // atmospheric transmittance and in-scattering to the combined background.
+    drawAtmosphereMoon(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
+
     // The source already contains premultiplied radiance and destination
     // transmittance. One bilinear sample reconstructs it; z=1 lets the existing
     // sky depth test reject geometry without any depth-texture fetches.
@@ -1347,7 +1353,6 @@ static void drawatmosphere(float alpha = atmoalpha)
 
     drawAtmosphereSun(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
     endAtmosphereSunDebugTimer();
-    drawAtmosphereMoon(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
 }
 
 VAR(showsky, 0, 1, 1);
@@ -1366,6 +1371,7 @@ void drawskybox(bool clear)
 {
     bool havefaces = haveskyfaces();
     bool havenightsky = atmo && !havefaces && sunlightdir.z < 0 && loadnightsky();
+    bool havemoon = atmo && atmomoon && atmoalpha > 0.0f && atmomoonsize > 0.0f;
     float nightfade = havenightsky ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
     nightfade *= nightfade*(3.0f - 2.0f*nightfade);
     bool limited = false;
@@ -1394,9 +1400,10 @@ void drawskybox(bool clear)
     // A partially faded night texture needs a deterministic background before
     // the atmosphere transmits it. The ordinary opaque daytime atmosphere does
     // not: it deliberately overwrites stale HDR sky pixels below.
-    if(clear || (!havefaces && (!atmo || atmoalpha < 1 || (havenightsky && nightfade < 1))))
+    if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havenightsky && nightfade < 1))))
     {
-        vec skyboxcolor = skyboxcolour.tocolor().mul(ldrscale);
+        bool moononlyclear = havemoon && !havefaces && !havenightsky && atmoalpha >= 1.0f;
+        vec skyboxcolor = moononlyclear ? vec(0) : skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
         glClear(GL_COLOR_BUFFER_BIT);
     }
@@ -1431,7 +1438,7 @@ void drawskybox(bool clear)
         // Only use destination-transmittance blending when a valid background
         // was drawn this frame. With no skybox/night backdrop the HDR target can
         // contain last frame's clouds, so blending would create temporal trails.
-        bool blendatmosphere = havefaces || havenightsky || atmoalpha < 1;
+        bool blendatmosphere = havefaces || havenightsky || havemoon || atmoalpha < 1;
         if(blendatmosphere)
         {
             glEnable(GL_BLEND);
