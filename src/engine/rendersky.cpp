@@ -741,6 +741,52 @@ FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
+static vec getAtmosphereMoonDirection()
+{
+    return vec(atmomoonyaw*RAD, atmomoonpitch*RAD).normalize();
+}
+
+bool getatmospheremoon(vec &direction, float &halfangle)
+{
+    direction = getAtmosphereMoonDirection();
+    halfangle = 0.5f*atmomoonsize*RAD;
+    return atmo && atmomoon && atmoalpha > 0.0f && halfangle > 0.0f;
+}
+
+static float circleOverlapArea(float radius1, float radius2, float separation)
+{
+    if(radius1 <= 0.0f || radius2 <= 0.0f || separation >= radius1 + radius2) return 0.0f;
+    if(separation <= fabsf(radius1 - radius2))
+    {
+        float radius = min(radius1, radius2);
+        return M_PI*radius*radius;
+    }
+
+    float separationSquared = separation*separation, radius1Squared = radius1*radius1, radius2Squared = radius2*radius2;
+    float angle1 = acosf(clamp((separationSquared + radius1Squared - radius2Squared)/(2.0f*separation*radius1), -1.0f, 1.0f));
+    float angle2 = acosf(clamp((separationSquared + radius2Squared - radius1Squared)/(2.0f*separation*radius2), -1.0f, 1.0f));
+    float lens = sqrtf(max((-separation + radius1 + radius2)*(separation + radius1 - radius2)*
+                           (separation - radius1 + radius2)*(separation + radius1 + radius2), 0.0f));
+    return radius1Squared*angle1 + radius2Squared*angle2 - 0.5f*lens;
+}
+
+float getsolareclipsevisibility()
+{
+    vec moondirection;
+    float moonradius;
+    if(!getatmospheremoon(moondirection, moonradius)) return 1.0f;
+
+    float sunradius = 0.5f*atmosundisksize*RAD;
+    if(sunradius <= 0.0f) return 1.0f;
+
+    vec sundirection = sunlightdir;
+    if(sundirection.squaredlen() <= 1.0e-8f) sundirection = vec(0, 0, 1);
+    else sundirection.normalize();
+    float separation = acosf(clamp(sundirection.dot(moondirection), -1.0f, 1.0f));
+    float covered = circleOverlapArea(sunradius, moonradius, separation)/(M_PI*sunradius*sunradius);
+    return 1.0f - clamp(covered*atmoalpha, 0.0f, 1.0f);
+}
+
 static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3, ATMOSPHERE_DEBUG_TIMESTAMP_COUNT = 4;
 static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][ATMOSPHERE_DEBUG_TIMESTAMP_COUNT] = { { 0 } };
 static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
@@ -1030,6 +1076,8 @@ void atmosphereDebugView()
     y += FONTH;
     draw_textf("Scale: %.2f", 0, y, atmoscale);
     y += FONTH;
+    draw_textf("Solar visibility: %.1f%%", 0, y, 100.0f*getsolareclipsevisibility());
+    y += FONTH;
     draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
 }
 
@@ -1167,8 +1215,8 @@ static void setAtmosphereCelestialParams(const matrix4 &celestialmatrix, float p
     glBindTexture(GL_TEXTURE_2D, atmosphereTransmittanceTex);
 }
 
-static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &direction, const vec &suncolor, float planetradius,
-                              float atmosphereradius, float alpha)
+static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &direction, const vec &moondirection, const vec &suncolor,
+                              float planetradius, float atmosphereradius, float alpha)
 {
     float sundiskscale = sinf(0.5f*atmosundisksize*RAD);
     if(alpha <= 0.0f || sundiskscale <= 0.0f || atmosundiskbright <= 0.0f) return;
@@ -1189,8 +1237,16 @@ static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &directi
     SETSHADER(atmospheresundisk);
     setAtmosphereCelestialParams(celestialmatrix, planetradius, atmosphereradius, alpha);
     LOCALPARAM(sundir, direction);
+    LOCALPARAM(moondir, moondirection);
     LOCALPARAM(sundiskcolor, diskcolor);
     LOCALPARAMF(sundiskparams, 1.0f/(sundiskscale*sundiskscale), 1.0f/max(coronamu, 1e-3f));
+    float moonhalfangle = 0.5f*atmomoonsize*RAD;
+    if(atmomoon && moonhalfangle > 0.0f)
+    {
+        float feather = min(max(moonhalfangle*0.015f, 0.00005f), moonhalfangle*0.5f);
+        LOCALPARAMF(solareclipseparams, cosf(moonhalfangle + feather), cosf(max(moonhalfangle - feather, 0.0f)), alpha);
+    }
+    else LOCALPARAMF(solareclipseparams, 1.0f, 1.0f, 0.0f);
     drawAtmosphereCelestialQuad();
     if(hadblend) glBlendFunc(GL_ONE, GL_SRC_ALPHA);
     else glDisable(GL_BLEND);
@@ -1241,6 +1297,8 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundir
     LOCALPARAM(sundir, sundirection);
     LOCALPARAM(moonlightcolor, moonlightcolor);
     LOCALPARAMF(moonparams, 0.5f/sinhalf, coshalf, apparentbrightness, earthshine);
+    float umbraangle = min(halfangle*2.65f, float(M_PI)), penumbraangle = min(halfangle*4.6f, float(M_PI));
+    LOCALPARAMF(lunareclipseparams, 2.0f*sinf(0.5f*umbraangle), 2.0f*sinf(0.5f*penumbraangle));
     glActiveTexture_(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, atmosphereMoonTexture->id);
     glActiveTexture_(GL_TEXTURE0);
@@ -1308,11 +1366,20 @@ static void drawatmosphere(float alpha = atmoalpha)
     vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale) : sunlight.tocolor().mul(sunlightscale);
     extern float hdrgamma;
     vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16);
-    LOCALPARAM(sunlight, vec4(sunscale, alpha));
     vec normalizedsundir = sunlightdir;
     if(normalizedsundir.squaredlen() > 1e-8f) normalizedsundir.normalize();
     else normalizedsundir = vec(0, 0, 1);
     LOCALPARAM(sundir, normalizedsundir);
+    vec normalizedmoondir = getAtmosphereMoonDirection();
+    float eclipsevisibility = getsolareclipsevisibility();
+
+    // A total eclipse retains a small cool multiple-scattered component from
+    // the uneclipsed horizon while direct solar energy follows disk coverage.
+    float totality = 1.0f - eclipsevisibility;
+    totality *= totality*(3.0f - 2.0f*totality);
+    float atmosphericsun = 0.015f + 0.985f*eclipsevisibility;
+    sunscale.mul(atmosphericsun).mul(vec(1.0f - 0.45f*totality, 1.0f - 0.25f*totality, 1.0f));
+    LOCALPARAM(sunlight, vec4(sunscale, alpha));
 
     beginAtmosphereRaymarchDebugTimer();
     gle::defvertex();
@@ -1351,7 +1418,7 @@ static void drawatmosphere(float alpha = atmoalpha)
     xtraverts += gle::end();
     endAtmosphereUpscaleDebugTimer();
 
-    drawAtmosphereSun(sunmatrix, normalizedsundir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
+    drawAtmosphereSun(sunmatrix, normalizedsundir, normalizedmoondir, suncolor, planetradius, planetradius + atmosphereheight, alpha);
     endAtmosphereSunDebugTimer();
 }
 

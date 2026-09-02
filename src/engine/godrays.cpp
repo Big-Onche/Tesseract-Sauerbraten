@@ -786,7 +786,8 @@ namespace geometry
         if((!customcolour && sunlight.iszero()) || sunlightscale <= 0.0f || sunlightdir.z <= 1.0e-4f || !ensurebuffers())
             return;
 
-        vec suncolor = (customcolour ? grgcolour.tocolor() : sunlight.tocolor()).mul(max(sunlightscale, 0.0f)).mul(ldrscale * 2.0f);
+        vec suncolor = (customcolour ? grgcolour.tocolor() : sunlight.tocolor()).mul(max(sunlightscale, 0.0f)*getsolareclipsevisibility())
+                                                                             .mul(ldrscale * 2.0f);
 
         if(suncolor.squaredlen() <= 1.0e-8f) return;
 

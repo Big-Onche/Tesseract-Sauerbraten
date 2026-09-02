@@ -938,14 +938,15 @@ namespace lensFlares
         float colorMax = max(max(baseColor.x, baseColor.y), baseColor.z);
         if(colorMax <= 1.0e-4f) return false;
 
+        float eclipseVisibility = getsolareclipsevisibility();
         float sunScale = max(sunlightscale, 0.0f);
-        float sunLuma = (0.2126f * baseColor.x + 0.7152f * baseColor.y + 0.0722f * baseColor.z) * sunScale;
+        float sunLuma = (0.2126f*baseColor.x + 0.7152f*baseColor.y + 0.0722f*baseColor.z)*sunScale*eclipseVisibility;
         if(sunLuma <= 1.0e-4f) return false;
 
         sunColor = vec(baseColor).mul(1.0f / colorMax);
 
         float sourceBoost = clamp(0.5f + sqrtf(sunLuma), 0.5f, 4.0f);
-        float strength = (sunflarestrength / 50.0f) * sourceBoost;
+        float strength = (sunflarestrength/50.0f)*sourceBoost*eclipseVisibility;
         sunParams = vec4(strength, 0.0f, lastmillis / 1000.0f, sourceBoost);
         ghostStrength = flareghosts ? 0.5f : 0.0f;
         layerWeights = vec4(1.0f, 1.0f, 1.0f, flareghosts ? 1.0f : 0.0f);

@@ -700,8 +700,10 @@ namespace volumetricClouds
         vec sundepth = vec(atmoshells).add(sunoffset * sunoffset).sqrt().sub(sunoffset);
         sunweight = vec(betarayleigh).mul(sundepth.x).madd(betamie, sundepth.y).madd(betaozone, sundepth.z - sundepth.x);
         vec sunextinction = vec(sunweight).neg().exp2();
-        vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(max(atmosunlightscale, 0.0f)) : sunlight.tocolor().mul(max(sunlightscale, 0.0f));
-        vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16).mul(sunextinction);
+        vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(max(atmosunlightscale, 0.0f))
+                                              : sunlight.tocolor().mul(max(sunlightscale, 0.0f));
+        vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16 * getsolareclipsevisibility());
+        sunscale.mul(sunextinction);
         float maxsunweight = max(max(sunweight.x, sunweight.y), sunweight.z);
         if(maxsunweight > 127) sunweight.mul(127 / maxsunweight);
         sunweight.add(1e-4f);
@@ -788,7 +790,8 @@ namespace volumetricClouds
         vec sourcecolor(float(sunlight.x), float(sunlight.y), float(sunlight.z));
         vec phase(vcphaseg, vcphaseg2, vcphaseblend);
         vec4 multiscat(vcmultiscat, vcmultiscatext, vcmultiscatphase, float(vcmultiscatoctaves));
-        float colorscale = 2.0f * ldrscaleb * sunlightscale;
+        float eclipsevisibility = getsolareclipsevisibility();
+        float colorscale = 2.0f * ldrscaleb * sunlightscale * eclipsevisibility;
         if(valid && cacheddirection.x == sunlightdir.x && cacheddirection.y == sunlightdir.y && cacheddirection.z == sunlightdir.z &&
            cachedcolor.x == sourcecolor.x && cachedcolor.y == sourcecolor.y && cachedcolor.z == sourcecolor.z &&
            cachedphase.x == phase.x && cachedphase.y == phase.y && cachedphase.z == phase.z &&
@@ -854,7 +857,7 @@ namespace volumetricClouds
 
     static vec4 calcsilverscreenparams(const vec &sdir)
     {
-        if(vcsilverradius <= 0 || sunlight.iszero() || sunlightscale <= 1.0e-4f) return vec4(0, 0, 0, 0);
+        if(vcsilverradius <= 0 || sunlight.iszero() || sunlightscale*getsolareclipsevisibility() <= 1.0e-4f) return vec4(0, 0, 0, 0);
 
         vec sunpoint(camera1->o);
         sunpoint.madd(sdir, max(nearplane * 4.0f, 1.0f));

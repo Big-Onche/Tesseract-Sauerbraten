@@ -3196,7 +3196,10 @@ static inline void setlightglobals(bool transparent = false)
         else
         {
             GLOBALPARAM(sunlightdir, sunlightdir);
-            GLOBALPARAMF(sunlightcolor, sunlight.x*lightscale*sunlightscale, sunlight.y*lightscale*sunlightscale, sunlight.z*lightscale*sunlightscale);
+            float eclipsevisibility = getsolareclipsevisibility();
+            GLOBALPARAMF(sunlightcolor, sunlight.x*lightscale*sunlightscale*eclipsevisibility,
+                         sunlight.y*lightscale*sunlightscale*eclipsevisibility,
+                         sunlight.z*lightscale*sunlightscale*eclipsevisibility);
             GLOBALPARAMF(giscale, 2*giscale);
             GLOBALPARAMF(skylightcolor, 2*giaoscale*skylight.x*lightscale*skylightscale, 2*giaoscale*skylight.y*lightscale*skylightscale, 2*giaoscale*skylight.z*lightscale*skylightscale);
         }
