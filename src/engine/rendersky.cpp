@@ -8,6 +8,7 @@ extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlig
 extern bvec atmosunlight;
 
 static void cleanupAtmosphereDebugTimer();
+static void cleanupAtmosphereRenderTarget();
 static void cleanupAtmosphereTransmittanceLUT();
 
 namespace skyboxtint
@@ -685,6 +686,7 @@ void cleanupsky()
 {
     skyboxtint::valid = false;
     fogdome::cleanup();
+    cleanupAtmosphereRenderTarget();
     cleanupAtmosphereTransmittanceLUT();
     cleanupAtmosphereDebugTimer();
 }
@@ -718,6 +720,7 @@ VARP(debugatmo, 0, 0, 1);
 VARFP(atmoviewsteps, 1, 24, 64, reloadatmosphereshader());
 VARFP(atmosunsteps, 1, 8, 32, reloadatmosphereshader());
 VARFP(atmosunlut, 0, 2, 2, cleanupAtmosphereTransmittanceLUT()); // 0 = 64x64, 1 = 128x32, 2 = 128x64
+FVARP(atmoscale, 0.125f, 0.25f, 1.0f);
 FVARR(atmoplanetsize, 1e-3f, 1, 1e3f);
 FVARR(atmoheight, 1e-3f, 1, 1e3f);
 FVARR(atmobright, 0, 1, 16);
@@ -734,14 +737,17 @@ FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
-static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3;
-static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][2] = { { 0 } };
+static const int ATMOSPHERE_DEBUG_QUERY_COUNT = 3, ATMOSPHERE_DEBUG_TIMESTAMP_COUNT = 3;
+static GLuint atmosphereDebugQueries[ATMOSPHERE_DEBUG_QUERY_COUNT][ATMOSPHERE_DEBUG_TIMESTAMP_COUNT] = { { 0 } };
 static int atmosphereDebugQueryCycle = 0, atmosphereDebugQueryWaiting = 0, atmosphereDebugQueryActive = -1;
 static Uint64 atmosphereDebugCPUStart = 0;
-static float atmosphereDebugGPUMillis = -1.0f, atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
+static float atmosphereDebugGPUMillis = -1.0f, atmosphereDebugRaymarchGPUMillis = -1.0f, atmosphereDebugUpscaleGPUMillis = -1.0f,
+             atmosphereDebugCPUMillis = 0.0f, atmosphereLUTRebuildMillis = 0.0f;
 
 static GLuint atmosphereTransmittanceTex = 0, atmosphereTransmittanceFBO = 0;
 static int atmosphereTransmittanceWidth = 0, atmosphereTransmittanceHeight = 0;
+static GLuint atmosphereRenderTex = 0, atmosphereRenderFBO = 0;
+static int atmosphereRenderWidth = 0, atmosphereRenderHeight = 0;
 
 struct AtmosphereTransmittanceLUTCache
 {
@@ -860,6 +866,36 @@ static void updateAtmosphereTransmittanceLUT(float planetradius, float atmospher
     atmosphereLUTRebuildMillis = frequency ? float((SDL_GetPerformanceCounter() - start) * 1000.0 / frequency) : 0.0f;
 }
 
+static void cleanupAtmosphereRenderTarget()
+{
+    if(atmosphereRenderFBO) { glDeleteFramebuffers_(1, &atmosphereRenderFBO); atmosphereRenderFBO = 0; }
+    if(atmosphereRenderTex) { glDeleteTextures(1, &atmosphereRenderTex); atmosphereRenderTex = 0; }
+    atmosphereRenderWidth = atmosphereRenderHeight = 0;
+}
+
+static void ensureAtmosphereRenderTarget()
+{
+    int width = max(int(ceilf(vieww*atmoscale)), 1), height = max(int(ceilf(viewh*atmoscale)), 1);
+    if(atmosphereRenderTex && atmosphereRenderFBO && width == atmosphereRenderWidth && height == atmosphereRenderHeight) return;
+
+    cleanupAtmosphereRenderTarget();
+    atmosphereRenderWidth = width;
+    atmosphereRenderHeight = height;
+
+    GLint previousFBO = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFBO);
+    glActiveTexture_(GL_TEXTURE0);
+    glGenTextures(1, &atmosphereRenderTex);
+    createtexture(atmosphereRenderTex, width, height, NULL, 3, 1, hasAFBO && hasTF ? GL_RGBA16F : GL_RGBA8, GL_TEXTURE_RECTANGLE);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glGenFramebuffers_(1, &atmosphereRenderFBO);
+    glBindFramebuffer_(GL_FRAMEBUFFER, atmosphereRenderFBO);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, atmosphereRenderTex, 0);
+    if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fatal("Failed allocating atmosphere render target!");
+    glBindFramebuffer_(GL_FRAMEBUFFER, previousFBO);
+}
+
 static void pollAtmosphereDebugTimer()
 {
     if(!debugatmo || !atmosphereDebugQueries[0][0]) return;
@@ -867,13 +903,16 @@ static void pollAtmosphereDebugTimer()
     loopi(ATMOSPHERE_DEBUG_QUERY_COUNT) if(atmosphereDebugQueryWaiting & (1 << i))
     {
         GLint available = 0;
-        glGetQueryObjectiv_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+        glGetQueryObjectiv_(atmosphereDebugQueries[i][2], GL_QUERY_RESULT_AVAILABLE, &available);
         if(!available) continue;
 
-        GLuint64EXT start = 0, end = 0;
+        GLuint64EXT start = 0, split = 0, end = 0;
         glGetQueryObjectui64v_(atmosphereDebugQueries[i][0], GL_QUERY_RESULT, &start);
-        glGetQueryObjectui64v_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT, &end);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][1], GL_QUERY_RESULT, &split);
+        glGetQueryObjectui64v_(atmosphereDebugQueries[i][2], GL_QUERY_RESULT, &end);
         atmosphereDebugGPUMillis = end >= start ? float(end - start) * 1.0e-6f : 0.0f;
+        atmosphereDebugRaymarchGPUMillis = split >= start ? float(split - start) * 1.0e-6f : 0.0f;
+        atmosphereDebugUpscaleGPUMillis = end >= split ? float(end - split) * 1.0e-6f : 0.0f;
         atmosphereDebugQueryWaiting &= ~(1 << i);
     }
 }
@@ -889,20 +928,29 @@ static void beginAtmosphereDebugTimer()
     if(hasTQ && glQueryCounter_)
     {
         if(!atmosphereDebugQueries[0][0])
-            glGenQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * 2, &atmosphereDebugQueries[0][0]);
+            glGenQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * ATMOSPHERE_DEBUG_TIMESTAMP_COUNT, &atmosphereDebugQueries[0][0]);
         if(!(atmosphereDebugQueryWaiting & (1 << atmosphereDebugQueryCycle)))
-        {
             atmosphereDebugQueryActive = atmosphereDebugQueryCycle;
-            glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][0], GL_TIMESTAMP);
-        }
     }
+}
+
+static void beginAtmosphereRaymarchDebugTimer()
+{
+    if(atmosphereDebugQueryActive >= 0)
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][0], GL_TIMESTAMP);
+}
+
+static void endAtmosphereRaymarchDebugTimer()
+{
+    if(atmosphereDebugQueryActive >= 0)
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][1], GL_TIMESTAMP);
 }
 
 static void endAtmosphereDebugTimer()
 {
     if(atmosphereDebugQueryActive >= 0)
     {
-        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][1], GL_TIMESTAMP);
+        glQueryCounter_(atmosphereDebugQueries[atmosphereDebugQueryActive][2], GL_TIMESTAMP);
         atmosphereDebugQueryWaiting |= 1 << atmosphereDebugQueryActive;
         atmosphereDebugQueryCycle = (atmosphereDebugQueryActive + 1) % ATMOSPHERE_DEBUG_QUERY_COUNT;
         atmosphereDebugQueryActive = -1;
@@ -917,13 +965,16 @@ static void endAtmosphereDebugTimer()
 
 static void cleanupAtmosphereDebugTimer()
 {
-    if(atmosphereDebugQueries[0][0]) glDeleteQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * 2, &atmosphereDebugQueries[0][0]);
+    if(atmosphereDebugQueries[0][0])
+        glDeleteQueries_(ATMOSPHERE_DEBUG_QUERY_COUNT * ATMOSPHERE_DEBUG_TIMESTAMP_COUNT, &atmosphereDebugQueries[0][0]);
     memset(atmosphereDebugQueries, 0, sizeof(atmosphereDebugQueries));
     atmosphereDebugQueryCycle = 0;
     atmosphereDebugQueryWaiting = 0;
     atmosphereDebugQueryActive = -1;
     atmosphereDebugCPUStart = 0;
     atmosphereDebugGPUMillis = -1.0f;
+    atmosphereDebugRaymarchGPUMillis = -1.0f;
+    atmosphereDebugUpscaleGPUMillis = -1.0f;
     atmosphereDebugCPUMillis = 0.0f;
 }
 
@@ -938,6 +989,12 @@ void atmosphereDebugView()
     if(atmosphereDebugGPUMillis >= 0.0f) draw_textf("GPU total: %.2f ms", 0, y, atmosphereDebugGPUMillis);
     else draw_text("GPU total: n/a", 0, y);
     y += FONTH;
+    if(atmosphereDebugRaymarchGPUMillis >= 0.0f) draw_textf("GPU raymarch: %.2f ms", 0, y, atmosphereDebugRaymarchGPUMillis);
+    else draw_text("GPU raymarch: n/a", 0, y);
+    y += FONTH;
+    if(atmosphereDebugUpscaleGPUMillis >= 0.0f) draw_textf("GPU upscale/composite: %.2f ms", 0, y, atmosphereDebugUpscaleGPUMillis);
+    else draw_text("GPU upscale/composite: n/a", 0, y);
+    y += FONTH;
     draw_textf("CPU submit: %.2f ms", 0, y, atmosphereDebugCPUMillis);
     y += FONTH;
     draw_textf("View steps: %d", 0, y, atmoviewsteps);
@@ -948,9 +1005,9 @@ void atmosphereDebugView()
     getAtmosphereTransmittanceLUTSize(lutwidth, lutheight);
     draw_textf("Solar LUT: %d x %d RGB16F", 0, y, lutwidth, lutheight);
     y += FONTH;
-    draw_textf("Render resolution: %d x %d", 0, y, vieww, viewh);
+    draw_textf("Raymarch resolution: %d x %d", 0, y, atmosphereRenderWidth, atmosphereRenderHeight);
     y += FONTH;
-    draw_text("Scale: 1.00", 0, y);
+    draw_textf("Scale: %.2f", 0, y, atmoscale);
     y += FONTH;
     draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
 }
@@ -995,6 +1052,8 @@ static void drawnightsky(float alpha)
 
 static void drawatmosphere(float alpha = atmoalpha)
 {
+    ensureAtmosphereRenderTarget();
+
     // Hillaire's Earth atmosphere model, expressed in kilometres to retain
     // enough precision on older GLSL implementations. atmoheight scales the
     // whole vertical density profile while atmoplanetsize only changes the
@@ -1016,6 +1075,16 @@ static void drawatmosphere(float alpha = atmoalpha)
         betao = vec(0.000650f, 0.001881f, 0.000085f).mul(max(atmoozone, 0.0f));
     updateAtmosphereTransmittanceLUT(planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight,
                                     25.0f*atmoheight, inverseOzoneHalfWidth, betar, betamextinction, betao);
+
+    GLint previousFBO = 0, previousViewport[4];
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFBO);
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+    GLboolean blend = glIsEnabled(GL_BLEND), depthtest = glIsEnabled(GL_DEPTH_TEST), scissortest = glIsEnabled(GL_SCISSOR_TEST);
+    glBindFramebuffer_(GL_FRAMEBUFFER, atmosphereRenderFBO);
+    glViewport(0, 0, atmosphereRenderWidth, atmosphereRenderHeight);
+    if(blend) glDisable(GL_BLEND);
+    if(depthtest) glDisable(GL_DEPTH_TEST);
+    if(scissortest) glDisable(GL_SCISSOR_TEST);
 
     SETSHADER(atmosphere);
 
@@ -1056,6 +1125,29 @@ static void drawatmosphere(float alpha = atmoalpha)
     if(sundiskscale > 0) LOCALPARAMF(sundiskparams, 1.0f/(sundiskscale*sundiskscale), 1.0f/max(coronamu, 1e-3f));
     else LOCALPARAMF(sundiskparams, 0, 0);
 
+    beginAtmosphereRaymarchDebugTimer();
+    gle::defvertex();
+    gle::begin(GL_TRIANGLE_STRIP);
+    gle::attribf(-1, 1, 1);
+    gle::attribf(1, 1, 1);
+    gle::attribf(-1, -1, 1);
+    gle::attribf(1, -1, 1);
+    xtraverts += gle::end();
+    endAtmosphereRaymarchDebugTimer();
+
+    glBindFramebuffer_(GL_FRAMEBUFFER, previousFBO);
+    glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+    if(blend) glEnable(GL_BLEND);
+    if(depthtest) glEnable(GL_DEPTH_TEST);
+    if(scissortest) glEnable(GL_SCISSOR_TEST);
+
+    // The source already contains premultiplied radiance and destination
+    // transmittance. One bilinear sample reconstructs it; z=1 lets the existing
+    // sky depth test reject geometry without any depth-texture fetches.
+    SETSHADER(atmosphereupscale);
+    LOCALPARAMF(atmosphereupscalesize, float(atmosphereRenderWidth), float(atmosphereRenderHeight));
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_RECTANGLE, atmosphereRenderTex);
     gle::defvertex();
     gle::begin(GL_TRIANGLE_STRIP);
     gle::attribf(-1, 1, 1);
