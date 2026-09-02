@@ -22,16 +22,34 @@ namespace lensFlares
 
     static vector<queuedFlare> queuedFlares;
 
+    enum flareRejectStage
+    {
+        FLARE_REJECT_DISTANCE = 0,
+        FLARE_REJECT_MAX_DISTANCE,
+        FLARE_REJECT_CLIP,
+        FLARE_REJECT_SCREEN,
+        FLARE_REJECT_EDGE,
+        FLARE_REJECT_COLOR,
+        FLARE_REJECT_VISIBILITY,
+        FLARE_REJECT_RAYCAST,
+        FLARE_REJECT_HARD_CENTER,
+        FLARE_REJECT_COUNT
+    };
+
     struct flareProfile
     {
         Uint64 renderStart;
         float totalMillis, averageMillis;
         int queued, rendered, rejected;
         int queriesIssued, queriesResolved, queriesPending, fallbackHits;
+        int rejects[FLARE_REJECT_COUNT];
         bool sunQueued, sunRendered;
 
         flareProfile() : renderStart(0), totalMillis(0.0f), averageMillis(-1.0f), queued(0), rendered(0), rejected(0),
-                         queriesIssued(0), queriesResolved(0), queriesPending(0), fallbackHits(0), sunQueued(false), sunRendered(false) {}
+                         queriesIssued(0), queriesResolved(0), queriesPending(0), fallbackHits(0), sunQueued(false), sunRendered(false)
+        {
+            memset(rejects, 0, sizeof(rejects));
+        }
     };
 
     static flareProfile profile;
@@ -57,6 +75,7 @@ namespace lensFlares
         profile.queued = queuedFlares.length();
         profile.rendered = profile.rejected = 0;
         profile.queriesIssued = profile.queriesResolved = profile.queriesPending = profile.fallbackHits = 0;
+        memset(profile.rejects, 0, sizeof(profile.rejects));
         profile.sunQueued = profile.sunRendered = false;
     }
 
@@ -71,6 +90,11 @@ namespace lensFlares
         profile.rejected = max(profile.queued - profile.rendered, 0);
         profile.queriesPending = pendingQueryCount();
         profile.renderStart = 0;
+    }
+
+    static void recordReject(flareRejectStage stage)
+    {
+        if(debugflares) profile.rejects[stage]++;
     }
 
     struct occlusionQuery
@@ -642,43 +666,74 @@ namespace lensFlares
     {
         // Note: shouldRender() is intentionally not rechecked here.
         // addFlares() already gates on it, so queuedFlares is never populated when rendering is disabled.
-        if(isvisiblesphere(0.0f, source.o) > (source.unlimitedDistance ? VFC_FOGGED : VFC_FULL_VISIBLE)) return false;
-
         vec flaredir(source.o);
         flaredir.sub(camera1->o);
         float flareDistance = flaredir.magnitude();
-        if(flareDistance <= 1.0e-4f) return false;
-        flaredir.mul(1.0f / flareDistance);
+        if(!(flareDistance > 1.0e-4f) || flareDistance >= FLT_MAX)
+        {
+            recordReject(FLARE_REJECT_DISTANCE);
+            return false;
+        }
 
-        if(raycube(camera1->o, flaredir, flareDistance, RAY_CLIPMAT | RAY_POLY) < flareDistance - 0.25f) return false;
-
-        vec4 flareClip;
-        camprojmatrix.transform(source.o, flareClip);
-        if(flareClip.w <= 1.0e-4f || flareClip.z < -flareClip.w) return false;
-        centerDepth = clamp(flareClip.z / flareClip.w, -1.0f, 1.0f);
-
-        vec2 flareNdc(flareClip.x / flareClip.w, flareClip.y / flareClip.w);
-        if(fabsf(flareNdc.x) > 1.35f || fabsf(flareNdc.y) > 1.35f) return false;
-
-        float screenEdge = max(fabsf(flareNdc.x), fabsf(flareNdc.y));
-        float edgeFade = clamp(1.0f - max(screenEdge - 0.90f, 0.0f) / 0.40f, 0.0f, 1.0f);
         float distanceFade = 1.0f;
         if(!source.unlimitedDistance)
         {
             float maxDistance = max(float(source.maxDistance), 1.0f);
             distanceFade = clamp(1.0f - flareDistance / maxDistance, 0.0f, 1.0f);
-            if(distanceFade <= 1.0e-4f) return false;
+            if(distanceFade <= 1.0e-4f)
+            {
+                recordReject(FLARE_REJECT_MAX_DISTANCE);
+                return false;
+            }
         }
 
-        float screenFade = edgeFade * distanceFade;
-        if(screenFade <= 1.0e-4f) return false;
+        vec4 flareClip;
+        camprojmatrix.transform(source.o, flareClip);
+        if(flareClip.w <= 1.0e-4f || flareClip.z < -flareClip.w)
+        {
+            recordReject(FLARE_REJECT_CLIP);
+            return false;
+        }
+        centerDepth = clamp(flareClip.z / flareClip.w, -1.0f, 1.0f);
 
-        flareScreen = vec4(flareNdc.x * 0.5f + 0.5f, flareNdc.y * 0.5f + 0.5f, screenFade, max(sunflareshaftsize / 100.0f, 0.01f));
+        vec2 flareNdc(flareClip.x / flareClip.w, flareClip.y / flareClip.w);
+        if(fabsf(flareNdc.x) > 1.35f || fabsf(flareNdc.y) > 1.35f)
+        {
+            recordReject(FLARE_REJECT_SCREEN);
+            return false;
+        }
+
+        float screenEdge = max(fabsf(flareNdc.x), fabsf(flareNdc.y));
+        float edgeFade = clamp(1.0f - max(screenEdge - 0.90f, 0.0f) / 0.40f, 0.0f, 1.0f);
+        float screenFade = edgeFade * distanceFade;
+        if(screenFade <= 1.0e-4f)
+        {
+            recordReject(FLARE_REJECT_EDGE);
+            return false;
+        }
 
         vec baseColor(source.color.r / 255.0f, source.color.g / 255.0f, source.color.b / 255.0f);
         float colorMax = max(max(baseColor.x, baseColor.y), baseColor.z);
-        if(colorMax <= 1.0e-4f) return false;
+        if(colorMax <= 1.0e-4f)
+        {
+            recordReject(FLARE_REJECT_COLOR);
+            return false;
+        }
 
+        if(isvisiblesphere(0.0f, source.o) > (source.unlimitedDistance ? VFC_FOGGED : VFC_FULL_VISIBLE))
+        {
+            recordReject(FLARE_REJECT_VISIBILITY);
+            return false;
+        }
+
+        flaredir.mul(1.0f / flareDistance);
+        if(raycube(camera1->o, flaredir, flareDistance, RAY_CLIPMAT | RAY_POLY) < flareDistance - 0.25f)
+        {
+            recordReject(FLARE_REJECT_RAYCAST);
+            return false;
+        }
+
+        flareScreen = vec4(flareNdc.x * 0.5f + 0.5f, flareNdc.y * 0.5f + 0.5f, screenFade, max(sunflareshaftsize / 100.0f, 0.01f));
         flareColor = vec(baseColor).mul(1.0f / colorMax);
 
         float flareLuma = 0.2126f * baseColor.x + 0.7152f * baseColor.y + 0.0722f * baseColor.z;
@@ -787,12 +842,15 @@ namespace lensFlares
             vec flareColor;
             float ghostStrength = 0.0f;
             float centerDepth = 1.0f;
-            if(initFlare(queuedFlares[i], flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride, centerDepth) &&
-               hardCenterVisible(queuedFlares[i].o, false, flareScreen, centerDepth))
+            if(!initFlare(queuedFlares[i], flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride,
+                          centerDepth)) continue;
+            if(!hardCenterVisible(queuedFlares[i].o, false, flareScreen, centerDepth))
             {
-                drawFlare(flareShader, flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride);
-                if(debugflares) profile.rendered++;
+                recordReject(FLARE_REJECT_HARD_CENTER);
+                continue;
             }
+            drawFlare(flareShader, flareScreen, flareParams, flareColor, ghostStrength, layerWeights, visibilityOverride);
+            if(debugflares) profile.rendered++;
         }
 
         if(glBlendFuncSeparate_) glBlendFuncSeparate_(oldBlendSrcRGB, oldBlendDstRGB, oldBlendSrcAlpha, oldBlendDstAlpha);
@@ -826,5 +884,15 @@ namespace lensFlares
         draw_textf("queries issued/resolved: %d / %d", 0, y, profile.queriesIssued, profile.queriesResolved);
         y += FONTH;
         draw_textf("queries pending/fallbacks: %d / %d", 0, y, profile.queriesPending, profile.fallbackHits);
+        y += FONTH;
+        draw_textf("reject distance/max: %d / %d", 0, y, profile.rejects[FLARE_REJECT_DISTANCE], profile.rejects[FLARE_REJECT_MAX_DISTANCE]);
+        y += FONTH;
+        draw_textf("reject clip/screen/edge: %d / %d / %d", 0, y, profile.rejects[FLARE_REJECT_CLIP], profile.rejects[FLARE_REJECT_SCREEN],
+                   profile.rejects[FLARE_REJECT_EDGE]);
+        y += FONTH;
+        draw_textf("reject color/pvs/ray: %d / %d / %d", 0, y, profile.rejects[FLARE_REJECT_COLOR], profile.rejects[FLARE_REJECT_VISIBILITY],
+                   profile.rejects[FLARE_REJECT_RAYCAST]);
+        y += FONTH;
+        draw_textf("reject hard center: %d", 0, y, profile.rejects[FLARE_REJECT_HARD_CENTER]);
     }
 }
