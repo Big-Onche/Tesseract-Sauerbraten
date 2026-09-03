@@ -743,6 +743,7 @@ extern int skytexture, skyshadow, explicitsky;
 
 extern void drawskybox(bool clear = false);
 extern void atmosphereDebugView();
+extern void skyDebugView();
 extern bool hasskybox();
 extern bool limitsky();
 extern bool renderexplicitsky(bool outline = false);

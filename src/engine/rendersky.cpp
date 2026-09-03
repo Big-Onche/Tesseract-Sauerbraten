@@ -1,13 +1,14 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
-static Texture *nightsky = NULL, *atmosphereMoonTexture = NULL;
+static Texture *deepStarsTexture = NULL, *atmosphereMoonTexture = NULL;
 extern bvec skyboxcolour;
 extern int atmo;
 extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
 extern bvec atmosunlight;
 
 static void cleanupAtmosphereDebugTimer();
+static void cleanupDeepStarsDebugTimer();
 static void cleanupAtmosphereRenderTarget();
 static void cleanupAtmosphereTransmittanceLUT();
 
@@ -689,6 +690,7 @@ void cleanupsky()
     cleanupAtmosphereRenderTarget();
     cleanupAtmosphereTransmittanceLUT();
     cleanupAtmosphereDebugTimer();
+    cleanupDeepStarsDebugTimer();
 }
 
 void getskycubetints(vec colors[6], vec2 &front)
@@ -717,6 +719,7 @@ static void reloadatmosphereshader()
 
 VARR(atmo, 0, 0, 1);
 VARP(debugatmo, 0, 0, 1);
+VARP(debugsky, 0, 0, 1);
 VARFP(atmoviewsteps, 1, 24, 64, reloadatmosphereshader());
 VARFP(atmosunsteps, 1, 8, 32, reloadatmosphereshader());
 VARFP(atmosunlut, 0, 2, 2, cleanupAtmosphereTransmittanceLUT()); // 0 = 64x64, 1 = 128x32, 2 = 128x64
@@ -728,18 +731,24 @@ CVAR1R(atmosunlight, 0);
 FVARR(atmosunlightscale, 0, 1, 16);
 CVAR1R(atmosundisk, 0);
 FVARR(atmosundisksize, 0, 6, 90);
-FVARR(atmosundiskcorona, 0, 0.4f, 1);
-FVARR(atmosundiskbright, 0, 1, 16);
+FVARR(atmosundiskcorona, 0, 0.6f, 1);
+FVARR(atmosundiskbright, 0, 4, 16);
 VARR(atmomoon, 0, 0, 1);
 FVARR(atmomoonyaw, 0, 0, 360);
 FVARR(atmomoonpitch, -90, 45, 90);
-FVARR(atmomoonsize, 0, 5, 90);
+FVARR(atmomoonsize, 0, 5.75, 90);
 FVARR(atmohaze, 0, 0.1f, 16);
 FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
 FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
+
+FVARR(deepstarssize, 2, 24, 512);
+VARR(deepstarsseed, 0, 1337, 0xFFFFFF);
+FVARR(deepstarsbright, 0, 1, 16);
+VARR(deepstarsrotate, 0, 1, 1);
+VARR(deepstarsflip, 0, 1, 1);
 
 static vec getAtmosphereMoonDirection()
 {
@@ -1047,7 +1056,7 @@ void atmosphereDebugView()
     if(!debugatmo) return;
 
     pollAtmosphereDebugTimer();
-    int y = 0;
+    int y = debugsky ? 6*FONTH : 0;
     draw_text("Atmosphere", 0, y);
     y += FONTH;
     if(atmosphereDebugGPUMillis >= 0.0f) draw_textf("GPU total: %.2f ms", 0, y, atmosphereDebugGPUMillis);
@@ -1081,26 +1090,87 @@ void atmosphereDebugView()
     draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
 }
 
-static bool loadnightsky()
+static const int DEEP_STARS_DEBUG_QUERY_COUNT = 3;
+static GLuint deepStarsDebugQueries[DEEP_STARS_DEBUG_QUERY_COUNT][2] = { { 0 } };
+static int deepStarsDebugQueryCycle = 0, deepStarsDebugQueryWaiting = 0, deepStarsDebugQueryActive = -1;
+static float deepStarsDebugGPUMillis = -1.0f;
+static int deepStarsRenderedPatches = 0, deepStarsTilesPerFace = 0;
+
+static void pollDeepStarsDebugTimer()
 {
-    // Repeat around the horizon, but do not wrap the north/south poles together.
-    if(!nightsky) nightsky = textureload("packages/sky/night.jpg", 2, true, false);
-    return nightsky != notexture;
+    if(!debugsky || !deepStarsDebugQueries[0][0]) return;
+
+    loopi(DEEP_STARS_DEBUG_QUERY_COUNT) if(deepStarsDebugQueryWaiting & (1 << i))
+    {
+        GLint available = 0;
+        glGetQueryObjectiv_(deepStarsDebugQueries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+        if(!available) continue;
+
+        GLuint64EXT start = 0, end = 0;
+        glGetQueryObjectui64v_(deepStarsDebugQueries[i][0], GL_QUERY_RESULT, &start);
+        glGetQueryObjectui64v_(deepStarsDebugQueries[i][1], GL_QUERY_RESULT, &end);
+        deepStarsDebugGPUMillis = end >= start ? float(end - start)*1.0e-6f : 0.0f;
+        deepStarsDebugQueryWaiting &= ~(1 << i);
+    }
 }
 
-static void drawnightsky(float alpha)
+static void beginDeepStarsDebugTimer()
 {
-    if(!loadnightsky()) return;
+    deepStarsDebugQueryActive = -1;
+    if(!debugsky) return;
 
-    SETSHADER(nightsky);
+    pollDeepStarsDebugTimer();
+    if(hasTQ && glQueryCounter_)
+    {
+        if(!deepStarsDebugQueries[0][0]) glGenQueries_(DEEP_STARS_DEBUG_QUERY_COUNT*2, &deepStarsDebugQueries[0][0]);
+        if(!(deepStarsDebugQueryWaiting & (1 << deepStarsDebugQueryCycle)))
+        {
+            deepStarsDebugQueryActive = deepStarsDebugQueryCycle;
+            glQueryCounter_(deepStarsDebugQueries[deepStarsDebugQueryActive][0], GL_TIMESTAMP);
+        }
+    }
+}
 
-    matrix4 nightskymatrix = invcammatrix;
-    nightskymatrix.settranslation(0, 0, 0);
-    nightskymatrix.mul(invprojmatrix);
-    LOCALPARAM(nightskymatrix, nightskymatrix);
-    LOCALPARAMF(nightskyalpha, alpha);
+static void endDeepStarsDebugTimer()
+{
+    if(deepStarsDebugQueryActive < 0) return;
+    glQueryCounter_(deepStarsDebugQueries[deepStarsDebugQueryActive][1], GL_TIMESTAMP);
+    deepStarsDebugQueryWaiting |= 1 << deepStarsDebugQueryActive;
+    deepStarsDebugQueryCycle = (deepStarsDebugQueryActive + 1)%DEEP_STARS_DEBUG_QUERY_COUNT;
+    deepStarsDebugQueryActive = -1;
+}
 
-    glBindTexture(GL_TEXTURE_2D, nightsky->id);
+static void cleanupDeepStarsDebugTimer()
+{
+    if(deepStarsDebugQueries[0][0]) glDeleteQueries_(DEEP_STARS_DEBUG_QUERY_COUNT*2, &deepStarsDebugQueries[0][0]);
+    memset(deepStarsDebugQueries, 0, sizeof(deepStarsDebugQueries));
+    deepStarsDebugQueryCycle = 0;
+    deepStarsDebugQueryWaiting = 0;
+    deepStarsDebugQueryActive = -1;
+    deepStarsDebugGPUMillis = -1.0f;
+}
+
+static bool loadDeepStars()
+{
+    if(!deepStarsTexture) deepStarsTexture = textureload("packages/sky/deep_stars.png", 3, true, false);
+    return deepStarsTexture != notexture;
+}
+
+static void drawDeepStars(float alpha)
+{
+    if(!loadDeepStars()) return;
+
+    SETSHADER(deepstars);
+
+    matrix4 deepstarsmatrix = invcammatrix;
+    deepstarsmatrix.settranslation(0, 0, 0);
+    deepstarsmatrix.mul(invprojmatrix);
+    LOCALPARAM(deepstarsmatrix, deepstarsmatrix);
+    LOCALPARAMF(deepstarsparams, float(deepStarsTilesPerFace), float(deepstarsseed), deepstarsbright, alpha);
+    float angle = (spinsky*lastmillis/1000.0f + yawsky)*RAD;
+    LOCALPARAMF(deepstarsoptions, float(deepstarsrotate), float(deepstarsflip), cosf(angle), sinf(angle));
+
+    glBindTexture(GL_TEXTURE_2D, deepStarsTexture->id);
 
     if(alpha < 1)
     {
@@ -1108,6 +1178,7 @@ static void drawnightsky(float alpha)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     }
 
+    beginDeepStarsDebugTimer();
     gle::defvertex();
     gle::begin(GL_TRIANGLE_STRIP);
     gle::attribf(-1, 1, 1);
@@ -1115,8 +1186,32 @@ static void drawnightsky(float alpha)
     gle::attribf(-1, -1, 1);
     gle::attribf(1, -1, 1);
     xtraverts += gle::end();
+    endDeepStarsDebugTimer();
 
     if(alpha < 1) glDisable(GL_BLEND);
+}
+
+void skyDebugView()
+{
+    if(!debugsky) return;
+
+    pollDeepStarsDebugTimer();
+    int y = 0;
+    draw_text("Sky", 0, y);
+    y += FONTH;
+    if(deepStarsDebugGPUMillis >= 0.0f) draw_textf("Deep stars GPU: %.2f ms", 0, y, deepStarsDebugGPUMillis);
+    else draw_text("Deep stars GPU: n/a", 0, y);
+    y += FONTH;
+    draw_textf("Deep stars patches: %d (%d x %d per face)", 0, y, deepStarsRenderedPatches, deepStarsTilesPerFace, deepStarsTilesPerFace);
+    y += FONTH;
+    float patchsize = deepStarsTilesPerFace ? 90.0f/deepStarsTilesPerFace : deepstarssize;
+    draw_textf("Deep stars patch size: %.2f degrees", 0, y, patchsize);
+    y += FONTH;
+    if(deepStarsTexture && deepStarsTexture != notexture)
+        draw_textf("Deep stars texture: %d x %d", 0, y, deepStarsTexture->w, deepStarsTexture->h);
+    else draw_text("Deep stars texture: not loaded", 0, y);
+    y += FONTH;
+    draw_textf("Deep stars seed: %d", 0, y, deepstarsseed);
 }
 
 static bool calcAtmosphereCelestialScissor(const vec &direction, float angularsize, int &x, int &y, int &w, int &h)
@@ -1437,9 +1532,11 @@ bool limitsky()
 void drawskybox(bool clear)
 {
     bool havefaces = haveskyfaces();
-    bool havenightsky = atmo && !havefaces && sunlightdir.z < 0 && loadnightsky();
+    bool havedeepstars = atmo && !havefaces && sunlightdir.z < 0 && loadDeepStars();
+    deepStarsTilesPerFace = max(int(ceilf(90.0f/deepstarssize)), 1);
+    deepStarsRenderedPatches = havedeepstars ? 6*deepStarsTilesPerFace*deepStarsTilesPerFace : 0;
     bool havemoon = atmo && atmomoon && atmoalpha > 0.0f && atmomoonsize > 0.0f;
-    float nightfade = havenightsky ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
+    float nightfade = havedeepstars ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
     nightfade *= nightfade*(3.0f - 2.0f*nightfade);
     bool limited = false;
     if(limitsky()) for(vtxarray *va = visibleva; va; va = va->next)
@@ -1467,9 +1564,9 @@ void drawskybox(bool clear)
     // A partially faded night texture needs a deterministic background before
     // the atmosphere transmits it. The ordinary opaque daytime atmosphere does
     // not: it deliberately overwrites stale HDR sky pixels below.
-    if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havenightsky && nightfade < 1))))
+    if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havedeepstars && nightfade < 1))))
     {
-        bool moononlyclear = havemoon && !havefaces && !havenightsky && atmoalpha >= 1.0f;
+        bool moononlyclear = havemoon && !havefaces && !havedeepstars && atmoalpha >= 1.0f;
         vec skyboxcolor = moononlyclear ? vec(0) : skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -1495,7 +1592,7 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
-    if(havenightsky) drawnightsky(nightfade);
+    if(havedeepstars) drawDeepStars(nightfade);
 
     if(atmo && (!havefaces || atmoalpha < 1))
     {
@@ -1505,7 +1602,7 @@ void drawskybox(bool clear)
         // Only use destination-transmittance blending when a valid background
         // was drawn this frame. With no skybox/night backdrop the HDR target can
         // contain last frame's clouds, so blending would create temporal trails.
-        bool blendatmosphere = havefaces || havenightsky || havemoon || atmoalpha < 1;
+        bool blendatmosphere = havefaces || havedeepstars || havemoon || atmoalpha < 1;
         if(blendatmosphere)
         {
             glEnable(GL_BLEND);

@@ -2910,6 +2910,7 @@ void gl_drawhud()
     pophudmatrix();
 
     drawcrosshair(w, h);
+    skyDebugView();
     atmosphereDebugView();
     lensFlares::debugview();
 
