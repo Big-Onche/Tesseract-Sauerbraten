@@ -744,6 +744,12 @@ FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
 FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
+FVARR(atmotwilightmie, 0, 1.75f, 4);
+FVARR(atmotwilightrayleigh, 0, 1, 4);
+FVARR(atmotwilightantisolar, 0, 0.18f, 1);
+FVARR(atmotwilightgrazing, 0.1f, 0.5f, 4);
+FVARR(atmotwilightgreen, 0, 0.75f, 4);
+FVARR(atmotwilightambient, 0, 1.5f, 4);
 FVARR(atmocelestialcontrast, 0, 512, 1024);
 FVARR(atmocelestialminvisibility, 0, 0.15f, 1);
 FVARR(atmoalpha, 0, 1, 1);
@@ -1947,6 +1953,10 @@ static void drawatmosphere(float alpha = atmoalpha)
         betam = vec(0.003996f, 0.003996f, 0.003996f).mul(mieamount),
         betamextinction = vec(0.008396f, 0.008396f, 0.008396f).mul(mieamount),
         betao = vec(0.000650f, 0.001881f, 0.000085f).mul(max(atmoozone, 0.0f));
+    // Strengthen the green-band ozone extinction. Its small vertical effect is
+    // amplified naturally along grazing solar paths, where the unwanted
+    // yellow-green twilight cast occurs.
+    betao.y *= 1.0f + max(atmotwilightgreen, 0.0f);
     updateAtmosphereTransmittanceLUT(planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight,
                                     25.0f*atmoheight, inverseOzoneHalfWidth, betar, betamextinction, betao);
 
@@ -1970,6 +1980,9 @@ static void drawatmosphere(float alpha = atmoalpha)
     LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, inverseOzoneHalfWidth, clamp(atmomultiscatter, 0.0f, 2.0f),
                 clamp(atmomieanisotropy, -0.99f, 0.99f));
     LOCALPARAMF(atmospherecontrastparams, atmocelestialcontrast, atmocelestialminvisibility);
+    LOCALPARAMF(atmospheretwilightparams, atmotwilightmie, atmotwilightrayleigh, atmotwilightantisolar,
+                atmotwilightgrazing*RAD);
+    LOCALPARAMF(atmospheretwilightambient, atmotwilightambient);
     LOCALPARAM(betarayleigh, betar);
     LOCALPARAM(betamie, betam);
     LOCALPARAM(mieextinction, betamextinction);
