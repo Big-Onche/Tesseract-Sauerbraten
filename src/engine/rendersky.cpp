@@ -9,6 +9,7 @@ extern bvec atmosunlight;
 
 static void cleanupAtmosphereDebugTimer();
 static void cleanupDeepStarsDebugTimer();
+static void cleanupRealStars();
 static void cleanupAtmosphereRenderTarget();
 static void cleanupAtmosphereTransmittanceLUT();
 
@@ -691,6 +692,7 @@ void cleanupsky()
     cleanupAtmosphereTransmittanceLUT();
     cleanupAtmosphereDebugTimer();
     cleanupDeepStarsDebugTimer();
+    cleanupRealStars();
 }
 
 void getskycubetints(vec colors[6], vec2 &front)
@@ -746,9 +748,63 @@ FVARR(atmoalpha, 0, 1, 1);
 
 FVARR(deepstarssize, 2, 24, 512);
 VARR(deepstarsseed, 0, 1337, 0xFFFFFF);
-FVARR(deepstarsbright, 0, 1, 16);
+FVARR(deepstarsbright, 0, 0.75, 16);
 VARR(deepstarsrotate, 0, 1, 1);
 VARR(deepstarsflip, 0, 1, 1);
+VARR(realstars, 0, 1, 1);
+FVARR(realstarsbright, 0, 12, 16);
+FVARR(realstarssize, 0.5f, 3.0f, 8);
+FVARR(realstarstwinkle, 0, 4, 8);
+FVARR(realstarstwinklespeed, 0, 12, 32);
+FVARR(realstarsmaglimit, -2, 5, 8);
+FVARR(starskylatitude, -90, 45, 90);
+FVARR(starskyoffset, -360, 0, 360);
+
+struct RealStarVertex
+{
+    vec direction;
+    bvec4 color;
+    vec2 params;
+
+    RealStarVertex(const vec &direction, const bvec4 &color, float magnitude, float seed)
+        : direction(direction), color(color), params(magnitude, seed)
+    {
+    }
+};
+
+static vector<RealStarVertex> realStarCatalog;
+static GLuint realStarsVBO = 0;
+static bool realStarsCatalogLoaded = false, realStarsCatalogLoading = false;
+
+static void addRealStar(int id, const char *constellation, float rightascension, float declination, float magnitude, float red, float green,
+                        float blue, int seed)
+{
+    if(!realStarsCatalogLoading || !constellation || !constellation[0]) return;
+    float ra = rightascension*15.0f*RAD, dec = declination*RAD, cosdec = cosf(dec);
+    vec direction(cosdec*cosf(ra), cosdec*sinf(ra), sinf(dec));
+    bvec4 color(uchar(clamp(int(red*255.0f + 0.5f), 0, 255)), uchar(clamp(int(green*255.0f + 0.5f), 0, 255)),
+                uchar(clamp(int(blue*255.0f + 0.5f), 0, 255)), 255);
+    float phase = float(seed ? seed : id & 0xFFFF)/65535.0f;
+    realStarCatalog.add(RealStarVertex(direction, color, magnitude, phase));
+}
+
+ICOMMAND(realstar, "isffffffi", (int *id, char *constellation, float *rightascension, float *declination, float *magnitude, float *red,
+                                  float *green, float *blue, int *seed),
+{
+    addRealStar(*id, constellation, *rightascension, *declination, *magnitude, *red, *green, *blue, *seed);
+});
+
+static void getCelestialTransforms(matrix3 &worldFromEquatorial, matrix3 *equatorialFromWorld = NULL)
+{
+    float latitude = starskylatitude*RAD;
+    float localSiderealAngle = (180.0f + starskyoffset + spinsky*lastmillis/1000.0f)*RAD;
+    float sinLatitude = sinf(latitude), cosLatitude = cosf(latitude);
+    float sinSidereal = sinf(localSiderealAngle), cosSidereal = cosf(localSiderealAngle);
+    worldFromEquatorial = matrix3(vec(-sinSidereal, -sinLatitude*cosSidereal, cosLatitude*cosSidereal),
+                                  vec(cosSidereal, -sinLatitude*sinSidereal, cosLatitude*sinSidereal),
+                                  vec(0, cosLatitude, sinLatitude));
+    if(equatorialFromWorld) equatorialFromWorld->transpose(worldFromEquatorial);
+}
 
 static vec getAtmosphereMoonDirection()
 {
@@ -1056,7 +1112,7 @@ void atmosphereDebugView()
     if(!debugatmo) return;
 
     pollAtmosphereDebugTimer();
-    int y = debugsky ? 6*FONTH : 0;
+    int y = debugsky ? 7*FONTH : 0;
     draw_text("Atmosphere", 0, y);
     y += FONTH;
     if(atmosphereDebugGPUMillis >= 0.0f) draw_textf("GPU total: %.2f ms", 0, y, atmosphereDebugGPUMillis);
@@ -1090,11 +1146,14 @@ void atmosphereDebugView()
     draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
 }
 
-static const int DEEP_STARS_DEBUG_QUERY_COUNT = 3;
+static const int DEEP_STARS_DEBUG_QUERY_COUNT = 3, REAL_STARS_DEBUG_QUERY_COUNT = 3;
 static GLuint deepStarsDebugQueries[DEEP_STARS_DEBUG_QUERY_COUNT][2] = { { 0 } };
 static int deepStarsDebugQueryCycle = 0, deepStarsDebugQueryWaiting = 0, deepStarsDebugQueryActive = -1;
 static float deepStarsDebugGPUMillis = -1.0f;
 static int deepStarsRenderedPatches = 0, deepStarsTilesPerFace = 0;
+static GLuint realStarsDebugQueries[REAL_STARS_DEBUG_QUERY_COUNT][2] = { { 0 } };
+static int realStarsDebugQueryCycle = 0, realStarsDebugQueryWaiting = 0, realStarsDebugQueryActive = -1;
+static float realStarsDebugGPUMillis = -1.0f;
 
 static void pollDeepStarsDebugTimer()
 {
@@ -1150,6 +1209,87 @@ static void cleanupDeepStarsDebugTimer()
     deepStarsDebugGPUMillis = -1.0f;
 }
 
+static void pollRealStarsDebugTimer()
+{
+    if(!debugsky || !realStarsDebugQueries[0][0]) return;
+
+    loopi(REAL_STARS_DEBUG_QUERY_COUNT) if(realStarsDebugQueryWaiting & (1 << i))
+    {
+        GLint available = 0;
+        glGetQueryObjectiv_(realStarsDebugQueries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+        if(!available) continue;
+
+        GLuint64EXT start = 0, end = 0;
+        glGetQueryObjectui64v_(realStarsDebugQueries[i][0], GL_QUERY_RESULT, &start);
+        glGetQueryObjectui64v_(realStarsDebugQueries[i][1], GL_QUERY_RESULT, &end);
+        realStarsDebugGPUMillis = end >= start ? float(end - start)*1.0e-6f : 0.0f;
+        realStarsDebugQueryWaiting &= ~(1 << i);
+    }
+}
+
+static void beginRealStarsDebugTimer()
+{
+    realStarsDebugQueryActive = -1;
+    if(!debugsky) return;
+
+    pollRealStarsDebugTimer();
+    if(hasTQ && glQueryCounter_)
+    {
+        if(!realStarsDebugQueries[0][0]) glGenQueries_(REAL_STARS_DEBUG_QUERY_COUNT*2, &realStarsDebugQueries[0][0]);
+        if(!(realStarsDebugQueryWaiting & (1 << realStarsDebugQueryCycle)))
+        {
+            realStarsDebugQueryActive = realStarsDebugQueryCycle;
+            glQueryCounter_(realStarsDebugQueries[realStarsDebugQueryActive][0], GL_TIMESTAMP);
+        }
+    }
+}
+
+static void endRealStarsDebugTimer()
+{
+    if(realStarsDebugQueryActive < 0) return;
+    glQueryCounter_(realStarsDebugQueries[realStarsDebugQueryActive][1], GL_TIMESTAMP);
+    realStarsDebugQueryWaiting |= 1 << realStarsDebugQueryActive;
+    realStarsDebugQueryCycle = (realStarsDebugQueryActive + 1)%REAL_STARS_DEBUG_QUERY_COUNT;
+    realStarsDebugQueryActive = -1;
+}
+
+static void cleanupRealStarsDebugTimer()
+{
+    if(realStarsDebugQueries[0][0]) glDeleteQueries_(REAL_STARS_DEBUG_QUERY_COUNT*2, &realStarsDebugQueries[0][0]);
+    memset(realStarsDebugQueries, 0, sizeof(realStarsDebugQueries));
+    realStarsDebugQueryCycle = 0;
+    realStarsDebugQueryWaiting = 0;
+    realStarsDebugQueryActive = -1;
+    realStarsDebugGPUMillis = -1.0f;
+}
+
+static bool ensureRealStars()
+{
+    if(!realStarsCatalogLoaded)
+    {
+        realStarsCatalogLoading = true;
+        realStarCatalog.setsize(0);
+        execfile("config/sky.cfg", false);
+        realStarsCatalogLoading = false;
+        realStarsCatalogLoaded = true;
+    }
+    if(!realStarCatalog.length()) return false;
+    if(!realStarsVBO)
+    {
+        glGenBuffers_(1, &realStarsVBO);
+        gle::bindvbo(realStarsVBO);
+        glBufferData_(GL_ARRAY_BUFFER, realStarCatalog.length()*sizeof(RealStarVertex), realStarCatalog.getbuf(), GL_STATIC_DRAW);
+        gle::clearvbo();
+    }
+    return true;
+}
+
+static void cleanupRealStars()
+{
+    if(realStarsVBO) { glDeleteBuffers_(1, &realStarsVBO); realStarsVBO = 0; }
+    cleanupRealStarsDebugTimer();
+}
+
 static bool loadDeepStars()
 {
     if(!deepStarsTexture) deepStarsTexture = textureload("packages/sky/deep_stars.png", 3, true, false);
@@ -1166,9 +1306,11 @@ static void drawDeepStars(float alpha)
     deepstarsmatrix.settranslation(0, 0, 0);
     deepstarsmatrix.mul(invprojmatrix);
     LOCALPARAM(deepstarsmatrix, deepstarsmatrix);
+    matrix3 worldFromEquatorial, equatorialFromWorld;
+    getCelestialTransforms(worldFromEquatorial, &equatorialFromWorld);
+    LOCALPARAM(deepstarsrotation, equatorialFromWorld);
     LOCALPARAMF(deepstarsparams, float(deepStarsTilesPerFace), float(deepstarsseed), deepstarsbright, alpha);
-    float angle = (spinsky*lastmillis/1000.0f + yawsky)*RAD;
-    LOCALPARAMF(deepstarsoptions, float(deepstarsrotate), float(deepstarsflip), cosf(angle), sinf(angle));
+    LOCALPARAMF(deepstarsoptions, float(deepstarsrotate), float(deepstarsflip));
 
     glBindTexture(GL_TEXTURE_2D, deepStarsTexture->id);
 
@@ -1191,16 +1333,73 @@ static void drawDeepStars(float alpha)
     if(alpha < 1) glDisable(GL_BLEND);
 }
 
+static void drawRealStars(float nightfade)
+{
+    if(!realstars || nightfade <= 0.0f || !ensureRealStars()) return;
+
+    SETSHADER(realstars);
+    matrix3 worldFromEquatorial;
+    getCelestialTransforms(worldFromEquatorial);
+    matrix4 realstarsmatrix = cammatrix;
+    realstarsmatrix.settranslation(0, 0, 0);
+    realstarsmatrix.mul(worldFromEquatorial);
+    matrix4 projected;
+    projected.mul(projmatrix, realstarsmatrix);
+    LOCALPARAM(realstarsmatrix, projected);
+    LOCALPARAM(realstarsworld, worldFromEquatorial);
+    const float referenceFov = 100.0f;
+    float fovscale = clamp(tanf(0.5f*referenceFov*RAD)/max(tanf(0.5f*curfov*RAD), 1.0e-4f), 0.25f, 8.0f);
+    LOCALPARAMF(realstarsparams, realstarsbright*ldrscale, realstarssize*fovscale, realstarsmaglimit, nightfade);
+    bool havetransmittance = atmosphereTransmittanceTex && atmosphereTransmittanceWidth > 0 && atmosphereTransmittanceHeight > 0;
+    LOCALPARAMF(realstarstwinkleparams, realstarstwinkle, realstarstwinklespeed, lastmillis/1000.0f, havetransmittance ? 1.0f : 0.0f);
+    if(havetransmittance)
+        LOCALPARAMF(atmospherelutparams, float(atmosphereTransmittanceWidth - 1)/atmosphereTransmittanceWidth,
+                    float(atmosphereTransmittanceHeight - 1)/atmosphereTransmittanceHeight, 0.5f/atmosphereTransmittanceWidth,
+                    0.5f/atmosphereTransmittanceHeight);
+    else LOCALPARAMF(atmospherelutparams, 1.0f, 1.0f, 0.0f, 0.0f);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, havetransmittance ? atmosphereTransmittanceTex : notexture->id);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    GLboolean programpointsize = glIsEnabled(GL_PROGRAM_POINT_SIZE);
+    if(!programpointsize) glEnable(GL_PROGRAM_POINT_SIZE);
+
+    gle::bindvbo(realStarsVBO);
+    const RealStarVertex *star = 0;
+    glVertexAttribPointer_(gle::ATTRIB_VERTEX, 3, GL_FLOAT, GL_FALSE, sizeof(RealStarVertex), star->direction.v);
+    glVertexAttribPointer_(gle::ATTRIB_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(RealStarVertex), star->color.v);
+    glVertexAttribPointer_(gle::ATTRIB_TEXCOORD0, 2, GL_FLOAT, GL_FALSE, sizeof(RealStarVertex), star->params.v);
+    glEnableVertexAttribArray_(gle::ATTRIB_VERTEX);
+    glEnableVertexAttribArray_(gle::ATTRIB_COLOR);
+    glEnableVertexAttribArray_(gle::ATTRIB_TEXCOORD0);
+    beginRealStarsDebugTimer();
+    glDrawArrays(GL_POINTS, 0, realStarCatalog.length());
+    endRealStarsDebugTimer();
+    xtraverts += realStarCatalog.length();
+    glDisableVertexAttribArray_(gle::ATTRIB_VERTEX);
+    glDisableVertexAttribArray_(gle::ATTRIB_COLOR);
+    glDisableVertexAttribArray_(gle::ATTRIB_TEXCOORD0);
+    gle::clearvbo();
+
+    if(!programpointsize) glDisable(GL_PROGRAM_POINT_SIZE);
+    glDisable(GL_BLEND);
+}
+
 void skyDebugView()
 {
     if(!debugsky) return;
 
     pollDeepStarsDebugTimer();
+    pollRealStarsDebugTimer();
     int y = 0;
     draw_text("Sky", 0, y);
     y += FONTH;
     if(deepStarsDebugGPUMillis >= 0.0f) draw_textf("Deep stars GPU: %.2f ms", 0, y, deepStarsDebugGPUMillis);
     else draw_text("Deep stars GPU: n/a", 0, y);
+    y += FONTH;
+    if(realStarsDebugGPUMillis >= 0.0f) draw_textf("Real stars GPU: %.2f ms", 0, y, realStarsDebugGPUMillis);
+    else draw_text("Real stars GPU: n/a", 0, y);
     y += FONTH;
     draw_textf("Deep stars patches: %d (%d x %d per face)", 0, y, deepStarsRenderedPatches, deepStarsTilesPerFace, deepStarsTilesPerFace);
     y += FONTH;
@@ -1592,7 +1791,11 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
-    if(havedeepstars) drawDeepStars(nightfade);
+    if(havedeepstars)
+    {
+        drawDeepStars(nightfade);
+        drawRealStars(nightfade);
+    }
 
     if(atmo && (!havefaces || atmoalpha < 1))
     {
