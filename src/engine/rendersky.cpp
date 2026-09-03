@@ -764,12 +764,12 @@ FVAR(realstarsmaglimit, -2, 5, 8);
 
 // milky way rendering
 VARR(milkyway, 0, 1, 1);
-FVARR(milkywaybright, 0, 0.25f, 16);
+FVARR(milkywaybright, 0, 0.3f, 16);
 FVARR(milkywaysaturation, 0, 4, 8);
 FVARR(milkywaywidth, 5, 90, 180);
 FVARR(milkywaydetail, 0, 2, 4);
-FVARR(milkywaydust, 0, 0.3f, 2);
-FVARR(milkywaycore, 0, 1, 8);
+FVARR(milkywaydust, 0, 0.6f, 1);
+FVARR(milkywaycore, 0, 0.4f, 2);
 FVARR(milkywaycorewarmth, 0, 0.5f, 2);
 VARR(milkywaystars, 0, 1, 1);
 FVARR(milkywaystarsbright, 0, 1, 16);
