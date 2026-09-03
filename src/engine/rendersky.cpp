@@ -1836,7 +1836,7 @@ static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &directi
     if(alpha <= 0.0f || sundiskscale <= 0.0f || atmosundiskbright <= 0.0f) return;
 
     extern float hdrgamma;
-    vec diskcolor = vec(!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).mul(ldrscale).pow(hdrgamma).mul(atmosundiskbright*4);
+    vec diskcolor = vec(!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).pow(hdrgamma).mul(ldrscale).mul(atmosundiskbright*4);
     float coshalf = sqrtf(max(1.0f - sundiskscale*sundiskscale, 0.0f)), horizontal = sqrtf(max(1.0f - direction.z*direction.z, 0.0f));
     if(diskcolor.iszero() || direction.z*coshalf + horizontal*sundiskscale <= 0.0f) return;
 
@@ -1892,6 +1892,8 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundir
     daylight *= clamp(atmobright*alpha, 0.0f, 1.0f);
     float apparentbrightness = 1.4f + (0.18f - 1.4f)*daylight, earthshine = 0.012f*(1.0f - daylight);
     vec moonlightcolor = suncolor;
+    extern float hdrgamma;
+    moonlightcolor.pow(hdrgamma);
     float maxsuncolor = max(max(moonlightcolor.x, moonlightcolor.y), moonlightcolor.z);
     if(maxsuncolor > 1.0e-4f) moonlightcolor.mul(1.0f/maxsuncolor);
     else moonlightcolor = vec(1);
@@ -1980,7 +1982,7 @@ static void drawatmosphere(float alpha = atmoalpha)
 
     vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale) : sunlight.tocolor().mul(sunlightscale);
     extern float hdrgamma;
-    vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16);
+    vec sunscale = vec(suncolor).pow(hdrgamma).mul(ldrscale).mul(atmobright * 16);
     vec normalizedsundir = sunlightdir;
     if(normalizedsundir.squaredlen() > 1e-8f) normalizedsundir.normalize();
     else normalizedsundir = vec(0, 0, 1);
