@@ -769,6 +769,12 @@ FVARR(milkywaydetail, 0, 2, 4);
 FVARR(milkywaydust, 0, 0.3f, 2);
 FVARR(milkywaycore, 0, 1, 8);
 FVARR(milkywaycorewarmth, 0, 0.5f, 2);
+VARR(milkywaystars, 0, 1, 1);
+FVARR(milkywaystarsbright, 0, 1, 16);
+FVARR(milkywaystarsdensity, 0, 6, 16);
+FVARR(milkywaystarssize, 0.25f, 0.75f, 6);
+FVARR(milkywaystarsmaskpower, 0.25f, 1.5f, 4);
+VARR(milkywaystarsseed, 0, 420, 0xFFFFFF);
 
 // fake stars filling the sky
 FVARR(deepstarssize, 2, 24, 512);
@@ -1558,6 +1564,9 @@ static void drawMilkyWay(float nightfade)
     LOCALPARAM(milkywayrotation, galacticFromWorld);
     LOCALPARAMF(milkywayparams, milkywaybright*ldrscale, milkywaysaturation, 0.5f*milkywaywidth*RAD, milkywaydetail);
     LOCALPARAMF(milkywayparams2, milkywaydust, milkywaycore, milkywaycorewarmth, nightfade);
+    LOCALPARAMF(milkywaystarsparams, milkywaystars ? milkywaystarsbright*ldrscale : 0.0f, milkywaystarsdensity, milkywaystarssize,
+                milkywaystarsmaskpower);
+    LOCALPARAMF(milkywaystarseedparam, float(milkywaystarsseed));
 
     glActiveTexture_(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, milkyWayNoiseTexture->id);
