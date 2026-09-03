@@ -744,6 +744,8 @@ FVARR(atmodensity, 0, 1, 16);
 FVARR(atmoozone, 0, 1, 16);
 FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
+FVARR(atmocelestialcontrast, 0, 512, 1024);
+FVARR(atmocelestialminvisibility, 0, 0.15f, 1);
 FVARR(atmoalpha, 0, 1, 1);
 
 // global sky values
@@ -762,7 +764,7 @@ FVAR(realstarsmaglimit, -2, 5, 8);
 
 // milky way rendering
 VARR(milkyway, 0, 1, 1);
-FVARR(milkywaybright, 0, 0.3f, 16);
+FVARR(milkywaybright, 0, 0.25f, 16);
 FVARR(milkywaysaturation, 0, 4, 8);
 FVARR(milkywaywidth, 5, 90, 180);
 FVARR(milkywaydetail, 0, 2, 4);
@@ -1957,6 +1959,7 @@ static void drawatmosphere(float alpha = atmoalpha)
     LOCALPARAMF(atmosphereparams, planetradius, planetradius + atmosphereheight, inverseRayleighScaleHeight, inverseMieScaleHeight);
     LOCALPARAMF(atmosphereparams2, 25.0f*atmoheight, inverseOzoneHalfWidth, clamp(atmomultiscatter, 0.0f, 2.0f),
                 clamp(atmomieanisotropy, -0.99f, 0.99f));
+    LOCALPARAMF(atmospherecontrastparams, atmocelestialcontrast, atmocelestialminvisibility);
     LOCALPARAM(betarayleigh, betar);
     LOCALPARAM(betamie, betam);
     LOCALPARAM(mieextinction, betamextinction);
