@@ -1,7 +1,7 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
-static Texture *deepStarsTexture = NULL, *atmosphereMoonTexture = NULL;
+static Texture *deepStarsTexture = NULL, *milkyWayTexture = NULL, *milkyWayNoiseTexture = NULL, *atmosphereMoonTexture = NULL;
 extern bvec skyboxcolour;
 extern int atmo;
 extern float atmobright, atmohaze, atmodensity, atmoozone, atmoalpha, atmosunlightscale;
@@ -9,6 +9,7 @@ extern bvec atmosunlight;
 
 static void cleanupAtmosphereDebugTimer();
 static void cleanupDeepStarsDebugTimer();
+static void cleanupMilkyWayDebugTimer();
 static void cleanupRealStars();
 static void cleanupAtmosphereRenderTarget();
 static void cleanupAtmosphereTransmittanceLUT();
@@ -692,6 +693,7 @@ void cleanupsky()
     cleanupAtmosphereTransmittanceLUT();
     cleanupAtmosphereDebugTimer();
     cleanupDeepStarsDebugTimer();
+    cleanupMilkyWayDebugTimer();
     cleanupRealStars();
 }
 
@@ -744,25 +746,95 @@ FVARR(atmomultiscatter, 0, 1, 2);
 FVARR(atmomieanisotropy, -0.99f, 0.8f, 0.99f);
 FVARR(atmoalpha, 0, 1, 1);
 
+// global sky values
+FVAR(skyoffset, -360, 0, 360);
+FVARR(skylatitude, -90, 45, 90);
+FVARR(skydate, -365250, 0, 365250); // whole local-solar days since 2000-01-01
+FVARR(skytime, 0, 0, 24); // local solar hours; the fixed reference longitude is zero
+
+// real stars set in sky.cfg
+VARR(realstars, 0, 1, 1);
+FVAR(realstarsbright, 0, 12, 16);
+FVAR(realstarssize, 0.5f, 3.0f, 8);
+FVAR(realstarstwinkle, 0, 4, 8);
+FVAR(realstarstwinklespeed, 0, 16, 32);
+FVAR(realstarsmaglimit, -2, 5, 8);
+
+// milky way rendering
+VARR(milkyway, 0, 1, 1);
+FVARR(milkywaybright, 0, 0.3f, 16);
+FVARR(milkywaysaturation, 0, 4, 8);
+FVARR(milkywaywidth, 5, 90, 180);
+FVARR(milkywaydetail, 0, 2, 4);
+FVARR(milkywaydust, 0, 0.3f, 2);
+FVARR(milkywaycore, 0, 1, 8);
+FVARR(milkywaycorewarmth, 0, 0.5f, 2);
+
+// fake stars filling the sky
 FVARR(deepstarssize, 2, 24, 512);
 VARR(deepstarsseed, 0, 1337, 0xFFFFFF);
 FVARR(deepstarsbright, 0, 0.75, 16);
 VARR(deepstarsrotate, 0, 1, 1);
 VARR(deepstarsflip, 0, 1, 1);
 
-VARR(realstars, 0, 1, 1);
-
-FVAR(realstarsbright, 0, 12, 16);
-FVAR(realstarssize, 0.5f, 3.0f, 8);
-FVAR(realstarstwinkle, 0, 4, 8);
-FVAR(realstarstwinklespeed, 0, 16, 32);
-FVAR(realstarsmaglimit, -2, 5, 8);
-FVAR(starskylatitude, -90, 45, 90);
-FVAR(starskyoffset, -360, 0, 360);
-
+// debug
 VAR(debugatmo, 0, 0, 1);
 VAR(debugsky, 0, 0, 1);
 VAR(showconstellations, 0, 0, 1);
+
+static bool isSkyCalendarLeapYear(int year)
+{
+    return year%4 == 0 && (year%100 != 0 || year%400 == 0);
+}
+
+static int getSkyCalendarMonthDays(int month, int year)
+{
+    static const int monthdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if(month < 1 || month > 12) return 0;
+    return month == 2 && isSkyCalendarLeapYear(year) ? 29 : monthdays[month - 1];
+}
+
+static bool isValidSkyCalendarDate(int day, int month, int year)
+{
+    return year >= 1000 && year <= 2999 && day >= 1 && day <= getSkyCalendarMonthDays(month, year);
+}
+
+static int skyCalendarDateToOffset(int day, int month, int year)
+{
+    // Fliegel-Van Flandern Gregorian calendar-to-Julian-day conversion.
+    int a = (14 - month)/12, y = year + 4800 - a, m = month + 12*a - 3;
+    int julianday = day + (153*m + 2)/5 + 365*y + y/4 - y/100 + y/400 - 32045;
+    return julianday - 2451545;
+}
+
+static void skyCalendarOffsetToDate(int offset, int &day, int &month, int &year)
+{
+    int l = clamp(offset, -365250, 365250) + 2451545 + 68569;
+    int n = 4*l/146097;
+    l -= (146097*n + 3)/4;
+    int i = 4000*(l + 1)/1461001;
+    l = l - 1461*i/4 + 31;
+    int j = 80*l/2447;
+    day = l - 2447*j/80;
+    l = j/11;
+    month = j + 2 - 12*l;
+    year = 100*(n - 49) + i + l;
+}
+
+ICOMMAND(skydatevalid, "iii", (int *day, int *month, int *year), intret(isValidSkyCalendarDate(*day, *month, *year) ? 1 : 0));
+ICOMMAND(skymonthdays, "ii", (int *month, int *year), intret(getSkyCalendarMonthDays(*month, *year)));
+ICOMMAND(skydatefromcalendar, "iii", (int *day, int *month, int *year),
+{
+    intret(isValidSkyCalendarDate(*day, *month, *year) ? skyCalendarDateToOffset(*day, *month, *year) : 0);
+});
+ICOMMAND(skydatecalendar, "i", (int *offset),
+{
+    int day;
+    int month;
+    int year;
+    skyCalendarOffsetToDate(*offset, day, month, year);
+    result(tempformatstring("%d %d %d", day, month, year));
+});
 
 struct RealStarVertex
 {
@@ -811,16 +883,48 @@ ICOMMAND(constellationline, "ii", (int *first, int *second),
     if(realStarsCatalogLoading && *first != *second) constellationCatalog.add(ConstellationSegment(*first, *second));
 });
 
+static float getLocalSiderealDegrees()
+{
+    // IAU-compatible Greenwich mean sidereal angle at J2000. skydate is an
+    // integer civil-date offset, while skytime and spinsky provide the daily
+    // local-solar/game-time rotation without any fragment-shader trigonometry.
+    float angle = 280.46061837f + 0.98564736629f*skydate + 15.04106864f*(skytime - 12.0f) + spinsky*lastmillis/1000.0f + skyoffset;
+    angle = fmodf(angle, 360.0f);
+    return angle < 0.0f ? angle + 360.0f : angle;
+}
+
+static void getDeepStarsTransforms(matrix3 &worldFromEquatorial, matrix3 *equatorialFromWorld = NULL)
+{
+    float latitude = skylatitude*RAD;
+    float localSiderealAngle = (180.0f + skyoffset + spinsky*lastmillis/1000.0f)*RAD;
+    float sinLatitude = sinf(latitude), cosLatitude = cosf(latitude);
+    float sinSidereal = sinf(localSiderealAngle), cosSidereal = cosf(localSiderealAngle);
+    worldFromEquatorial = matrix3(vec(-sinSidereal, -sinLatitude*cosSidereal, cosLatitude*cosSidereal), vec(cosSidereal, -sinLatitude*sinSidereal, cosLatitude*sinSidereal), vec(0, cosLatitude, sinLatitude));
+    if(equatorialFromWorld) equatorialFromWorld->transpose(worldFromEquatorial);
+}
+
 static void getCelestialTransforms(matrix3 &worldFromEquatorial, matrix3 *equatorialFromWorld = NULL)
 {
-    float latitude = starskylatitude*RAD;
-    float localSiderealAngle = (180.0f + starskyoffset + spinsky*lastmillis/1000.0f)*RAD;
+    float latitude = skylatitude*RAD;
+    float localSiderealAngle = getLocalSiderealDegrees()*RAD;
     float sinLatitude = sinf(latitude), cosLatitude = cosf(latitude);
     float sinSidereal = sinf(localSiderealAngle), cosSidereal = cosf(localSiderealAngle);
     worldFromEquatorial = matrix3(vec(-sinSidereal, -sinLatitude*cosSidereal, cosLatitude*cosSidereal),
                                   vec(cosSidereal, -sinLatitude*sinSidereal, cosLatitude*sinSidereal),
                                   vec(0, cosLatitude, sinLatitude));
     if(equatorialFromWorld) equatorialFromWorld->transpose(worldFromEquatorial);
+}
+
+static void getGalacticFromWorld(matrix3 &galacticFromWorld)
+{
+    // Fixed IAU J2000 equatorial-to-galactic frame. +X is the Galactic Center,
+    // +Z is the North Galactic Pole (RA 192.8595, Dec +27.1283 degrees).
+    static const matrix3 galacticFromEquatorial(vec(-0.0548755604f, 0.4941094279f, -0.8676661490f),
+                                                 vec(-0.8734370902f, -0.4448296300f, -0.1980763734f),
+                                                 vec(-0.4838350155f, 0.7469822445f, 0.4559837762f));
+    matrix3 worldFromEquatorial, equatorialFromWorld;
+    getCelestialTransforms(worldFromEquatorial, &equatorialFromWorld);
+    galacticFromWorld.mul(galacticFromEquatorial, equatorialFromWorld);
 }
 
 static vec getAtmosphereMoonDirection()
@@ -1121,7 +1225,7 @@ void atmosphereDebugView()
     if(!debugatmo) return;
 
     pollAtmosphereDebugTimer();
-    int y = debugsky ? 7*FONTH : 0;
+    int y = debugsky ? 13*FONTH : 0;
     draw_text("Atmosphere", 0, y);
     y += FONTH;
     if(atmosphereDebugGPUMillis >= 0.0f) draw_textf("GPU total: %.2f ms", 0, y, atmosphereDebugGPUMillis);
@@ -1155,11 +1259,14 @@ void atmosphereDebugView()
     draw_textf("LUT rebuild: %.2f ms", 0, y, atmosphereLUTRebuildMillis);
 }
 
-static const int DEEP_STARS_DEBUG_QUERY_COUNT = 3, REAL_STARS_DEBUG_QUERY_COUNT = 3;
+static const int DEEP_STARS_DEBUG_QUERY_COUNT = 3, MILKY_WAY_DEBUG_QUERY_COUNT = 3, REAL_STARS_DEBUG_QUERY_COUNT = 3;
 static GLuint deepStarsDebugQueries[DEEP_STARS_DEBUG_QUERY_COUNT][2] = { { 0 } };
 static int deepStarsDebugQueryCycle = 0, deepStarsDebugQueryWaiting = 0, deepStarsDebugQueryActive = -1;
 static float deepStarsDebugGPUMillis = -1.0f;
 static int deepStarsRenderedPatches = 0, deepStarsTilesPerFace = 0;
+static GLuint milkyWayDebugQueries[MILKY_WAY_DEBUG_QUERY_COUNT][2] = { { 0 } };
+static int milkyWayDebugQueryCycle = 0, milkyWayDebugQueryWaiting = 0, milkyWayDebugQueryActive = -1;
+static float milkyWayDebugGPUMillis = -1.0f;
 static GLuint realStarsDebugQueries[REAL_STARS_DEBUG_QUERY_COUNT][2] = { { 0 } };
 static int realStarsDebugQueryCycle = 0, realStarsDebugQueryWaiting = 0, realStarsDebugQueryActive = -1;
 static float realStarsDebugGPUMillis = -1.0f;
@@ -1216,6 +1323,60 @@ static void cleanupDeepStarsDebugTimer()
     deepStarsDebugQueryWaiting = 0;
     deepStarsDebugQueryActive = -1;
     deepStarsDebugGPUMillis = -1.0f;
+}
+
+static void pollMilkyWayDebugTimer()
+{
+    if(!debugsky || !milkyWayDebugQueries[0][0]) return;
+
+    loopi(MILKY_WAY_DEBUG_QUERY_COUNT) if(milkyWayDebugQueryWaiting & (1 << i))
+    {
+        GLint available = 0;
+        glGetQueryObjectiv_(milkyWayDebugQueries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+        if(!available) continue;
+
+        GLuint64EXT start = 0, end = 0;
+        glGetQueryObjectui64v_(milkyWayDebugQueries[i][0], GL_QUERY_RESULT, &start);
+        glGetQueryObjectui64v_(milkyWayDebugQueries[i][1], GL_QUERY_RESULT, &end);
+        milkyWayDebugGPUMillis = end >= start ? float(end - start)*1.0e-6f : 0.0f;
+        milkyWayDebugQueryWaiting &= ~(1 << i);
+    }
+}
+
+static void beginMilkyWayDebugTimer()
+{
+    milkyWayDebugQueryActive = -1;
+    if(!debugsky) return;
+
+    pollMilkyWayDebugTimer();
+    if(hasTQ && glQueryCounter_)
+    {
+        if(!milkyWayDebugQueries[0][0]) glGenQueries_(MILKY_WAY_DEBUG_QUERY_COUNT*2, &milkyWayDebugQueries[0][0]);
+        if(!(milkyWayDebugQueryWaiting & (1 << milkyWayDebugQueryCycle)))
+        {
+            milkyWayDebugQueryActive = milkyWayDebugQueryCycle;
+            glQueryCounter_(milkyWayDebugQueries[milkyWayDebugQueryActive][0], GL_TIMESTAMP);
+        }
+    }
+}
+
+static void endMilkyWayDebugTimer()
+{
+    if(milkyWayDebugQueryActive < 0) return;
+    glQueryCounter_(milkyWayDebugQueries[milkyWayDebugQueryActive][1], GL_TIMESTAMP);
+    milkyWayDebugQueryWaiting |= 1 << milkyWayDebugQueryActive;
+    milkyWayDebugQueryCycle = (milkyWayDebugQueryActive + 1)%MILKY_WAY_DEBUG_QUERY_COUNT;
+    milkyWayDebugQueryActive = -1;
+}
+
+static void cleanupMilkyWayDebugTimer()
+{
+    if(milkyWayDebugQueries[0][0]) glDeleteQueries_(MILKY_WAY_DEBUG_QUERY_COUNT*2, &milkyWayDebugQueries[0][0]);
+    memset(milkyWayDebugQueries, 0, sizeof(milkyWayDebugQueries));
+    milkyWayDebugQueryCycle = 0;
+    milkyWayDebugQueryWaiting = 0;
+    milkyWayDebugQueryActive = -1;
+    milkyWayDebugGPUMillis = -1.0f;
 }
 
 static void pollRealStarsDebugTimer()
@@ -1349,7 +1510,7 @@ static void drawDeepStars(float alpha)
     deepstarsmatrix.mul(invprojmatrix);
     LOCALPARAM(deepstarsmatrix, deepstarsmatrix);
     matrix3 worldFromEquatorial, equatorialFromWorld;
-    getCelestialTransforms(worldFromEquatorial, &equatorialFromWorld);
+    getDeepStarsTransforms(worldFromEquatorial, &equatorialFromWorld);
     LOCALPARAM(deepstarsrotation, equatorialFromWorld);
     LOCALPARAMF(deepstarsparams, float(deepStarsTilesPerFace), float(deepstarsseed), deepstarsbright, alpha);
     LOCALPARAMF(deepstarsoptions, float(deepstarsrotate), float(deepstarsflip));
@@ -1373,6 +1534,48 @@ static void drawDeepStars(float alpha)
     endDeepStarsDebugTimer();
 
     if(alpha < 1) glDisable(GL_BLEND);
+}
+
+static bool loadMilkyWay()
+{
+    // Clamp only vertically: galactic longitude must wrap at the mask seam.
+    if(!milkyWayTexture) milkyWayTexture = textureload("packages/sky/milky_way.png", 2, true, false);
+    if(!milkyWayNoiseTexture) milkyWayNoiseTexture = textureload("packages/noise/grass_wind.jpg", 0, true, false);
+    return milkyWayTexture != notexture && milkyWayNoiseTexture != notexture;
+}
+
+static void drawMilkyWay(float nightfade)
+{
+    if(!milkyway || nightfade <= 0.0f || !loadMilkyWay()) return;
+
+    SETSHADER(milkyway);
+    matrix4 milkywaymatrix = invcammatrix;
+    milkywaymatrix.settranslation(0, 0, 0);
+    milkywaymatrix.mul(invprojmatrix);
+    LOCALPARAM(milkywaymatrix, milkywaymatrix);
+    matrix3 galacticFromWorld;
+    getGalacticFromWorld(galacticFromWorld);
+    LOCALPARAM(milkywayrotation, galacticFromWorld);
+    LOCALPARAMF(milkywayparams, milkywaybright*ldrscale, milkywaysaturation, 0.5f*milkywaywidth*RAD, milkywaydetail);
+    LOCALPARAMF(milkywayparams2, milkywaydust, milkywaycore, milkywaycorewarmth, nightfade);
+
+    glActiveTexture_(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, milkyWayNoiseTexture->id);
+    glActiveTexture_(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, milkyWayTexture->id);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    beginMilkyWayDebugTimer();
+    gle::defvertex();
+    gle::begin(GL_TRIANGLE_STRIP);
+    gle::attribf(-1, 1, 1);
+    gle::attribf(1, 1, 1);
+    gle::attribf(-1, -1, 1);
+    gle::attribf(1, -1, 1);
+    xtraverts += gle::end();
+    endMilkyWayDebugTimer();
+    glDisable(GL_BLEND);
 }
 
 static void drawRealStars(float nightfade)
@@ -1472,6 +1675,7 @@ void skyDebugView()
     if(!debugsky) return;
 
     pollDeepStarsDebugTimer();
+    pollMilkyWayDebugTimer();
     pollRealStarsDebugTimer();
     int y = 0;
     draw_text("Sky", 0, y);
@@ -1479,8 +1683,24 @@ void skyDebugView()
     if(deepStarsDebugGPUMillis >= 0.0f) draw_textf("Deep stars GPU: %.2f ms", 0, y, deepStarsDebugGPUMillis);
     else draw_text("Deep stars GPU: n/a", 0, y);
     y += FONTH;
+    if(milkyWayDebugGPUMillis >= 0.0f) draw_textf("Milky Way GPU: %.2f ms", 0, y, milkyWayDebugGPUMillis);
+    else draw_text("Milky Way GPU: n/a", 0, y);
+    y += FONTH;
     if(realStarsDebugGPUMillis >= 0.0f) draw_textf("Real stars GPU: %.2f ms", 0, y, realStarsDebugGPUMillis);
     else draw_text("Real stars GPU: n/a", 0, y);
+    y += FONTH;
+    if(milkyWayTexture && milkyWayTexture != notexture)
+        draw_textf("Milky Way mask: %d x %d", 0, y, milkyWayTexture->w, milkyWayTexture->h);
+    else draw_text("Milky Way mask: 2048 x 512 (not loaded)", 0, y);
+    y += FONTH;
+    draw_textf("Milky Way width: %.2f degrees", 0, y, milkywaywidth);
+    y += FONTH;
+    draw_textf("Milky Way detail: %s", 0, y,
+               milkywaydetail > 0.0f || milkywaydust > 0.0f || milkywaycore > 0.0f ? "2-sample medium + fine" : "off");
+    y += FONTH;
+    draw_textf("Sky latitude: %.2f degrees", 0, y, skylatitude);
+    y += FONTH;
+    draw_textf("Sidereal rotation: %.2f degrees", 0, y, getLocalSiderealDegrees());
     y += FONTH;
     draw_textf("Deep stars patches: %d (%d x %d per face)", 0, y, deepStarsRenderedPatches, deepStarsTilesPerFace, deepStarsTilesPerFace);
     y += FONTH;
@@ -1812,11 +2032,14 @@ bool limitsky()
 void drawskybox(bool clear)
 {
     bool havefaces = haveskyfaces();
-    bool havedeepstars = atmo && !havefaces && sunlightdir.z < 0 && loadDeepStars();
+    bool havenightsky = atmo && !havefaces && sunlightdir.z < 0;
+    bool havedeepstars = havenightsky && loadDeepStars();
+    bool havemilkyway = havenightsky && milkyway && loadMilkyWay();
+    bool havecelestialbackground = havedeepstars || havemilkyway;
     deepStarsTilesPerFace = max(int(ceilf(90.0f/deepstarssize)), 1);
     deepStarsRenderedPatches = havedeepstars ? 6*deepStarsTilesPerFace*deepStarsTilesPerFace : 0;
     bool havemoon = atmo && atmomoon && atmoalpha > 0.0f && atmomoonsize > 0.0f;
-    float nightfade = havedeepstars ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
+    float nightfade = havenightsky ? clamp((-sunlightdir.z - 0.03f) / 0.17f, 0.0f, 1.0f) : 0.0f;
     nightfade *= nightfade*(3.0f - 2.0f*nightfade);
     bool limited = false;
     if(limitsky()) for(vtxarray *va = visibleva; va; va = va->next)
@@ -1844,9 +2067,9 @@ void drawskybox(bool clear)
     // A partially faded night texture needs a deterministic background before
     // the atmosphere transmits it. The ordinary opaque daytime atmosphere does
     // not: it deliberately overwrites stale HDR sky pixels below.
-    if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havedeepstars && nightfade < 1))))
+    if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havecelestialbackground && nightfade < 1))))
     {
-        bool moononlyclear = havemoon && !havefaces && !havedeepstars && atmoalpha >= 1.0f;
+        bool moononlyclear = havemoon && !havefaces && !havecelestialbackground && atmoalpha >= 1.0f;
         vec skyboxcolor = moononlyclear ? vec(0) : skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -1872,9 +2095,10 @@ void drawskybox(bool clear)
         drawenvbox(sky);
     }
 
-    if(havedeepstars)
+    if(havenightsky)
     {
-        drawDeepStars(nightfade);
+        if(havedeepstars) drawDeepStars(nightfade);
+        if(havemilkyway) drawMilkyWay(nightfade);
         drawConstellationLines(nightfade);
         drawRealStars(nightfade);
     }
@@ -1887,7 +2111,7 @@ void drawskybox(bool clear)
         // Only use destination-transmittance blending when a valid background
         // was drawn this frame. With no skybox/night backdrop the HDR target can
         // contain last frame's clouds, so blending would create temporal trails.
-        bool blendatmosphere = havefaces || havedeepstars || havemoon || atmoalpha < 1;
+        bool blendatmosphere = havefaces || havecelestialbackground || havemoon || atmoalpha < 1;
         if(blendatmosphere)
         {
             glEnable(GL_BLEND);
