@@ -1609,10 +1609,18 @@ static void drawRealStars(float nightfade)
     bool havetransmittance = atmosphereTransmittanceTex && atmosphereTransmittanceWidth > 0 && atmosphereTransmittanceHeight > 0;
     LOCALPARAMF(realstarstwinkleparams, realstarstwinkle, realstarstwinklespeed, lastmillis/1000.0f, havetransmittance ? 1.0f : 0.0f);
     if(havetransmittance)
+    {
         LOCALPARAMF(atmospherelutparams, float(atmosphereTransmittanceWidth - 1)/atmosphereTransmittanceWidth,
                     float(atmosphereTransmittanceHeight - 1)/atmosphereTransmittanceHeight, 0.5f/atmosphereTransmittanceWidth,
                     0.5f/atmosphereTransmittanceHeight);
-    else LOCALPARAMF(atmospherelutparams, 1.0f, 1.0f, 0.0f, 0.0f);
+        float planetradius = 6360.0f*atmoplanetsize;
+        LOCALPARAMF(atmosphereradii, planetradius, planetradius + 100.0f*atmoheight);
+    }
+    else
+    {
+        LOCALPARAMF(atmospherelutparams, 1.0f, 1.0f, 0.0f, 0.0f);
+        LOCALPARAMF(atmosphereradii, 1.0f, 1.0f);
+    }
     glActiveTexture_(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, havetransmittance ? atmosphereTransmittanceTex : notexture->id);
 
@@ -2081,8 +2089,12 @@ void drawskybox(bool clear)
     // not: it deliberately overwrites stale HDR sky pixels below.
     if(clear || havemoon || (!havefaces && (!atmo || atmoalpha < 1 || (havecelestialbackground && nightfade < 1))))
     {
-        bool moononlyclear = havemoon && !havefaces && !havecelestialbackground && atmoalpha >= 1.0f;
-        vec skyboxcolor = moononlyclear ? vec(0) : skyboxcolour.tocolor().mul(ldrscale);
+        // With an opaque procedural atmosphere the physical boundary radiance is
+        // black. Feeding skyboxcolour through its transmittance contaminates
+        // twilight and lets the moon reveal a dark cutout in that artificial
+        // backdrop when it occludes stars.
+        bool opaqueatmosphere = atmo && !havefaces && atmoalpha >= 1.0f;
+        vec skyboxcolor = opaqueatmosphere ? vec(0) : skyboxcolour.tocolor().mul(ldrscale);
         glClearColor(skyboxcolor.x, skyboxcolor.y, skyboxcolor.z, 0);
         glClear(GL_COLOR_BUFFER_BIT);
     }
