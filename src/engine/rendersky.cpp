@@ -720,8 +720,6 @@ static void reloadatmosphereshader()
 }
 
 VARR(atmo, 0, 0, 1);
-VARP(debugatmo, 0, 0, 1);
-VARP(debugsky, 0, 0, 1);
 VARFP(atmoviewsteps, 1, 24, 64, reloadatmosphereshader());
 VARFP(atmosunsteps, 1, 8, 32, reloadatmosphereshader());
 VARFP(atmosunlut, 0, 2, 2, cleanupAtmosphereTransmittanceLUT()); // 0 = 64x64, 1 = 128x32, 2 = 128x64
@@ -751,33 +749,48 @@ VARR(deepstarsseed, 0, 1337, 0xFFFFFF);
 FVARR(deepstarsbright, 0, 0.75, 16);
 VARR(deepstarsrotate, 0, 1, 1);
 VARR(deepstarsflip, 0, 1, 1);
+
 VARR(realstars, 0, 1, 1);
-FVARR(realstarsbright, 0, 12, 16);
-FVARR(realstarssize, 0.5f, 3.0f, 8);
-FVARR(realstarstwinkle, 0, 4, 8);
-FVARR(realstarstwinklespeed, 0, 12, 32);
-FVARR(realstarsmaglimit, -2, 5, 8);
-FVARR(starskylatitude, -90, 45, 90);
-FVARR(starskyoffset, -360, 0, 360);
+
+FVAR(realstarsbright, 0, 12, 16);
+FVAR(realstarssize, 0.5f, 3.0f, 8);
+FVAR(realstarstwinkle, 0, 4, 8);
+FVAR(realstarstwinklespeed, 0, 16, 32);
+FVAR(realstarsmaglimit, -2, 5, 8);
+FVAR(starskylatitude, -90, 45, 90);
+FVAR(starskyoffset, -360, 0, 360);
+
+VAR(debugatmo, 0, 0, 1);
+VAR(debugsky, 0, 0, 1);
+VAR(showconstellations, 0, 0, 1);
 
 struct RealStarVertex
 {
     vec direction;
     bvec4 color;
     vec2 params;
+    int id;
 
-    RealStarVertex(const vec &direction, const bvec4 &color, float magnitude, float seed)
-        : direction(direction), color(color), params(magnitude, seed)
+    RealStarVertex(const vec &direction, const bvec4 &color, float magnitude, float seed, int id)
+        : direction(direction), color(color), params(magnitude, seed), id(id)
     {
     }
 };
 
+struct ConstellationSegment
+{
+    int first, second;
+
+    ConstellationSegment(int first, int second) : first(first), second(second) {}
+};
+
 static vector<RealStarVertex> realStarCatalog;
-static GLuint realStarsVBO = 0;
+static vector<ConstellationSegment> constellationCatalog;
+static GLuint realStarsVBO = 0, constellationLinesVBO = 0;
+static int constellationLineVertices = 0;
 static bool realStarsCatalogLoaded = false, realStarsCatalogLoading = false;
 
-static void addRealStar(int id, const char *constellation, float rightascension, float declination, float magnitude, float red, float green,
-                        float blue, int seed)
+static void addRealStar(int id, const char *constellation, float rightascension, float declination, float magnitude, float red, float green, float blue, int seed)
 {
     if(!realStarsCatalogLoading || !constellation || !constellation[0]) return;
     float ra = rightascension*15.0f*RAD, dec = declination*RAD, cosdec = cosf(dec);
@@ -785,13 +798,17 @@ static void addRealStar(int id, const char *constellation, float rightascension,
     bvec4 color(uchar(clamp(int(red*255.0f + 0.5f), 0, 255)), uchar(clamp(int(green*255.0f + 0.5f), 0, 255)),
                 uchar(clamp(int(blue*255.0f + 0.5f), 0, 255)), 255);
     float phase = float(seed ? seed : id & 0xFFFF)/65535.0f;
-    realStarCatalog.add(RealStarVertex(direction, color, magnitude, phase));
+    realStarCatalog.add(RealStarVertex(direction, color, magnitude, phase, id));
 }
 
-ICOMMAND(realstar, "isffffffi", (int *id, char *constellation, float *rightascension, float *declination, float *magnitude, float *red,
-                                  float *green, float *blue, int *seed),
+ICOMMAND(realstar, "isffffffi", (int *id, char *constellation, float *rightascension, float *declination, float *magnitude, float *red, float *green, float *blue, int *seed),
 {
     addRealStar(*id, constellation, *rightascension, *declination, *magnitude, *red, *green, *blue, *seed);
+});
+
+ICOMMAND(constellationline, "ii", (int *first, int *second),
+{
+    if(realStarsCatalogLoading && *first != *second) constellationCatalog.add(ConstellationSegment(*first, *second));
 });
 
 static void getCelestialTransforms(matrix3 &worldFromEquatorial, matrix3 *equatorialFromWorld = NULL)
@@ -877,9 +894,7 @@ struct AtmosphereTransmittanceLUTCache
     {
     }
 
-    bool matches(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight,
-                 float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction,
-                 const vec &newbetaozone) const
+    bool matches(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight, float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction, const vec &newbetaozone) const
     {
         return valid && sunsteps == atmosunsteps && planetradius == newplanetradius && atmosphereradius == newatmosphereradius &&
                inverseRayleighScaleHeight == newinverseRayleighScaleHeight && inverseMieScaleHeight == newinverseMieScaleHeight &&
@@ -887,9 +902,7 @@ struct AtmosphereTransmittanceLUTCache
                mieextinction == newmieextinction && betaozone == newbetaozone;
     }
 
-    void update(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight,
-                float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction,
-                const vec &newbetaozone)
+    void update(float newplanetradius, float newatmosphereradius, float newinverseRayleighScaleHeight, float newinverseMieScaleHeight, float newozonecenter, float newinverseOzoneHalfWidth, const vec &newbetarayleigh, const vec &newmieextinction, const vec &newbetaozone)
     {
         valid = true;
         sunsteps = atmosunsteps;
@@ -926,15 +939,12 @@ static void cleanupAtmosphereTransmittanceLUT()
     atmosphereLUTRebuildMillis = 0.0f;
 }
 
-static void updateAtmosphereTransmittanceLUT(float planetradius, float atmosphereradius, float inverseRayleighScaleHeight,
-                                            float inverseMieScaleHeight, float ozonecenter, float inverseOzoneHalfWidth,
-                                            const vec &betarayleigh, const vec &mieextinction, const vec &betaozone)
+static void updateAtmosphereTransmittanceLUT(float planetradius, float atmosphereradius, float inverseRayleighScaleHeight, float inverseMieScaleHeight, float ozonecenter, float inverseOzoneHalfWidth, const vec &betarayleigh, const vec &mieextinction, const vec &betaozone)
 {
     int width, height;
     getAtmosphereTransmittanceLUTSize(width, height);
     bool resize = width != atmosphereTransmittanceWidth || height != atmosphereTransmittanceHeight;
-    if(!resize && atmosphereTransmittanceCache.matches(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight,
-                                                       ozonecenter, inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone)) return;
+    if(!resize && atmosphereTransmittanceCache.matches(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight, ozonecenter, inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone)) return;
 
     Uint64 start = SDL_GetPerformanceCounter();
     if(resize)
@@ -975,8 +985,7 @@ static void updateAtmosphereTransmittanceLUT(float planetradius, float atmospher
     if(depthtest) glEnable(GL_DEPTH_TEST);
     if(scissortest) glEnable(GL_SCISSOR_TEST);
 
-    atmosphereTransmittanceCache.update(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight, ozonecenter,
-                                        inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone);
+    atmosphereTransmittanceCache.update(planetradius, atmosphereradius, inverseRayleighScaleHeight, inverseMieScaleHeight, ozonecenter, inverseOzoneHalfWidth, betarayleigh, mieextinction, betaozone);
     Uint64 frequency = SDL_GetPerformanceFrequency();
     atmosphereLUTRebuildMillis = frequency ? float((SDL_GetPerformanceCounter() - start) * 1000.0 / frequency) : 0.0f;
 }
@@ -1269,6 +1278,7 @@ static bool ensureRealStars()
     {
         realStarsCatalogLoading = true;
         realStarCatalog.setsize(0);
+        constellationCatalog.setsize(0);
         execfile("config/sky.cfg", false);
         realStarsCatalogLoading = false;
         realStarsCatalogLoaded = true;
@@ -1284,9 +1294,41 @@ static bool ensureRealStars()
     return true;
 }
 
+static const RealStarVertex *findRealStar(int id)
+{
+    loopv(realStarCatalog) if(realStarCatalog[i].id == id) return &realStarCatalog[i];
+    return NULL;
+}
+
+static bool ensureConstellationLines()
+{
+    if(!ensureRealStars() || !constellationCatalog.length()) return false;
+    if(!constellationLinesVBO)
+    {
+        vector<vec> vertices;
+        loopv(constellationCatalog)
+        {
+            const RealStarVertex *first = findRealStar(constellationCatalog[i].first),
+                                 *second = findRealStar(constellationCatalog[i].second);
+            if(!first || !second) continue;
+            vertices.add(first->direction);
+            vertices.add(second->direction);
+        }
+        constellationLineVertices = vertices.length();
+        if(!constellationLineVertices) return false;
+        glGenBuffers_(1, &constellationLinesVBO);
+        gle::bindvbo(constellationLinesVBO);
+        glBufferData_(GL_ARRAY_BUFFER, constellationLineVertices*sizeof(vec), vertices.getbuf(), GL_STATIC_DRAW);
+        gle::clearvbo();
+    }
+    return constellationLineVertices > 0;
+}
+
 static void cleanupRealStars()
 {
     if(realStarsVBO) { glDeleteBuffers_(1, &realStarsVBO); realStarsVBO = 0; }
+    if(constellationLinesVBO) { glDeleteBuffers_(1, &constellationLinesVBO); constellationLinesVBO = 0; }
+    constellationLineVertices = 0;
     cleanupRealStarsDebugTimer();
 }
 
@@ -1383,6 +1425,45 @@ static void drawRealStars(float nightfade)
     gle::clearvbo();
 
     if(!programpointsize) glDisable(GL_PROGRAM_POINT_SIZE);
+    glDisable(GL_BLEND);
+}
+
+static void drawConstellationLines(float nightfade)
+{
+    if(!realstars || !showconstellations || nightfade <= 0.0f || !ensureConstellationLines()) return;
+
+    SETSHADER(constellationlines);
+    matrix3 worldFromEquatorial;
+    getCelestialTransforms(worldFromEquatorial);
+    matrix4 realstarsmatrix = cammatrix;
+    realstarsmatrix.settranslation(0, 0, 0);
+    realstarsmatrix.mul(worldFromEquatorial);
+    matrix4 projected;
+    projected.mul(projmatrix, realstarsmatrix);
+    LOCALPARAM(realstarsmatrix, projected);
+    LOCALPARAM(realstarsworld, worldFromEquatorial);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    GLboolean linesmooth = glIsEnabled(GL_LINE_SMOOTH);
+    if(!linesmooth) glEnable(GL_LINE_SMOOTH);
+    gle::bindvbo(constellationLinesVBO);
+    gle::enablevertex();
+    gle::vertexpointer(sizeof(vec), (const vec *)0);
+
+    // A broad low-alpha pass gives the links a restrained halo without a blur texture.
+    LOCALPARAMF(constellationparams, ldrscale, nightfade, 0.10f);
+    glLineWidth(4.25f);
+    glDrawArrays(GL_LINES, 0, constellationLineVertices);
+
+    // Keep the readable line faint and soft so it does not compete with the real stars.
+    LOCALPARAMF(constellationparams, ldrscale, nightfade, 0.32f);
+    glLineWidth(1.75f);
+    glDrawArrays(GL_LINES, 0, constellationLineVertices);
+    xtraverts += 2*constellationLineVertices;
+    gle::disablevertex();
+    gle::clearvbo();
+    glLineWidth(1.0f);
+    if(!linesmooth) glDisable(GL_LINE_SMOOTH);
     glDisable(GL_BLEND);
 }
 
@@ -1794,6 +1875,7 @@ void drawskybox(bool clear)
     if(havedeepstars)
     {
         drawDeepStars(nightfade);
+        drawConstellationLines(nightfade);
         drawRealStars(nightfade);
     }
 
