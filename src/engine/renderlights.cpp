@@ -1907,6 +1907,7 @@ extern int smcache, smfilter, smgather, smalpha, smalphaprec, alphashadow;
 GLuint shadowatlastex = 0, shadowatlasfbo = 0;
 GLuint shadowcolortex = 0, shadowblanktex = 0;
 GLuint shadowfiltertex = 0, shadowfilterfbo = 0;
+GLuint csmpcsssampler = 0;
 GLenum shadowatlastarget = GL_NONE;
 vector<uint> shadowcolorclears, shadowcolorblurs;
 int smalign = 0;
@@ -2042,6 +2043,7 @@ void setupshadowatlas()
 
 void cleanupshadowatlas()
 {
+    if(csmpcsssampler) { glDeleteSamplers_(1, &csmpcsssampler); csmpcsssampler = 0; }
     if(shadowatlastex) { glDeleteTextures(1, &shadowatlastex); shadowatlastex = 0; }
     if(shadowcolortex) { glDeleteTextures(1, &shadowcolortex); shadowcolortex = 0; }
     if(shadowblanktex) { glDeleteTextures(1, &shadowblanktex); shadowblanktex = 0; }
@@ -2237,6 +2239,24 @@ VARF(csmsplits, 1, 3, CSM_MAXSPLITS, { cleardeferredlightshaders(); clearshadowc
 FVAR(csmsplitweight, 0.20f, 0.75f, 0.95f);
 VARF(csmshadowmap, 0, 1, 1, { cleardeferredlightshaders(); clearshadowcache(); });
 
+VARFP(csmpcss, 0, 0, 1, cleardeferredlightshaders());
+VARFP(csmpcssquality, 0, 1, 2, cleardeferredlightshaders());
+VARP(csmpcssblockers, 1, 12, 32);
+VARP(csmpcsssamples, 1, 16, 64);
+FVARP(csmpcssdist, 0, 512, 16384);
+FVARP(csmpcssfade, 0.01f, 0.25f, 1);
+FVARP(csmpcssminradius, 0, 0, 128);
+FVARP(csmpcssmaxradius, 0, 8, 128);
+FVARP(csmpcsssoftness, 0, 0.2f, 16);
+FVARP(csmpcsscascadescale, 0, 0.5f, 1);
+
+extern float atmosundisksize, atmoalpha;
+
+static bool usecsmpcss()
+{
+    return csmpcss && glGenSamplers_ && glDeleteSamplers_ && glBindSampler_ && glSamplerParameteri_;
+}
+
 // cascaded shadow maps
 struct cascadedshadowmap
 {
@@ -2389,6 +2409,21 @@ void cascadedshadowmap::bindparams()
         csmoffsetv[i] = vec(sm.x, sm.y, 0.5f + bias).add2(0.5f*sm.size);
     }
     GLOBALPARAMF(csmz, splits[0].center.z*-splits[0].scale.z, splits[0].scale.z);
+    if(usecsmpcss())
+    {
+        // The sky's sun disk size is an angular diameter in degrees. Read it each frame so edits need no shader rebuild.
+        GLOBALPARAMF(csmpcssparams, tanf(0.5f*atmosundisksize*RAD)*csmpcsssoftness, min(csmpcssminradius, csmpcssmaxradius),
+                     csmpcssmaxradius, 1.0f/max(fabsf(splits[0].scale.z), 1e-12f));
+        GLOBALPARAMF(csmpcssdistance, csmpcssdist, 1.0f/max(csmpcssdist*csmpcssfade, 1e-4f), csmpcsscascadescale);
+        GLOBALPARAMF(csmpcsscounts, csmpcssblockers, csmpcsssamples);
+        vec4 moondisk;
+        float visibility = getsolareclipsevisibility(&moondisk);
+        vec moonoffset;
+        model.transformnormal(vec(moondisk), moonoffset);
+        // w = 0 bypasses the mask; w = -1 skips shadow work during totality.
+        GLOBALPARAMF(csmpcsseclipse, moonoffset.x, moonoffset.y, moondisk.w*moondisk.w,
+                     visibility <= 0.0f ? -1.0f : (moondisk.w > 0.0f ? atmoalpha : 0.0f));
+    }
 }
 
 cascadedshadowmap csm;
@@ -2829,6 +2864,11 @@ Shader *loaddeferredlightshader(const char *type = NULL)
     {
         usecsm = csmsplits;
         sun[sunlen++] = 'c';
+        if(usecsmpcss() && !minimap)
+        {
+            sun[sunlen++] = 'h';
+            sun[sunlen++] = '0' + csmpcssquality;
+        }
         if(smalpha && alphashadow) sun[sunlen++] = 'C';
         sun[sunlen++] = '0' + csmsplits;
         if(!minimap)
@@ -3119,6 +3159,21 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
     }
     glActiveTexture_(GL_TEXTURE12);
     glBindTexture(GL_TEXTURE_3D, skyvistex);
+    if(usecsmpcss() && csm.rendered && drawtex != DRAWTEX_MINIMAP)
+    {
+        if(!csmpcsssampler)
+        {
+            glGenSamplers_(1, &csmpcsssampler);
+            glSamplerParameteri_(csmpcsssampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+            glSamplerParameteri_(csmpcsssampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glSamplerParameteri_(csmpcsssampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glSamplerParameteri_(csmpcsssampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri_(csmpcsssampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        glActiveTexture_(GL_TEXTURE13);
+        glBindTexture(shadowatlastarget, shadowatlastex);
+        glBindSampler_(13, csmpcsssampler);
+    }
     glActiveTexture_(GL_TEXTURE0);
 }
 
@@ -3531,6 +3586,8 @@ void renderlights(float bsx1 = -1, float bsy1 = -1, float bsx2 = 1, float bsy2 =
         if(msaalight==2) glDisable(GL_SAMPLE_MASK);
     }
     else if(avatar && !stencilmask) glDisable(GL_STENCIL_TEST);
+
+    if(usecsmpcss() && csm.rendered && drawtex != DRAWTEX_MINIMAP) glBindSampler_(13, 0);
 
     glDisable(GL_BLEND);
 

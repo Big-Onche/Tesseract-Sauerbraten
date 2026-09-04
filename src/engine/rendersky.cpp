@@ -970,8 +970,9 @@ static float circleOverlapArea(float radius1, float radius2, float separation)
     return radius1Squared*angle1 + radius2Squared*angle2 - 0.5f*lens;
 }
 
-float getsolareclipsevisibility()
+float getsolareclipsevisibility(vec4 *disk)
 {
+    if(disk) *disk = vec4(0, 0, 0, 0);
     vec moondirection;
     float moonradius;
     if(!getatmospheremoon(moondirection, moonradius)) return 1.0f;
@@ -983,6 +984,16 @@ float getsolareclipsevisibility()
     if(sundirection.squaredlen() <= 1.0e-8f) sundirection = vec(0, 0, 1);
     else sundirection.normalize();
     float separation = acosf(clamp(sundirection.dot(moondirection), -1.0f, 1.0f));
+    if(separation >= sunradius + moonradius) return 1.0f;
+    if(disk)
+    {
+        // Angular tangent-plane coordinates in solar-radius units; rotate into CSM XY at the caller.
+        vec tangent = vec(moondirection).sub(vec(sundirection).mul(sundirection.dot(moondirection)));
+        float length = tangent.magnitude();
+        if(length > 1e-6f) tangent.mul(separation/(sunradius*length));
+        else tangent = vec(0, 0, 0);
+        *disk = vec4(tangent, moonradius/sunradius);
+    }
     float covered = circleOverlapArea(sunradius, moonradius, separation)/(M_PI*sunradius*sunradius);
     return 1.0f - clamp(covered*atmoalpha, 0.0f, 1.0f);
 }

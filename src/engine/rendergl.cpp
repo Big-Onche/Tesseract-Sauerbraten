@@ -2,6 +2,11 @@
 
 #include "engine.h"
 
+void (APIENTRYP glGenSamplers_)(GLsizei, GLuint *) = NULL;
+void (APIENTRYP glDeleteSamplers_)(GLsizei, const GLuint *) = NULL;
+void (APIENTRYP glBindSampler_)(GLuint, GLuint) = NULL;
+void (APIENTRYP glSamplerParameteri_)(GLuint, GLenum, GLint) = NULL;
+
 bool hasVAO = false, hasTR = false, hasTSW = false, hasPBO = false, hasFBO = false, hasAFBO = false, hasDS = false, hasTF = false, hasCBF = false, hasS3TC = false, hasFXT1 = false, hasLATC = false, hasRGTC = false, hasAF = false, hasFBB = false, hasFBMS = false, hasTMS = false, hasMSS = false, hasFBMSBS = false, hasUBO = false, hasMBR = false, hasDB2 = false, hasDBB = false, hasTG = false, hasTQ = false, hasPF = false, hasTRG = false, hasTI = false, hasHFV = false, hasHFP = false, hasDBT = false, hasDC = false, hasDBGO = false, hasEGPU4 = false, hasGPU4 = false, hasGPU5 = false, hasBFE = false, hasEAL = false, hasCR = false, hasOQ2 = false, hasES2 = false, hasES3 = false, hasCB = false, hasCI = false, hasTS = false;
 bool mesa = false, intel = false, amd = false, nvidia = false;
 
@@ -405,6 +410,7 @@ void gl_checkextensions()
 
     if(glversion < 200) fatal("OpenGL 2.0 or greater is required!");
 
+
 #ifdef WIN32
     glActiveTexture_ =            (PFNGLACTIVETEXTUREPROC)            getprocaddress("glActiveTexture");
 
@@ -535,6 +541,18 @@ void gl_checkextensions()
     if(glslversion < 120) fatal("GLSL 1.20 or greater is required!");
 
     parseglexts();
+
+    glGenSamplers_ = NULL;
+    glDeleteSamplers_ = NULL;
+    glBindSampler_ = NULL;
+    glSamplerParameteri_ = NULL;
+    if(glversion >= 330 || hasext("GL_ARB_sampler_objects"))
+    {
+        glGenSamplers_ = (void (APIENTRYP)(GLsizei, GLuint *))getprocaddress("glGenSamplers");
+        glDeleteSamplers_ = (void (APIENTRYP)(GLsizei, const GLuint *))getprocaddress("glDeleteSamplers");
+        glBindSampler_ = (void (APIENTRYP)(GLuint, GLuint))getprocaddress("glBindSampler");
+        glSamplerParameteri_ = (void (APIENTRYP)(GLuint, GLenum, GLint))getprocaddress("glSamplerParameteri");
+    }
 
     if(glversion >= 330 || (hasext("GL_ARB_draw_instanced") && hasext("GL_ARB_instanced_arrays")))
     {

@@ -5,6 +5,12 @@
 #define APIENTRYP APIENTRY *
 #endif
 
+// Optional sampler objects let CSM read raw depth without changing atlas comparison state.
+extern void (APIENTRYP glGenSamplers_)(GLsizei, GLuint *);
+extern void (APIENTRYP glDeleteSamplers_)(GLsizei, const GLuint *);
+extern void (APIENTRYP glBindSampler_)(GLuint, GLuint);
+extern void (APIENTRYP glSamplerParameteri_)(GLuint, GLenum, GLint);
+
 // OpenGL deprecated functionality
 #ifndef GL_QUADS
 #define GL_QUADS                      0x0007
