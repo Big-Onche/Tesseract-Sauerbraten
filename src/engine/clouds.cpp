@@ -137,13 +137,13 @@ namespace volumetricClouds
     FVAR(vcinsidefogcolourscale, 0.0f, 1.0f, 4.0f);
 
     // map settings
-    VARP(vcmultiscatoctaves, 1, 3, 4);
-    FVAR(vcmultiscat, 0.0f, 1.0f, 1.0f);            // a: scattering attenuation per octave
-    FVAR(vcmultiscatext, 0.0f, 0.8f, 1.0f);         // b: extinction attenuation per octave
-    FVAR(vcmultiscatphase, 0.0f, 0.0f, 1.0f);       // c: phase-angle attenuation per octave
-    FVAR(vcphaseg, -0.95f, 0.55f, 0.95f);
-    FVAR(vcphaseg2, -0.95f, -0.25f, 0.95f);
-    FVAR(vcphaseblend, 0.0f, 0.18f, 1.0f);
+    VARR(vcmultiscatoctaves, 1, 3, 4);
+    FVARR(vcmultiscat, 0.0f, 1.0f, 1.0f);            // a: scattering attenuation per octave
+    FVARR(vcmultiscatext, 0.0f, 0.8f, 1.0f);         // b: extinction attenuation per octave
+    FVARR(vcmultiscatphase, 0.0f, 0.0f, 1.0f);       // c: phase-angle attenuation per octave
+    FVARR(vcphaseg, -0.95f, 0.55f, 0.95f);
+    FVARR(vcphaseg2, -0.95f, -0.25f, 0.95f);
+    FVARR(vcphaseblend, 0.0f, 0.18f, 1.0f);
     FVARR(vcfogdistmul, 0.25f, 12.0f, 64.0f);
     VARR(vcatmoblendmin, 0, 10, 100);
     VARR(vcatmoblendmax, 0, 100, 100);
