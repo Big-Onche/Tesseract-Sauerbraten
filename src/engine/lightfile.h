@@ -14,7 +14,9 @@ namespace lightfile
     {
         POSITION = 0, COLOR = 3, RANGE = 6, FLAGS, SHAPE, SOURCE_RADIUS, WIDTH, HEIGHT, ORIENTATION,
         PCSS_ENABLED = 15, PCSS_QUALITY, PCSS_BLOCKERS, PCSS_SAMPLES, PCSS_PENUMBRA, PCSS_DISTANCE, PCSS_MINPIXELS,
-        SHADOW_ENABLED, NUMVALUES
+        SHADOW_ENABLED, INTENSITY, FLICKER_AMPLITUDE, FLICKER_FREQUENCY, FLICKER_NOISE, FLICKER_SEED,
+        OFFSET_AMPLITUDE, OFFSET_FREQUENCY, OFFSET_NOISE, OFFSET_SEED, OFFSET_AXES, OFFSET_QUANTIZE = OFFSET_AXES+3,
+        BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE, ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, NUMVALUES
     };
 
     struct record
@@ -27,7 +29,16 @@ namespace lightfile
             memset(values, 0, sizeof(values));
             values[COLOR] = values[COLOR+1] = values[COLOR+2] = 255;
             values[RANGE] = 128;
-            for(int i = PCSS_ENABLED; i < NUMVALUES; ++i) values[i] = -1;
+            for(int i = PCSS_ENABLED; i <= SHADOW_ENABLED; ++i) values[i] = -1;
+            values[INTENSITY] = 1;
+            values[FLICKER_FREQUENCY] = values[FLICKER_NOISE] = 1;
+            values[OFFSET_FREQUENCY] = values[OFFSET_NOISE] = 1;
+            values[OFFSET_AXES] = values[OFFSET_AXES+1] = values[OFFSET_AXES+2] = 1;
+            values[OFFSET_QUANTIZE] = 0.025f;
+            values[BLINK_DUTY] = 0.5f;
+            values[ATTENUATION_EXPONENT] = 2;
+            values[ATTENUATION_MINDISTANCE] = 16;
+            values[ATTENUATION_EDGE] = 0.1f;
         }
     };
 
@@ -62,7 +73,25 @@ namespace lightfile
         { "pcss.max_penumbra", PCSS_PENUMBRA, 1, -1, 128, false, true },
         { "pcss.distance", PCSS_DISTANCE, 1, -1, 16384, false, true },
         { "pcss.min_pixels", PCSS_MINPIXELS, 1, -1, 1024, false, true },
-        { "shadow.enabled", SHADOW_ENABLED, 1, -1, 1, true, true }
+        { "shadow.enabled", SHADOW_ENABLED, 1, -1, 1, true, true },
+        { "intensity", INTENSITY, 1, 0, 64, false, true },
+        { "flicker.amplitude", FLICKER_AMPLITUDE, 1, 0, 1, false, true },
+        { "flicker.frequency", FLICKER_FREQUENCY, 1, 0, 100, false, true },
+        { "flicker.noise", FLICKER_NOISE, 1, 0, 1, false, true },
+        { "flicker.seed", FLICKER_SEED, 1, 0, 16777215, true, true },
+        { "offset.amplitude", OFFSET_AMPLITUDE, 1, 0, 4096, false, true },
+        { "offset.frequency", OFFSET_FREQUENCY, 1, 0, 100, false, true },
+        { "offset.noise", OFFSET_NOISE, 1, 0, 1, false, true },
+        { "offset.seed", OFFSET_SEED, 1, 0, 16777215, true, true },
+        { "offset.axes", OFFSET_AXES, 3, -1, 1, false, true },
+        { "offset.quantize", OFFSET_QUANTIZE, 1, 0, 4, false, true },
+        { "blink.frequency", BLINK_FREQUENCY, 1, 0, 100, false, true },
+        { "blink.duty", BLINK_DUTY, 1, 0, 1, false, true },
+        { "blink.phase", BLINK_PHASE, 1, -1000, 1000, false, true },
+        { "blink.fade", BLINK_FADE, 1, 0, 0.5f, false, true },
+        { "attenuation.exponent", ATTENUATION_EXPONENT, 1, 0, 8, false, true },
+        { "attenuation.min_distance", ATTENUATION_MINDISTANCE, 1, 0.01f, 4096, false, true },
+        { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true }
     };
     static const char *const shapes[] = { "point", "sphere", "disk", "capsule", "rectangle" };
 
@@ -174,7 +203,8 @@ namespace lightfile
                     return false;
                 }
                 if(!numbers(value, &current.values[p.index], p.count, p.minimum, p.maximum, p.integral)) return false;
-                if(p.minimum == -1 && current.values[p.index] < 0 && current.values[p.index] != -1) return false;
+                if(p.index >= PCSS_ENABLED && p.index <= SHADOW_ENABLED && current.values[p.index] < 0 && current.values[p.index] != -1)
+                    return false;
                 if((p.index == PCSS_BLOCKERS || p.index == PCSS_SAMPLES) && current.values[p.index] == 0) return false;
                 if(p.index == POSITION) current.positioned = true;
                 return true;

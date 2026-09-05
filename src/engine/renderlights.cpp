@@ -1771,11 +1771,81 @@ static bool uselocalpcss()
     return localshapes && localpcss && glGenSamplers_ && glDeleteSamplers_ && glBindSampler_ && glSamplerParameteri_;
 }
 
+VARP(localattenuation, 0, 1, 1);
+
+static uint lightnoisehash(uint value)
+{
+    value ^= value >> 16;
+    value *= 0x7FEB352DU;
+    value ^= value >> 15;
+    value *= 0x846CA68BU;
+    return value ^ (value >> 16);
+}
+
+static float lightnoisevalue(uint tick, uint seed)
+{
+    return float(lightnoisehash(tick ^ lightnoisehash(seed)) >> 8)*(2.0f/16777215.0f) - 1.0f;
+}
+
+static float lightsmooth(float t)
+{
+    t = clamp(t, 0.0f, 1.0f);
+    return t*t*(3 - 2*t);
+}
+
+static float lightwave(double cycles, uint seed, float noise)
+{
+    double tick = floor(cycles);
+    float fraction = float(cycles-tick), blend = lightsmooth(fraction);
+    uint index = uint(tick);
+    float a = lightnoisevalue(index, seed), b = lightnoisevalue(index+1, seed);
+    float phase = float(lightnoisehash(seed) >> 8)/16777216.0f;
+    float periodic = sinf(2*M_PI*(fraction+phase));
+    return periodic*(1-noise) + (a+(b-a)*blend)*noise;
+}
+
+animatedlightstate evaluatelight(const extentity &e, int millis)
+{
+    const lightanimation &a = e.animation;
+    // Use the simulation clock, never per-pass wall time or mutable RNG state.
+    double seconds = max(millis, 0)/1000.0;
+    float intensity = a.intensity;
+    if(a.flickeramp > 0 && a.flickerfrequency > 0)
+        intensity *= max(0.0f, 1 + a.flickeramp*lightwave(seconds*a.flickerfrequency, uint(a.flickerseed), a.flickernoise));
+    if(a.blinkfrequency > 0)
+    {
+        double cycles = seconds*a.blinkfrequency + a.blinkphase;
+        float phase = float(cycles-floor(cycles)), blink;
+        if(a.blinkduty <= 0) blink = 0;
+        else if(a.blinkduty >= 1) blink = 1;
+        else if(a.blinkfade <= 0) blink = phase < a.blinkduty ? 1 : 0;
+        else
+        {
+            float fade = min(a.blinkfade, a.blinkduty*0.5f);
+            blink = lightsmooth(phase/fade)*lightsmooth((a.blinkduty-phase)/fade);
+        }
+        intensity *= blink;
+    }
+    animatedlightstate state;
+    state.o = e.o;
+    if(a.offsetamp > 0 && a.offsetfrequency > 0) loopi(3)
+    {
+        float offset = a.offsetamp*a.offsetaxes[i]*
+                       lightwave(seconds*a.offsetfrequency, uint(a.offsetseed)+0x9E3779B9U*(i+1), a.offsetnoise);
+        // Quantize the shared source, not just its shadows, so tiny changes can reuse the exact cached map.
+        if(a.offsetquantize > 0) offset = floorf(offset/a.offsetquantize+0.5f)*a.offsetquantize;
+        state.o[i] += offset;
+    }
+    state.color = vec(e.attr2, e.attr3, e.attr4).max(0).mul(intensity);
+    return state;
+}
+
 struct lightinfo
 {
     int ent, shadowmap;
     ushort flags, batched;
     vec o, color;
+    lightattenuation attenuation;
     float radius, dist;
     vec dir, spotx, spoty;
     int spot;
@@ -1793,12 +1863,18 @@ struct lightinfo
     }
     lightinfo(int i, const extentity &e)
       : ent(i), shadowmap(-1), flags(e.attr5), batched(~0),
-        o(e.o), color(vec(e.attr2, e.attr3, e.attr4).max(0)), radius(e.attr1), dist(camera1->o.dist(e.o)),
+        o(e.o), color(0, 0, 0), attenuation(e.attenuation), radius(e.attr1), dist(0),
         dir(0, 0, 0), spot(0), query(NULL)
     {
+        const animatedlightstate state = evaluatelight(e, lastmillis);
+        o = state.o;
+        color = state.color;
+        dist = camera1->o.dist(o);
         if(e.attached && e.attached->type == ET_SPOTLIGHT)
         {
-            dir = vec(e.attached->o).sub(e.o).normalize();
+            dir = vec(e.attached->o).sub(o);
+            if(dir.squaredlen() <= 1e-12f) dir = vec(0, 0, 1);
+            else dir.normalize();
             spot = clamp(int(e.attached->attr1), 1, 89);
             calcspot();
         }
@@ -3291,6 +3367,8 @@ static LocalShaderParam emitterparams("emitterparams"), emitterx("emitterx"), em
 static vec4 emitterparamsv[8], emitterxv[8], emitteryv[8], emitterpcssv[8];
 static LocalShaderParam emitterdistance("emitterdistance");
 static vec2 emitterdistancev[8];
+static LocalShaderParam lightattenuationparam("lightattenuation");
+static vec4 lightattenuationv[8];
 
 static inline void setlightparams(int i, const lightinfo &l)
 {
@@ -3317,6 +3395,7 @@ static inline void setlightparams(int i, const lightinfo &l)
     if(!uselocalpcss() || shadow.enabled == 0 || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
     emitterpcssv[i] = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
                          max(1.0f, floorf(min(samples, 16 << quality)*lod)));
+    lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation);
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
     if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
@@ -3357,6 +3436,7 @@ static inline void setlightshader(Shader *s, int n, bool baselight, bool shadowm
     emittery.setv(emitteryv, n);
     emitterpcss.setv(emitterpcssv, n);
     emitterdistance.setv(emitterdistancev, n);
+    lightattenuationparam.setv(lightattenuationv, n);
     if(spotlight) spotparams.setv(spotparamsv, n);
     if(shadowmap)
     {
@@ -3725,6 +3805,11 @@ void rendervolumetric()
         else if(l.shadowmap >= 0) volumetricshader->setvariant(0, colorshadow ? 1 : 0);
         else volumetricshader->set();
 
+        setlightparams(0, l);
+        emitterparams.setv(emitterparamsv, 1);
+        emitterx.setv(emitterxv, 1);
+        emittery.setv(emitteryv, 1);
+        lightattenuationparam.setv(lightattenuationv, 1);
         LOCALPARAM(lightpos, vec4(l.o, 1).div(l.radius));
         vec color = vec(l.color).mul(ldrscaleb).mul(volcolour.tocolor().mul(volscale));
         LOCALPARAM(lightcolor, color);
@@ -3888,7 +3973,7 @@ void viewlightscissor()
         if(ents.inrange(idx) && ents[idx]->type == ET_LIGHT)
         {
             extentity &e = *ents[idx];
-            loopvj(lights) if(lights[j].o == e.o)
+            loopvj(lights) if(lights[j].ent == idx)
             {
                 lightinfo &l = lights[j];
                 if(!l.validscissor()) break;
@@ -3926,16 +4011,18 @@ void collectlights()
                 conoutf(CON_WARN, "Warning: Ignoring light at %f, %f, %f (radius > 1250 (%d))", e->o.x, e->o.y, e->o.z, e->attr1);
                 warned = true;
             }
-            return;
+            continue;
         }
 
+        const lightinfo candidate(i, *e);
+        if(candidate.color.iszero()) continue;
         if(smviscull)
         {
-            if(isfoggedsphere(e->attr1, e->o)) continue;
-            if(pvsoccludedsphere(e->o, e->attr1)) continue;
+            if(isfoggedsphere(candidate.radius, candidate.o)) continue;
+            if(pvsoccludedsphere(candidate.o, candidate.radius)) continue;
         }
 
-        lightinfo &l = lights.add(lightinfo(i, *e));
+        lightinfo &l = lights.add(candidate);
         if(l.validscissor()) lightorder.add(lights.length()-1);
     }
 
@@ -4935,7 +5022,7 @@ void rendershadowmaps(int offset = 0)
         shadowdir = l.dir;
         shadowspot = l.spot;
 
-        shadowmesh *mesh = e ? findshadowmesh(l.ent, *e) : NULL;
+        shadowmesh *mesh = e && l.o == e->o ? findshadowmesh(l.ent, *e) : NULL;
 
         findshadowvas(smalpha > 1 && alphashadow > (l.colorshadow() ? 0 : 1));
         if(shadowtransparent)

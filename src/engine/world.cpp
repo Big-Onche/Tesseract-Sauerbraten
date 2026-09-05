@@ -828,8 +828,12 @@ void renderentradius(extentity &e, bool color)
         case ET_LIGHT:
             if(e.attr1 <= 0) break;
             if(color) gle::colorf(e.attr2/255.0f, e.attr3/255.0f, e.attr4/255.0f);
-            renderentsphere(e, e.attr1);
-            renderlightshape(e);
+            {
+                extentity visual = e;
+                visual.o = evaluatelight(e, lastmillis).o;
+                renderentsphere(visual, e.attr1);
+                renderlightshape(visual);
+            }
             break;
 
         case ET_SPOTLIGHT:
@@ -1657,6 +1661,17 @@ static lightfile::record lightrecord(const extentity &e)
     r.values[PCSS_BLOCKERS] = e.shadow.blockers; r.values[PCSS_SAMPLES] = e.shadow.samples;
     r.values[PCSS_PENUMBRA] = e.shadow.penumbra; r.values[PCSS_DISTANCE] = e.shadow.distance; r.values[PCSS_MINPIXELS] = e.shadow.minpixels;
     r.values[SHADOW_ENABLED] = !(e.attr5&L_NOSHADOW);
+    const lightanimation &a = e.animation;
+    r.values[INTENSITY] = a.intensity;
+    r.values[FLICKER_AMPLITUDE] = a.flickeramp; r.values[FLICKER_FREQUENCY] = a.flickerfrequency;
+    r.values[FLICKER_NOISE] = a.flickernoise; r.values[FLICKER_SEED] = a.flickerseed;
+    r.values[OFFSET_AMPLITUDE] = a.offsetamp; r.values[OFFSET_FREQUENCY] = a.offsetfrequency;
+    r.values[OFFSET_NOISE] = a.offsetnoise; r.values[OFFSET_SEED] = a.offsetseed; r.values[OFFSET_QUANTIZE] = a.offsetquantize;
+    loopi(3) r.values[OFFSET_AXES+i] = a.offsetaxes[i];
+    r.values[BLINK_FREQUENCY] = a.blinkfrequency; r.values[BLINK_DUTY] = a.blinkduty;
+    r.values[BLINK_PHASE] = a.blinkphase; r.values[BLINK_FADE] = a.blinkfade;
+    r.values[ATTENUATION_EXPONENT] = e.attenuation.exponent;
+    r.values[ATTENUATION_MINDISTANCE] = e.attenuation.mindistance; r.values[ATTENUATION_EDGE] = e.attenuation.edge;
     return r;
 }
 
@@ -1669,12 +1684,65 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
     e.shadow.enabled = int(r.values[PCSS_ENABLED]); e.shadow.quality = int(r.values[PCSS_QUALITY]);
     e.shadow.blockers = int(r.values[PCSS_BLOCKERS]); e.shadow.samples = int(r.values[PCSS_SAMPLES]);
     e.shadow.penumbra = r.values[PCSS_PENUMBRA]; e.shadow.distance = r.values[PCSS_DISTANCE]; e.shadow.minpixels = r.values[PCSS_MINPIXELS];
+    lightanimation &a = e.animation;
+    a.intensity = r.values[INTENSITY];
+    a.flickeramp = r.values[FLICKER_AMPLITUDE]; a.flickerfrequency = r.values[FLICKER_FREQUENCY];
+    a.flickernoise = r.values[FLICKER_NOISE]; a.flickerseed = int(r.values[FLICKER_SEED]);
+    a.offsetamp = r.values[OFFSET_AMPLITUDE]; a.offsetfrequency = r.values[OFFSET_FREQUENCY];
+    a.offsetnoise = r.values[OFFSET_NOISE]; a.offsetseed = int(r.values[OFFSET_SEED]); a.offsetquantize = r.values[OFFSET_QUANTIZE];
+    loopi(3) a.offsetaxes[i] = r.values[OFFSET_AXES+i];
+    a.blinkfrequency = r.values[BLINK_FREQUENCY]; a.blinkduty = r.values[BLINK_DUTY];
+    a.blinkphase = r.values[BLINK_PHASE]; a.blinkfade = r.values[BLINK_FADE];
+    e.attenuation.exponent = r.values[ATTENUATION_EXPONENT];
+    e.attenuation.mindistance = r.values[ATTENUATION_MINDISTANCE]; e.attenuation.edge = r.values[ATTENUATION_EDGE];
     if(r.values[SHADOW_ENABLED] >= 0)
     {
         if(r.values[SHADOW_ENABLED] == 0) e.attr5 |= L_NOSHADOW;
         else e.attr5 &= ~L_NOSHADOW;
     }
 }
+
+// Get/set animation and attenuation properties on the selected light(s), using the sidecar's validation.
+ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numargs),
+{
+    const lightfile::property *property = NULL;
+    loopi(sizeof(lightfile::properties)/sizeof(lightfile::properties[0]))
+        if(!strcmp(name, lightfile::properties[i].name)) { property = &lightfile::properties[i]; break; }
+    if(!property || property->index < lightfile::INTENSITY)
+    {
+        conoutf(CON_ERROR, "unknown animation/attenuation property: %s", name);
+        return;
+    }
+    if(*numargs < 2)
+    {
+        entfocus(efocus, if(e.type == ET_LIGHT)
+        {
+            const lightfile::record r = lightrecord(e);
+            string output = "";
+            loopi(property->count) concatstring(output, tempformatstring(i ? " %.9g" : "%.9g", r.values[property->index+i]));
+            result(output);
+        });
+        return;
+    }
+    if(noentedit()) return;
+    lightfile::parser parser;
+    defformatstring(line, "%s = %s", name, value);
+    if(!parser.line("sauerlights 1") || !parser.line("[light]") || !parser.line("position = 0 0 0") ||
+       !parser.line(line) || !parser.finish())
+    {
+        conoutf(CON_ERROR, "invalid value for %s", name);
+        return;
+    }
+    // These properties never change the base entity or octree bounds. Collection evaluates the new state next frame.
+    addimplicit(loopv(entgroup)
+    {
+        extentity &e = *entities::getents()[entgroup[i]];
+        if(e.type != ET_LIGHT) continue;
+        lightfile::record r = lightrecord(e);
+        loopj(property->count) r.values[property->index+j] = parser.records[0].values[property->index+j];
+        applylightrecord(e, r);
+    });
+});
 
 void saveLightEntities()
 {

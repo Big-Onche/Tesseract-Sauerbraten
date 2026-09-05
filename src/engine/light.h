@@ -83,3 +83,10 @@ extern volatile bool check_calclight_progress;
 
 extern void check_calclight_canceled();
 
+
+// A deterministic snapshot. Render passes consume the collected lightinfo made from this state.
+struct animatedlightstate
+{
+    vec o, color;
+};
+extern animatedlightstate evaluatelight(const extentity &e, int millis);

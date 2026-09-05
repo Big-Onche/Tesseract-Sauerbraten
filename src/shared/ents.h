@@ -52,12 +52,35 @@ struct lightshadow
     lightshadow() : enabled(-1), quality(-1), blockers(-1), samples(-1), penumbra(-1), distance(-1), minpixels(-1) {}
 };
 
+struct lightanimation
+{
+    float intensity, flickeramp, flickerfrequency, flickernoise;
+    int flickerseed;
+    float offsetamp, offsetfrequency, offsetnoise, offsetquantize;
+    vec offsetaxes;
+    int offsetseed;
+    float blinkfrequency, blinkduty, blinkphase, blinkfade;
+
+    lightanimation() : intensity(1), flickeramp(0), flickerfrequency(1), flickernoise(1), flickerseed(0),
+                       offsetamp(0), offsetfrequency(1), offsetnoise(1), offsetquantize(0.025f), offsetaxes(1, 1, 1), offsetseed(0),
+                       blinkfrequency(0), blinkduty(0.5f), blinkphase(0), blinkfade(0) {}
+};
+
+struct lightattenuation
+{
+    float exponent, mindistance, edge;
+
+    lightattenuation() : exponent(2), mindistance(16), edge(0.1f) {}
+};
+
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
 {
     int flags;  // the only dynamic state of a map entity
     extentity *attached;
     lightshape emitter;
     lightshadow shadow;
+    lightanimation animation;
+    lightattenuation attenuation;
 
     extentity() : flags(0), attached(NULL) {}
 
