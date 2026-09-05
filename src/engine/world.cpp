@@ -393,7 +393,7 @@ undoblock *newundoent()
     loopv(entgroup)
     {
         e->i = entgroup[i];
-        e->e = *entities::getents()[entgroup[i]];
+        new (&e->e) entitysnapshot(*entities::getents()[entgroup[i]]);
         e++;
     }
     return u;
@@ -546,6 +546,15 @@ void pasteundoent(int idx, const entity &ue)
     while(ents.length() < idx) ents.add(entities::newentity())->type = ET_EMPTY;
     int efocus = -1;
     entedit(idx, (entity &)e = ue);
+}
+
+static void pasteundoent(int idx, const entitysnapshot &ue)
+{
+    if(idx < 0 || idx >= MAXENTS) return;
+    vector<extentity *> &ents = entities::getents();
+    while(ents.length() <= idx) ents.add(entities::newentity())->type = ET_EMPTY;
+    int efocus = -1;
+    entedit(idx, { (entity &)e = ue; ue.applylight(e); });
 }
 
 void pasteundoents(undoblock *u)
@@ -1217,7 +1226,7 @@ void newent(char *what, int *a1, int *a2, int *a3, int *a4, int *a5)
 }
 
 int entcopygrid;
-vector<entity> entcopybuf;
+vector<entitysnapshot> entcopybuf;
 
 void entcopy()
 {
@@ -1234,25 +1243,28 @@ void entpaste()
     if(noentedit() || entcopybuf.empty()) return;
     entcancel();
     float m = float(sel.grid)/float(entcopygrid);
+    vector<int> pastedtypes;
     loopv(entcopybuf)
     {
-        const entity &c = entcopybuf[i];
+        const entitysnapshot &c = entcopybuf[i];
         vec o = vec(c.o).mul(m).add(vec(sel.o));
         int idx;
         extentity *e = newentity(true, o, ET_EMPTY, c.attr1, c.attr2, c.attr3, c.attr4, c.attr5, idx);
         if(!e) continue;
+        c.applylight(*e);
+        pastedtypes.add(c.type);
         entadd(idx);
         keepents = max(keepents, idx+1);
     }
     keepents = 0;
     int j = 0;
-    groupeditundo(e.type = entcopybuf[j++].type;);
+    groupeditundo(e.type = pastedtypes[j++];);
 }
 
 void entreplace()
 {
     if(noentedit() || entcopybuf.empty()) return;
-    const entity &c = entcopybuf[0];
+    const entitysnapshot &c = entcopybuf[0];
     if(entgroup.length() || enthover >= 0)
     {
         groupedit({
@@ -1262,11 +1274,13 @@ void entreplace()
             e.attr3 = c.attr3;
             e.attr4 = c.attr4;
             e.attr5 = c.attr5;
+            c.applylight(e);
         });
     }
     else
     {
         newentity(c.type, c.attr1, c.attr2, c.attr3, c.attr4, c.attr5, false);
+        groupeditpure(c.applylight(e));
     }
 }
 
@@ -1670,6 +1684,7 @@ static lightfile::record lightrecord(const extentity &e)
     loopi(3) r.values[OFFSET_AXES+i] = a.offsetaxes[i];
     r.values[BLINK_FREQUENCY] = a.blinkfrequency; r.values[BLINK_DUTY] = a.blinkduty;
     r.values[BLINK_PHASE] = a.blinkphase; r.values[BLINK_FADE] = a.blinkfade;
+    r.values[ATTENUATION_ENABLED] = e.attenuation.enabled;
     r.values[ATTENUATION_EXPONENT] = e.attenuation.exponent;
     r.values[ATTENUATION_MINDISTANCE] = e.attenuation.mindistance; r.values[ATTENUATION_EDGE] = e.attenuation.edge;
     return r;
@@ -1693,6 +1708,7 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
     loopi(3) a.offsetaxes[i] = r.values[OFFSET_AXES+i];
     a.blinkfrequency = r.values[BLINK_FREQUENCY]; a.blinkduty = r.values[BLINK_DUTY];
     a.blinkphase = r.values[BLINK_PHASE]; a.blinkfade = r.values[BLINK_FADE];
+    e.attenuation.enabled = r.values[ATTENUATION_ENABLED] != 0;
     e.attenuation.exponent = r.values[ATTENUATION_EXPONENT];
     e.attenuation.mindistance = r.values[ATTENUATION_MINDISTANCE]; e.attenuation.edge = r.values[ATTENUATION_EDGE];
     if(r.values[SHADOW_ENABLED] >= 0)
@@ -1701,6 +1717,13 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
         else e.attr5 &= ~L_NOSHADOW;
     }
 }
+
+// UI-only formatting: retain full precision in the light state and sidecar.
+ICOMMAND(lightuifloat, "f", (float *value),
+{
+    defformatstring(text, "%.2f", fabsf(*value) < 0.005f ? 0.0f : *value);
+    result(text);
+});
 
 // Get/set animation and attenuation properties on the selected light(s), using the sidecar's validation.
 ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numargs),
@@ -1740,6 +1763,8 @@ ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numarg
         if(e.type != ET_LIGHT) continue;
         lightfile::record r = lightrecord(e);
         loopj(property->count) r.values[property->index+j] = parser.records[0].values[property->index+j];
+        if(property->index >= lightfile::ATTENUATION_EXPONENT && property->index <= lightfile::ATTENUATION_EDGE)
+            r.values[lightfile::ATTENUATION_ENABLED] = 1;
         applylightrecord(e, r);
     });
 });

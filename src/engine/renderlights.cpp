@@ -3395,7 +3395,7 @@ static inline void setlightparams(int i, const lightinfo &l)
     if(!uselocalpcss() || shadow.enabled == 0 || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
     emitterpcssv[i] = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
                          max(1.0f, floorf(min(samples, 16 << quality)*lod)));
-    lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation);
+    lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation && l.attenuation.enabled);
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
     if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));

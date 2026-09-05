@@ -68,9 +68,10 @@ struct lightanimation
 
 struct lightattenuation
 {
+    bool enabled;
     float exponent, mindistance, edge;
 
-    lightattenuation() : exponent(2), mindistance(16), edge(0.1f) {}
+    lightattenuation() : enabled(false), exponent(2), mindistance(16), edge(0.1f) {}
 };
 
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
@@ -93,6 +94,27 @@ struct extentity : entity                       // part of the entity that doesn
     void setnopickup(bool val) { if(val) flags |= EF_NOPICKUP; else flags &= ~EF_NOPICKUP; }
     void setnopickup() { flags |= EF_NOPICKUP; }
     void clearnopickup() { flags &= ~EF_NOPICKUP; }
+};
+
+// Editor snapshots contain configuration only, never extentity pointers or transient flags.
+struct entitysnapshot : entity
+{
+    lightshape emitter;
+    lightshadow shadow;
+    lightanimation animation;
+    lightattenuation attenuation;
+
+    entitysnapshot() {}
+    entitysnapshot(const extentity &e)
+        : entity(e), emitter(e.emitter), shadow(e.shadow), animation(e.animation), attenuation(e.attenuation) {}
+
+    void applylight(extentity &e) const
+    {
+        e.emitter = emitter;
+        e.shadow = shadow;
+        e.animation = animation;
+        e.attenuation = attenuation;
+    }
 };
 
 #define MAXENTS 10000

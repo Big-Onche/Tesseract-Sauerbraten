@@ -16,15 +16,16 @@ namespace lightfile
         PCSS_ENABLED = 15, PCSS_QUALITY, PCSS_BLOCKERS, PCSS_SAMPLES, PCSS_PENUMBRA, PCSS_DISTANCE, PCSS_MINPIXELS,
         SHADOW_ENABLED, INTENSITY, FLICKER_AMPLITUDE, FLICKER_FREQUENCY, FLICKER_NOISE, FLICKER_SEED,
         OFFSET_AMPLITUDE, OFFSET_FREQUENCY, OFFSET_NOISE, OFFSET_SEED, OFFSET_AXES, OFFSET_QUANTIZE = OFFSET_AXES+3,
-        BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE, ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, NUMVALUES
+        BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE,
+        ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, NUMVALUES
     };
 
     struct record
     {
         float values[NUMVALUES];
-        bool positioned;
+        bool positioned, attenuationexplicit;
 
-        record() : positioned(false)
+        record() : positioned(false), attenuationexplicit(false)
         {
             memset(values, 0, sizeof(values));
             values[COLOR] = values[COLOR+1] = values[COLOR+2] = 255;
@@ -91,7 +92,8 @@ namespace lightfile
         { "blink.fade", BLINK_FADE, 1, 0, 0.5f, false, true },
         { "attenuation.exponent", ATTENUATION_EXPONENT, 1, 0, 8, false, true },
         { "attenuation.min_distance", ATTENUATION_MINDISTANCE, 1, 0.01f, 4096, false, true },
-        { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true }
+        { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true },
+        { "attenuation.enabled", ATTENUATION_ENABLED, 1, 0, 1, true, true }
     };
     static const char *const shapes[] = { "point", "sphere", "disk", "capsule", "rectangle" };
 
@@ -207,6 +209,9 @@ namespace lightfile
                     return false;
                 if((p.index == PCSS_BLOCKERS || p.index == PCSS_SAMPLES) && current.values[p.index] == 0) return false;
                 if(p.index == POSITION) current.positioned = true;
+                if(p.index == ATTENUATION_ENABLED) current.attenuationexplicit = true;
+                else if(p.index >= ATTENUATION_EXPONENT && p.index <= ATTENUATION_EDGE && !current.attenuationexplicit)
+                    current.values[ATTENUATION_ENABLED] = 1;
                 return true;
             }
             return true; // Unknown optional fields are intentionally ignored.

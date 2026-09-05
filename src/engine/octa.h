@@ -268,7 +268,7 @@ struct editinfo
     editinfo() : copy(NULL) {}
 };
 
-struct undoent   { int i; entity e; };
+struct undoent   { int i; entitysnapshot e; };
 struct undoblock // undo header, all data sits in payload
 {
     undoblock *prev, *next;
