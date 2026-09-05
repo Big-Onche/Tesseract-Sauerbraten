@@ -129,10 +129,10 @@ namespace skyboxtint
     {
         vec fog = fogcolour.tocolor();
         vec suncol = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale)
-                                            : sunlight.tocolor().mul(sunlightscale);
+                                            : getdirectionallightcolor().tocolor().mul(getdirectionallightscale());
         if(suncol.x + suncol.y + suncol.z <= 1e-4f) suncol = vec(1, 1, 1);
 
-        float sunup = clamp(sunlightdir.z * 0.5f + 0.5f, 0.0f, 1.0f);
+        float sunup = clamp(getdirectionallightdir().z * 0.5f + 0.5f, 0.0f, 1.0f);
         float sunset = 1.0f - smoothstepf(0.35f, 0.85f, sunup);
         float haze = clamp(atmohaze * 0.20f, 0.0f, 1.0f);
         float density = clamp(1.0f - exp2f(-0.35f*max(atmodensity, 0.0f)), 0.0f, 1.0f);
@@ -141,7 +141,7 @@ namespace skyboxtint
         float brightscale = clamp(atmobright, 0.0f, 8.0f);
         float customsun = !atmosunlight.iszero() ? 1.0f : 0.0f;
 
-        vec2 sunh(sunlightdir);
+        vec2 sunh(getdirectionallightdir());
         if(sunh.squaredlen() > 1e-6f) sunh.normalize();
         else sunh = vec2(0, -1);
 
@@ -214,7 +214,7 @@ namespace skyboxtint
 
     static void proceduralcubetints(vec out[6], vec2 &front)
     {
-        front = vec2(sunlightdir);
+        front = vec2(getdirectionallightdir());
         if(front.squaredlen() > 1e-6f) front.normalize();
         else front = vec2(0, -1);
         vec2 right(-front.y, front.x);
@@ -735,9 +735,7 @@ CVAR1R(atmosundisk, 0);
 FVARR(atmosundisksize, 0, 6, 90);
 FVARR(atmosundiskcorona, 0, 0.6f, 1);
 FVARR(atmosundiskbright, 0, 4, 16);
-VARR(atmomoon, 0, 0, 1);
-FVARR(atmomoonyaw, 0, 0, 360);
-FVARR(atmomoonpitch, -90, 45, 90);
+FVARR(atmomoon, 0, 0, 1);
 FVARR(atmomoonsize, 0, 5.75, 90);
 FVARR(atmohaze, 0, 0.1f, 16);
 FVARR(atmodensity, 0, 1, 16);
@@ -943,7 +941,7 @@ static void getGalacticFromWorld(matrix3 &galacticFromWorld)
 
 static vec getAtmosphereMoonDirection()
 {
-    return vec(atmomoonyaw*RAD, atmomoonpitch*RAD).normalize();
+    return vec(moonlightyaw*RAD, moonlightpitch*RAD).normalize();
 }
 
 bool getatmospheremoon(vec &direction, float &halfangle)
@@ -1850,7 +1848,7 @@ static void drawAtmosphereSun(const matrix4 &celestialmatrix, const vec &directi
                               float planetradius, float atmosphereradius, float alpha)
 {
     float sundiskscale = sinf(0.5f*atmosundisksize*RAD);
-    if(alpha <= 0.0f || sundiskscale <= 0.0f || atmosundiskbright <= 0.0f) return;
+    if(!moonlight.iszero() || alpha <= 0.0f || sundiskscale <= 0.0f || atmosundiskbright <= 0.0f) return;
 
     extern float hdrgamma;
     vec diskcolor = vec(!atmosundisk.iszero() ? atmosundisk.tocolor() : suncolor).pow(hdrgamma).mul(ldrscale).mul(atmosundiskbright*4);
@@ -1896,7 +1894,7 @@ static void drawAtmosphereMoon(const matrix4 &celestialmatrix, const vec &sundir
     float halfangle = 0.5f*atmomoonsize*RAD, sinhalf = sinf(halfangle);
     if(!atmomoon || alpha <= 0.0f || sinhalf <= 0.0f) return;
 
-    float yaw = atmomoonyaw*RAD, pitch = atmomoonpitch*RAD;
+    float yaw = moonlightyaw*RAD, pitch = moonlightpitch*RAD;
     vec direction(yaw, pitch), moonright(cosf(yaw), sinf(yaw), 0),
         moonup(sinf(yaw)*sinf(pitch), -cosf(yaw)*sinf(pitch), cosf(pitch));
     float coshalf = cosf(halfangle), horizontal = sqrtf(max(1.0f - direction.z*direction.z, 0.0f));
@@ -2004,15 +2002,17 @@ static void drawatmosphere(float alpha = atmoalpha)
     glActiveTexture_(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, atmosphereTransmittanceTex);
 
-    vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale) : sunlight.tocolor().mul(sunlightscale);
+    vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(atmosunlightscale)
+                                        : getdirectionallightcolor().tocolor().mul(getdirectionallightscale());
     extern float hdrgamma;
     vec sunscale = vec(suncolor).pow(hdrgamma).mul(ldrscale).mul(atmobright * 16);
     vec normalizedsundir = sunlightdir;
     if(normalizedsundir.squaredlen() > 1e-8f) normalizedsundir.normalize();
     else normalizedsundir = vec(0, 0, 1);
-    LOCALPARAM(sundir, normalizedsundir);
+    // Scattering follows the active light; the solar direction still controls celestial geometry and lunar phase.
+    LOCALPARAM(sundir, getdirectionallightdir());
     vec normalizedmoondir = getAtmosphereMoonDirection();
-    float eclipsevisibility = getsolareclipsevisibility();
+    float eclipsevisibility = getdirectionallightvisibility();
 
     // A total eclipse retains a small cool multiple-scattered component from
     // the uneclipsed horizon while direct solar energy follows disk coverage.

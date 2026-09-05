@@ -2345,7 +2345,7 @@ FVARP(csmpcssmaxradius, 0, 8, 128);
 FVARP(csmpcsssoftness, 0, 0.2f, 16);
 FVARP(csmpcsscascadescale, 0, 0.5f, 1);
 
-extern float atmosundisksize, atmoalpha;
+extern float atmosundisksize, atmomoonsize, atmoalpha;
 
 static bool usecsmpcss()
 {
@@ -2421,13 +2421,13 @@ void cascadedshadowmap::updatesplitdist()
 void cascadedshadowmap::getmodelmatrix()
 {
     model = viewmatrix;
-    model.rotate_around_x(sunlightpitch*RAD);
-    model.rotate_around_z((180-sunlightyaw)*RAD);
+    model.rotate_around_x(getdirectionallightpitch()*RAD);
+    model.rotate_around_z((180 - getdirectionallightyaw())*RAD);
 }
 
 void cascadedshadowmap::getprojmatrix()
 {
-    lightview = vec(sunlightdir).neg();
+    lightview = vec(getdirectionallightdir()).neg();
 
     // compute the split frustums
     updatesplitdist();
@@ -2506,13 +2506,14 @@ void cascadedshadowmap::bindparams()
     GLOBALPARAMF(csmz, splits[0].center.z*-splits[0].scale.z, splits[0].scale.z);
     if(usecsmpcss())
     {
-        // The sky's sun disk size is an angular diameter in degrees. Read it each frame so edits need no shader rebuild.
-        GLOBALPARAMF(csmpcssparams, tanf(0.5f*atmosundisksize*RAD)*csmpcsssoftness, min(csmpcssminradius, csmpcssmaxradius),
+        // Use the active celestial disk's angular diameter; edits need no shader rebuild.
+        float disksize = moonlight.iszero() ? atmosundisksize : atmomoonsize;
+        GLOBALPARAMF(csmpcssparams, tanf(0.5f*disksize*RAD)*csmpcsssoftness, min(csmpcssminradius, csmpcssmaxradius),
                      csmpcssmaxradius, 1.0f/max(fabsf(splits[0].scale.z), 1e-12f));
         GLOBALPARAMF(csmpcssdistance, csmpcssdist, 1.0f/max(csmpcssdist*csmpcssfade, 1e-4f), csmpcsscascadescale);
         GLOBALPARAMF(csmpcsscounts, csmpcssblockers, csmpcsssamples);
         vec4 moondisk;
-        float visibility = getsolareclipsevisibility(&moondisk);
+        float visibility = getdirectionallightvisibility(&moondisk);
         vec moonoffset;
         model.transformnormal(vec(moondisk), moonoffset);
         // w = 0 bypasses the mask; w = -1 skips shadow work during totality.
@@ -2606,13 +2607,13 @@ void reflectiveshadowmap::setup()
 void reflectiveshadowmap::getmodelmatrix()
 {
     model = viewmatrix;
-    model.rotate_around_x(sunlightpitch*RAD);
-    model.rotate_around_z((180-sunlightyaw)*RAD);
+    model.rotate_around_x(getdirectionallightpitch()*RAD);
+    model.rotate_around_z((180 - getdirectionallightyaw())*RAD);
 }
 
 void reflectiveshadowmap::getprojmatrix()
 {
-    lightview = vec(sunlightdir).neg();
+    lightview = vec(getdirectionallightdir()).neg();
 
     // find z extent
     float minz = lightview.project_bb(worldmin, worldmax), maxz = lightview.project_bb(worldmax, worldmin),
@@ -2781,7 +2782,7 @@ void radiancehints::bindparams()
 
 bool useradiancehints()
 {
-    return !sunlight.iszero() && csmshadowmap && gi && giscale && gidist;
+    return !getdirectionallightcolor().iszero() && csmshadowmap && gi && giscale && gidist;
 }
 
 FVAR(avatarshadowdist, 0, 12, 100);
@@ -2955,7 +2956,7 @@ Shader *loaddeferredlightshader(const char *type = NULL)
     shadow[shadowlen] = '\0';
 
     int usecsm = 0, userh = 0;
-    if(!sunlight.iszero() && csmshadowmap)
+    if(!getdirectionallightcolor().iszero() && csmshadowmap)
     {
         usecsm = csmsplits;
         sun[sunlen++] = 'c';
@@ -3349,11 +3350,10 @@ static inline void setlightglobals(bool transparent = false)
         }
         else
         {
-            GLOBALPARAM(sunlightdir, sunlightdir);
-            float eclipsevisibility = getsolareclipsevisibility();
-            GLOBALPARAMF(sunlightcolor, sunlight.x*lightscale*sunlightscale*eclipsevisibility,
-                         sunlight.y*lightscale*sunlightscale*eclipsevisibility,
-                         sunlight.z*lightscale*sunlightscale*eclipsevisibility);
+            GLOBALPARAM(sunlightdir, getdirectionallightdir());
+            const bvec &color = getdirectionallightcolor();
+            float scale = lightscale*getdirectionallightscale()*getdirectionallightvisibility();
+            GLOBALPARAMF(sunlightcolor, color.x*scale, color.y*scale, color.z*scale);
             GLOBALPARAMF(giscale, 2*giscale);
             GLOBALPARAMF(skylightcolor, 2*giaoscale*skylight.x*lightscale*skylightscale, 2*giaoscale*skylight.y*lightscale*skylightscale, 2*giaoscale*skylight.z*lightscale*skylightscale);
         }
@@ -4845,7 +4845,7 @@ void rendercsmshadowmaps()
 
     csm.rendered = 0;
 
-    if(sunlight.iszero() || !csmshadowmap) return;
+    if(getdirectionallightcolor().iszero() || !csmshadowmap) return;
 
     csm.rendered = 1;
 

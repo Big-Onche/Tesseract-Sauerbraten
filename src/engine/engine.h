@@ -870,7 +870,7 @@ namespace volumetricClouds
 // Dedicated cloud crepuscular rays, separate from world volumetric lights.
 namespace godrays
 {
-    // Raymarched sunlight shafts occluded by CSM world geometry.
+    // Raymarched directional-light shafts occluded by CSM world geometry.
     namespace geometry
     {
         extern void render();

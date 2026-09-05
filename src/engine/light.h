@@ -43,12 +43,40 @@ struct PackNode
     void reserve(ushort tx, ushort ty, ushort tw, ushort th);
 };
 
-extern bvec ambient, skylight, sunlight;
-extern float ambientscale, skylightscale, sunlightscale;
-extern float sunlightyaw, sunlightpitch;
-extern vec sunlightdir;
+extern bvec ambient, skylight, sunlight, moonlight;
+extern float ambientscale, skylightscale, sunlightscale, moonlightscale;
+extern float sunlightyaw, sunlightpitch, moonlightyaw, moonlightpitch;
+extern vec sunlightdir, moonlightdir;
 extern bool getatmospheremoon(vec &direction, float &halfangle);
 extern float getsolareclipsevisibility(vec4 *disk = NULL);
+
+// Lighting effects share one directional source; celestial positions remain independent.
+inline const bvec &getdirectionallightcolor()
+{
+    return moonlight.iszero() ? sunlight : moonlight;
+}
+
+inline const vec &getdirectionallightdir()
+{
+    return moonlight.iszero() ? sunlightdir : moonlightdir;
+}
+
+inline float getdirectionallightscale()
+{
+    return moonlight.iszero() ? sunlightscale : moonlightscale;
+}
+
+inline float getdirectionallightyaw()
+{
+    return moonlight.iszero() ? sunlightyaw : moonlightyaw;
+}
+
+inline float getdirectionallightpitch()
+{
+    return moonlight.iszero() ? sunlightpitch : moonlightpitch;
+}
+
+extern float getdirectionallightvisibility(vec4 *disk = NULL);
 extern int fullbright, fullbrightlevel;
 
 extern void clearlights();

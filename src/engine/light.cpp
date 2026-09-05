@@ -10,6 +10,7 @@ FVARR(skylightscale, 0, 1, 16);
 extern void setupsunlight();
 CVAR1FR(sunlight, 0,
 {
+    if(!sunlight.iszero()) setvar("moonlight", 0, true);
     setupsunlight();
     cleardeferredlightshaders();
     clearshadowcache();
@@ -20,6 +21,28 @@ vec sunlightdir(0, 0, 1);
 extern void setsunlightdir();
 FVARFR(sunlightyaw, 0, 0, 360, setsunlightdir());
 FVARFR(sunlightpitch, -90, 90, 90, setsunlightdir());
+
+CVAR1FR(moonlight, 0,
+{
+    if(!moonlight.iszero()) setvar("sunlight", 0, true);
+    setupsunlight();
+    cleardeferredlightshaders();
+    clearshadowcache();
+});
+FVARFR(moonlightscale, 0, 1, 16, setupsunlight());
+
+vec moonlightdir(0, 45*RAD);
+extern void setmoonlightdir();
+FVARFR(moonlightyaw, 0, 0, 360, setmoonlightdir());
+FVARFR(moonlightpitch, -90, 45, 90, setmoonlightdir());
+
+void setmoonlightdir()
+{
+    moonlightdir = vec(moonlightyaw*RAD, moonlightpitch*RAD);
+    loopk(3) if(fabs(moonlightdir[k]) < 1e-5f) moonlightdir[k] = 0;
+    moonlightdir.normalize();
+    setupsunlight();
+}
 
 void setsunlightdir()
 {
@@ -32,6 +55,14 @@ void setsunlightdir()
 void setupsunlight()
 {
     clearradiancehintscache();
+}
+
+float getdirectionallightvisibility(vec4 *disk)
+{
+    if(moonlight.iszero()) return getsolareclipsevisibility(disk);
+    // The moon cannot eclipse its own light or shadow filter.
+    if(disk) *disk = vec4(0, 0, 0, 0);
+    return 1.0f;
 }
 
 static const surfaceinfo brightsurfaces[6] =

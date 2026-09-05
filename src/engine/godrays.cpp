@@ -624,7 +624,7 @@ namespace geometry
 
         if(shadowatlastarget == GL_TEXTURE_2D) SETSHADER(geometryGodRays2D);
         else SETSHADER(geometryGodRaysRect);
-        LOCALPARAM(sunDir, sunlightdir);
+        LOCALPARAM(sunDir, getdirectionallightdir());
         LOCALPARAM(sunColor, suncolor);
         LOCALPARAMF(godRayDepthScale, float(vieww)/bufferwidth, float(viewh)/bufferheight);
         LOCALPARAMF(godRayGeomParams, max(grgdensity, 0.25f), clamp(grgdecay, 0.0f, 1.0f), maxdistance, max(grgforwardexp, 0.25f));
@@ -783,11 +783,12 @@ namespace geometry
             return;
 
         const bool customcolour = _grgcolour != 0;
-        if((!customcolour && sunlight.iszero()) || sunlightscale <= 0.0f || sunlightdir.z <= 1.0e-4f || !ensurebuffers())
+        if((!customcolour && getdirectionallightcolor().iszero()) || getdirectionallightscale() <= 0.0f ||
+           getdirectionallightdir().z <= 1.0e-4f || !ensurebuffers())
             return;
 
-        vec suncolor = (customcolour ? grgcolour.tocolor() : sunlight.tocolor()).mul(max(sunlightscale, 0.0f)*getsolareclipsevisibility())
-                                                                             .mul(ldrscale * 2.0f);
+        vec suncolor = (customcolour ? grgcolour.tocolor() : getdirectionallightcolor().tocolor())
+                           .mul(max(getdirectionallightscale(), 0.0f)*getdirectionallightvisibility()).mul(ldrscale * 2.0f);
 
         if(suncolor.squaredlen() <= 1.0e-8f) return;
 

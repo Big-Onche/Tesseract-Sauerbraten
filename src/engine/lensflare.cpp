@@ -355,7 +355,7 @@ namespace lensFlares
     static bool shouldRender(bool sun = false)
     {
         if(!flares || (sun && sunflarestrength <= 0)) return false;
-        return !sun || (sunflares && !sunlight.iszero() && sunlightscale > 1.0e-4f);
+        return !sun || (sunflares && !getdirectionallightcolor().iszero() && getdirectionallightscale() > 1.0e-4f);
     }
 
     static float getFovScale()
@@ -916,7 +916,7 @@ namespace lensFlares
         if(!shouldRender(true)) return false;
 
         vec sunPoint(camera1->o);
-        sunPoint.madd(sunlightdir, max(nearplane*4.0f, 1.0f));
+        sunPoint.madd(getdirectionallightdir(), max(nearplane*4.0f, 1.0f));
 
         vec4 sunClip;
         camprojmatrix.transform(sunPoint, sunClip);
@@ -927,19 +927,19 @@ namespace lensFlares
 
         float screenEdge = max(fabsf(sunNdc.x), fabsf(sunNdc.y));
         float edgeFade = clamp(1.0f - max(screenEdge - 0.90f, 0.0f) / 0.40f, 0.0f, 1.0f);
-        float horizonFade = clamp((sunlightdir.z - 0.02f) / 0.10f, 0.0f, 1.0f);
+        float horizonFade = clamp((getdirectionallightdir().z - 0.02f) / 0.10f, 0.0f, 1.0f);
         float screenFade = edgeFade * horizonFade;
         if(screenFade <= 1.0e-4f) return false;
 
         float shaftScale = max(sunflareshaftsize / 100.0f, 0.01f);
         sunScreen = vec4(sunNdc.x * 0.5f + 0.5f, sunNdc.y * 0.5f + 0.5f, screenFade, shaftScale);
 
-        vec baseColor = sunlight.tocolor();
+        vec baseColor = getdirectionallightcolor().tocolor();
         float colorMax = max(max(baseColor.x, baseColor.y), baseColor.z);
         if(colorMax <= 1.0e-4f) return false;
 
-        float eclipseVisibility = getsolareclipsevisibility();
-        float sunScale = max(sunlightscale, 0.0f);
+        float eclipseVisibility = getdirectionallightvisibility();
+        float sunScale = max(getdirectionallightscale(), 0.0f);
         float sunLuma = (0.2126f*baseColor.x + 0.7152f*baseColor.y + 0.0722f*baseColor.z)*sunScale*eclipseVisibility;
         if(sunLuma <= 1.0e-4f) return false;
 
@@ -1078,7 +1078,7 @@ namespace lensFlares
 
         if(renderSun)
         {
-            if(!hardCenterVisible(sunlightdir, true, sunScreen, 1.0f))
+            if(!hardCenterVisible(getdirectionallightdir(), true, sunScreen, 1.0f))
             {
                 sunGeometryVisibilityTarget = sunOcclusionTarget = sunOcclusionSmoothed = 0.0f;
                 reportDebugOcclusion(1.0f, 1.0f, 0.0f);

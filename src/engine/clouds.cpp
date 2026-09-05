@@ -691,7 +691,7 @@ namespace volumetricClouds
         betamie = vec(lambda).recip().square().mul(k).mul(9.072e-17f / M_LN2 * atmohaze);
         betaozone = vec(ozone).mul(1.5e-7f / M_LN2 * atmoozone);
 
-        vec sdir = sunlightdir;
+        vec sdir = getdirectionallightdir();
         float slen = sdir.magnitude();
         if(slen > 1.0e-4f) sdir.div(slen);
         else sdir = vec(0, 0, 1);
@@ -701,8 +701,8 @@ namespace volumetricClouds
         sunweight = vec(betarayleigh).mul(sundepth.x).madd(betamie, sundepth.y).madd(betaozone, sundepth.z - sundepth.x);
         vec sunextinction = vec(sunweight).neg().exp2();
         vec suncolor = !atmosunlight.iszero() ? atmosunlight.tocolor().mul(max(atmosunlightscale, 0.0f))
-                                              : sunlight.tocolor().mul(max(sunlightscale, 0.0f));
-        vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16 * getsolareclipsevisibility());
+                                              : getdirectionallightcolor().tocolor().mul(max(getdirectionallightscale(), 0.0f));
+        vec sunscale = vec(suncolor).mul(ldrscale).pow(hdrgamma).mul(atmobright * 16 * getdirectionallightvisibility());
         sunscale.mul(sunextinction);
         float maxsunweight = max(max(sunweight.x, sunweight.y), sunweight.z);
         if(maxsunweight > 127) sunweight.mul(127 / maxsunweight);
@@ -787,19 +787,21 @@ namespace volumetricClouds
         static float cachedcolorscale = 0.0f;
         static bool valid = false;
 
-        vec sourcecolor(float(sunlight.x), float(sunlight.y), float(sunlight.z));
+        const bvec &lightcolor = getdirectionallightcolor();
+        const vec &lightdir = getdirectionallightdir();
+        vec sourcecolor(float(lightcolor.x), float(lightcolor.y), float(lightcolor.z));
         vec phase(vcphaseg, vcphaseg2, vcphaseblend);
         vec4 multiscat(vcmultiscat, vcmultiscatext, vcmultiscatphase, float(vcmultiscatoctaves));
-        float eclipsevisibility = getsolareclipsevisibility();
-        float colorscale = 2.0f * ldrscaleb * sunlightscale * eclipsevisibility;
-        if(valid && cacheddirection.x == sunlightdir.x && cacheddirection.y == sunlightdir.y && cacheddirection.z == sunlightdir.z &&
+        float eclipsevisibility = getdirectionallightvisibility();
+        float colorscale = 2.0f * ldrscaleb * getdirectionallightscale() * eclipsevisibility;
+        if(valid && cacheddirection.x == lightdir.x && cacheddirection.y == lightdir.y && cacheddirection.z == lightdir.z &&
            cachedcolor.x == sourcecolor.x && cachedcolor.y == sourcecolor.y && cachedcolor.z == sourcecolor.z &&
            cachedphase.x == phase.x && cachedphase.y == phase.y && cachedphase.z == phase.z &&
            cachedmultiscat.x == multiscat.x && cachedmultiscat.y == multiscat.y && cachedmultiscat.z == multiscat.z &&
            cachedmultiscat.w == multiscat.w && cachedcolorscale == colorscale) return params;
 
         valid = true;
-        cacheddirection = sunlightdir;
+        cacheddirection = lightdir;
         cachedcolor = sourcecolor;
         cachedphase = phase;
         cachedmultiscat = multiscat;
@@ -857,7 +859,8 @@ namespace volumetricClouds
 
     static vec4 calcsilverscreenparams(const vec &sdir)
     {
-        if(vcsilverradius <= 0 || sunlight.iszero() || sunlightscale*getsolareclipsevisibility() <= 1.0e-4f) return vec4(0, 0, 0, 0);
+        if(vcsilverradius <= 0 || getdirectionallightcolor().iszero() || getdirectionallightscale()*getdirectionallightvisibility() <= 1.0e-4f)
+            return vec4(0, 0, 0, 0);
 
         vec sunpoint(camera1->o);
         sunpoint.madd(sdir, max(nearplane * 4.0f, 1.0f));
