@@ -2959,6 +2959,9 @@ void gl_setupframe(bool force)
 void gl_drawframe()
 {
     synctimers();
+    // Advance once per displayed frame so every lighting pass shares the same bounded PCSS seed.
+    static uint shadowframe = 0;
+    GLOBALPARAMF(localpcssframe, float(shadowframe++ & 4095));
     xtravertsva = xtraverts = glde = gbatches = vtris = vverts = 0;
     flipqueries();
     aspect = forceaspect ? forceaspect : hudw/float(hudh);
