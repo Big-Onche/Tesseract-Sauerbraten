@@ -1684,6 +1684,8 @@ static lightfile::record lightrecord(const extentity &e)
     loopi(3) r.values[OFFSET_AXES+i] = a.offsetaxes[i];
     r.values[BLINK_FREQUENCY] = a.blinkfrequency; r.values[BLINK_DUTY] = a.blinkduty;
     r.values[BLINK_PHASE] = a.blinkphase; r.values[BLINK_FADE] = a.blinkfade;
+    r.values[SECONDARY_COLOR] = e.secondary.color;
+    r.values[SECONDARY_RADIUS] = clamp(e.secondary.radius, 0.0f, float(max(int(e.attr1), 0)));
     r.values[ATTENUATION_ENABLED] = e.attenuation.enabled;
     r.values[ATTENUATION_EXPONENT] = e.attenuation.exponent;
     r.values[ATTENUATION_MINDISTANCE] = e.attenuation.mindistance; r.values[ATTENUATION_EDGE] = e.attenuation.edge;
@@ -1708,6 +1710,8 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
     loopi(3) a.offsetaxes[i] = r.values[OFFSET_AXES+i];
     a.blinkfrequency = r.values[BLINK_FREQUENCY]; a.blinkduty = r.values[BLINK_DUTY];
     a.blinkphase = r.values[BLINK_PHASE]; a.blinkfade = r.values[BLINK_FADE];
+    e.secondary.color = int(r.values[SECONDARY_COLOR]);
+    e.secondary.radius = clamp(r.values[SECONDARY_RADIUS], 0.0f, float(max(int(e.attr1), 0)));
     e.attenuation.enabled = r.values[ATTENUATION_ENABLED] != 0;
     e.attenuation.exponent = r.values[ATTENUATION_EXPONENT];
     e.attenuation.mindistance = r.values[ATTENUATION_MINDISTANCE]; e.attenuation.edge = r.values[ATTENUATION_EDGE];
@@ -1725,7 +1729,7 @@ ICOMMAND(lightuifloat, "f", (float *value),
     result(text);
 });
 
-// Get/set animation and attenuation properties on the selected light(s), using the sidecar's validation.
+// Get/set extended light properties on the selected light(s), using the sidecar's validation.
 ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numargs),
 {
     const lightfile::property *property = NULL;
@@ -1733,7 +1737,7 @@ ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numarg
         if(!strcmp(name, lightfile::properties[i].name)) { property = &lightfile::properties[i]; break; }
     if(!property || property->index < lightfile::INTENSITY)
     {
-        conoutf(CON_ERROR, "unknown animation/attenuation property: %s", name);
+        conoutf(CON_ERROR, "unknown extended light property: %s", name);
         return;
     }
     if(*numargs < 2)
@@ -1742,7 +1746,8 @@ ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numarg
         {
             const lightfile::record r = lightrecord(e);
             string output = "";
-            loopi(property->count) concatstring(output, tempformatstring(i ? " %.9g" : "%.9g", r.values[property->index+i]));
+            if(property->index == lightfile::SECONDARY_COLOR) formatstring(output, "0x%06X", unsigned(r.values[property->index]));
+            else loopi(property->count) concatstring(output, tempformatstring(i ? " %.9g" : "%.9g", r.values[property->index+i]));
             result(output);
         });
         return;

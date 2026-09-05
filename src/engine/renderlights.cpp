@@ -1837,6 +1837,7 @@ animatedlightstate evaluatelight(const extentity &e, int millis)
         state.o[i] += offset;
     }
     state.color = vec(e.attr2, e.attr3, e.attr4).max(0).mul(intensity);
+    state.secondarycolor = vec((e.secondary.color >> 16)&0xFF, (e.secondary.color >> 8)&0xFF, e.secondary.color&0xFF).mul(intensity);
     return state;
 }
 
@@ -1844,7 +1845,8 @@ struct lightinfo
 {
     int ent, shadowmap;
     ushort flags, batched;
-    vec o, color;
+    vec o, color, secondarycolor;
+    float secondaryradius;
     lightattenuation attenuation;
     float radius, dist;
     vec dir, spotx, spoty;
@@ -1855,7 +1857,7 @@ struct lightinfo
     lightinfo() {}
     lightinfo(const vec &o, const vec &color, float radius, ushort flags = 0, const vec &dir = vec(0, 0, 0), int spot = 0)
       : ent(-1), shadowmap(-1), flags(flags), batched(~0),
-        o(o), color(color), radius(radius), dist(camera1->o.dist(o)),
+        o(o), color(color), secondarycolor(0, 0, 0), secondaryradius(0), radius(radius), dist(camera1->o.dist(o)),
         dir(dir), spot(spot), query(NULL)
     {
         if(spot > 0) calcspot();
@@ -1863,12 +1865,14 @@ struct lightinfo
     }
     lightinfo(int i, const extentity &e)
       : ent(i), shadowmap(-1), flags(e.attr5), batched(~0),
-        o(e.o), color(0, 0, 0), attenuation(e.attenuation), radius(e.attr1), dist(0),
+        o(e.o), color(0, 0, 0), secondarycolor(0, 0, 0), secondaryradius(clamp(e.secondary.radius, 0.0f, float(max(int(e.attr1), 0)))),
+        attenuation(e.attenuation), radius(e.attr1), dist(0),
         dir(0, 0, 0), spot(0), query(NULL)
     {
         const animatedlightstate state = evaluatelight(e, lastmillis);
         o = state.o;
         color = state.color;
+        secondarycolor = state.secondarycolor;
         dist = camera1->o.dist(o);
         if(e.attached && e.attached->type == ET_SPOTLIGHT)
         {
@@ -3369,6 +3373,8 @@ static LocalShaderParam emitterdistance("emitterdistance");
 static vec2 emitterdistancev[8];
 static LocalShaderParam lightattenuationparam("lightattenuation");
 static vec4 lightattenuationv[8];
+static LocalShaderParam lightsecondaryparam("lightsecondary");
+static vec4 lightsecondaryv[8];
 
 static inline void setlightparams(int i, const lightinfo &l)
 {
@@ -3398,6 +3404,7 @@ static inline void setlightparams(int i, const lightinfo &l)
     lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation && l.attenuation.enabled);
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
+    lightsecondaryv[i] = vec4(vec(l.secondarycolor).mul(2*ldrscaleb), l.secondaryradius/l.radius);
     if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
     if(l.shadowmap >= 0)
     {
@@ -3431,6 +3438,7 @@ static inline void setlightshader(Shader *s, int n, bool baselight, bool shadowm
     s->setvariant(n - (variant&7 ? 1 : 0), variant);
     lightpos.setv(lightposv, n);
     lightcolor.setv(lightcolorv, n);
+    lightsecondaryparam.setv(lightsecondaryv, n);
     emitterparams.setv(emitterparamsv, n);
     emitterx.setv(emitterxv, n);
     emittery.setv(emitteryv, n);
@@ -3813,6 +3821,8 @@ void rendervolumetric()
         LOCALPARAM(lightpos, vec4(l.o, 1).div(l.radius));
         vec color = vec(l.color).mul(ldrscaleb).mul(volcolour.tocolor().mul(volscale));
         LOCALPARAM(lightcolor, color);
+        vec innercolor = vec(l.secondarycolor).mul(ldrscaleb).mul(volcolour.tocolor().mul(volscale));
+        LOCALPARAM(lightsecondary, vec4(innercolor, l.secondaryradius/l.radius));
 
         if(l.shadowmap >= 0)
         {
@@ -4015,7 +4025,7 @@ void collectlights()
         }
 
         const lightinfo candidate(i, *e);
-        if(candidate.color.iszero()) continue;
+        if(candidate.color.iszero() && (candidate.secondaryradius <= 0 || candidate.secondarycolor.iszero())) continue;
         if(smviscull)
         {
             if(isfoggedsphere(candidate.radius, candidate.o)) continue;

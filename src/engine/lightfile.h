@@ -17,7 +17,7 @@ namespace lightfile
         SHADOW_ENABLED, INTENSITY, FLICKER_AMPLITUDE, FLICKER_FREQUENCY, FLICKER_NOISE, FLICKER_SEED,
         OFFSET_AMPLITUDE, OFFSET_FREQUENCY, OFFSET_NOISE, OFFSET_SEED, OFFSET_AXES, OFFSET_QUANTIZE = OFFSET_AXES+3,
         BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE,
-        ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, NUMVALUES
+        ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, SECONDARY_COLOR, SECONDARY_RADIUS, NUMVALUES
     };
 
     struct record
@@ -40,6 +40,7 @@ namespace lightfile
             values[ATTENUATION_EXPONENT] = 2;
             values[ATTENUATION_MINDISTANCE] = 16;
             values[ATTENUATION_EDGE] = 0.1f;
+            values[SECONDARY_COLOR] = 0xFFFFFF;
         }
     };
 
@@ -93,7 +94,9 @@ namespace lightfile
         { "attenuation.exponent", ATTENUATION_EXPONENT, 1, 0, 8, false, true },
         { "attenuation.min_distance", ATTENUATION_MINDISTANCE, 1, 0.01f, 4096, false, true },
         { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true },
-        { "attenuation.enabled", ATTENUATION_ENABLED, 1, 0, 1, true, true }
+        { "attenuation.enabled", ATTENUATION_ENABLED, 1, 0, 1, true, true },
+        { "secondary.color", SECONDARY_COLOR, 1, 0, 16777215, true, true },
+        { "secondary.radius", SECONDARY_RADIUS, 1, 0, 32767, false, true }
     };
     static const char *const shapes[] = { "point", "sphere", "disk", "capsule", "rectangle" };
 
@@ -245,6 +248,8 @@ namespace lightfile
                 {
                     char value[64];
                     if(p.index == SHAPE) std::snprintf(value, sizeof(value), " %s", shapes[int(records[i].values[SHAPE])]);
+                    else if(p.index == SECONDARY_COLOR)
+                        std::snprintf(value, sizeof(value), " 0x%06X", unsigned(records[i].values[SECONDARY_COLOR]));
                     else std::snprintf(value, sizeof(value), " %.9g", records[i].values[p.index+k]);
                     append(text, value);
                 }

@@ -87,6 +87,6 @@ extern void check_calclight_canceled();
 // A deterministic snapshot. Render passes consume the collected lightinfo made from this state.
 struct animatedlightstate
 {
-    vec o, color;
+    vec o, color, secondarycolor;
 };
 extern animatedlightstate evaluatelight(const extentity &e, int millis);

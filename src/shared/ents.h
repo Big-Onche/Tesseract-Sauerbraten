@@ -74,6 +74,14 @@ struct lightattenuation
     lightattenuation() : enabled(false), exponent(2), mindistance(16), edge(0.1f) {}
 };
 
+struct lightsecondary
+{
+    int color;
+    float radius;
+
+    lightsecondary() : color(0xFFFFFF), radius(0) {}
+};
+
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
 {
     int flags;  // the only dynamic state of a map entity
@@ -82,6 +90,7 @@ struct extentity : entity                       // part of the entity that doesn
     lightshadow shadow;
     lightanimation animation;
     lightattenuation attenuation;
+    lightsecondary secondary;
 
     extentity() : flags(0), attached(NULL) {}
 
@@ -103,10 +112,11 @@ struct entitysnapshot : entity
     lightshadow shadow;
     lightanimation animation;
     lightattenuation attenuation;
+    lightsecondary secondary;
 
     entitysnapshot() {}
     entitysnapshot(const extentity &e)
-        : entity(e), emitter(e.emitter), shadow(e.shadow), animation(e.animation), attenuation(e.attenuation) {}
+        : entity(e), emitter(e.emitter), shadow(e.shadow), animation(e.animation), attenuation(e.attenuation), secondary(e.secondary) {}
 
     void applylight(extentity &e) const
     {
@@ -114,6 +124,7 @@ struct entitysnapshot : entity
         e.shadow = shadow;
         e.animation = animation;
         e.attenuation = attenuation;
+        e.secondary = secondary;
     }
 };
 
