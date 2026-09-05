@@ -27,10 +27,27 @@ enum
     EF_NOPICKUP  = 1<<9
 };
 
+// Runtime emitter geometry. Never serialized with entity or the .lit sidecar.
+enum { LIGHT_POINT = 0, LIGHT_SPHERE, LIGHT_DISK, LIGHT_CAPSULE, LIGHT_RECTANGLE };
+struct lightshape
+{
+    int type;
+    float radius, width, height, yaw, pitch, roll;
+
+    lightshape() : type(LIGHT_POINT), radius(0), width(0), height(0), yaw(0), pitch(0), roll(0) {}
+
+    void axes(vec &x, vec &y) const
+    {
+        x = vec(1, 0, 0).rotate_around_x(roll*RAD).rotate_around_y(pitch*RAD).rotate_around_z(yaw*RAD);
+        y = vec(0, 1, 0).rotate_around_x(roll*RAD).rotate_around_y(pitch*RAD).rotate_around_z(yaw*RAD);
+    }
+};
+
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
 {
     int flags;  // the only dynamic state of a map entity
     extentity *attached;
+    lightshape emitter;
 
     extentity() : flags(0), attached(NULL) {}
 

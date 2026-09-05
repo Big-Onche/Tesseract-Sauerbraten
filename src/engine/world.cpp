@@ -493,6 +493,32 @@ void attachentities()
 #define groupeditundo(f){ makeundoent(); groupeditpure(f); }
 #define groupedit(f)    { addimplicit(groupeditundo(f)); }
 
+// Selection/hover command; intentionally bypasses persistent entity attributes.
+ICOMMAND(lightshape, "iffffff", (int *type, float *radius, float *width, float *height, float *yaw, float *pitch, float *roll),
+{
+    if(noentedit()) return;
+    addimplicit(groupeditpure(if(e.type == ET_LIGHT)
+    {
+        e.emitter.type = clamp(*type, int(LIGHT_POINT), int(LIGHT_RECTANGLE));
+        e.emitter.radius = clamp(*radius, 0.0f, 4096.0f);
+        e.emitter.width = clamp(*width, 0.0f, 8192.0f);
+        e.emitter.height = clamp(*height, 0.0f, 8192.0f);
+        e.emitter.yaw = clamp(*yaw, -360.0f, 360.0f);
+        e.emitter.pitch = clamp(*pitch, -360.0f, 360.0f);
+        e.emitter.roll = clamp(*roll, -360.0f, 360.0f);
+    }));
+});
+
+ICOMMAND(getlightshape, "", (),
+{
+    entfocus(efocus, if(e.type == ET_LIGHT)
+    {
+        const lightshape &s = e.emitter;
+        defformatstring(value, "%d %g %g %g %g %g %g", s.type, s.radius, s.width, s.height, s.yaw, s.pitch, s.roll);
+        result(value);
+    });
+});
+
 vec getselpos()
 {
     vector<extentity *> &ents = entities::getents();
@@ -746,6 +772,55 @@ void renderentbox(const extentity &e, const vec &center, const vec &radius, int 
     xtraverts += gle::end();
 }
 
+VAR(showlightshapes, 0, 1, 1);
+
+static void renderlightshape(const extentity &e)
+{
+    if(!showlightshapes) return;
+    const lightshape &s = e.emitter;
+    vec x, y;
+    s.axes(x, y);
+    vec z;
+    z.cross(x, y);
+    gle::begin(GL_LINES);
+    if(s.type == LIGHT_RECTANGLE)
+    {
+        loopi(4)
+        {
+            loopj(2)
+            {
+                int corner = (i+j)%4;
+                float u = corner == 1 || corner == 2 ? 0.5f : -0.5f, v = corner >= 2 ? 0.5f : -0.5f;
+                gle::attrib(vec(e.o).add(vec(x).mul(u*s.width)).add(vec(y).mul(v*s.height)));
+            }
+        }
+    }
+    else
+    {
+        int rings = s.type == LIGHT_DISK ? 1 : 3;
+        loopk(s.type == LIGHT_CAPSULE ? 2 : 1)
+        {
+            vec center = vec(e.o).add(vec(x).mul(s.type == LIGHT_CAPSULE ? (k ? 0.5f : -0.5f)*s.width : 0));
+            loopj(rings) loopi(32)
+            {
+                vec u = j == 2 ? y : x, v = j == 0 ? y : z;
+                loopl(2)
+                {
+                    float angle = (i+l)*2*M_PI/32;
+                    gle::attrib(vec(center).add(vec(u).mul(s.radius*cosf(angle))).add(vec(v).mul(s.radius*sinf(angle))));
+                }
+            }
+        }
+        if(s.type == LIGHT_CAPSULE) loopi(4)
+        {
+            vec offset = vec(i&1 ? y : z).mul(i&2 ? -s.radius : s.radius);
+            gle::attrib(vec(e.o).add(offset).sub(vec(x).mul(s.width*0.5f)));
+            gle::attrib(vec(e.o).add(offset).add(vec(x).mul(s.width*0.5f)));
+        }
+    }
+    gle::end();
+}
+
 void renderentradius(extentity &e, bool color)
 {
     switch(e.type)
@@ -754,6 +829,7 @@ void renderentradius(extentity &e, bool color)
             if(e.attr1 <= 0) break;
             if(color) gle::colorf(e.attr2/255.0f, e.attr3/255.0f, e.attr4/255.0f);
             renderentsphere(e, e.attr1);
+            renderlightshape(e);
             break;
 
         case ET_SPOTLIGHT:

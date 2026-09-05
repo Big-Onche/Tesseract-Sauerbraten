@@ -1757,6 +1757,20 @@ PackNode shadowatlaspacker(0, 0, SHADOWATLAS_SIZE, SHADOWATLAS_SIZE);
 
 extern int smminradius;
 
+VARP(localshapes, 0, 1, 1);
+VARP(localpcss, 0, 1, 1);
+VARP(localpcssquality, 0, 1, 2);
+VARP(localpcssblockers, 1, 12, 32);
+VARP(localpcsssamples, 1, 16, 64);
+FVARP(localpcssmaxpenumbra, 0, 16, 128);
+FVARP(localpcssdist, 0, 512, 16384);
+FVARP(localpcssminpixels, 0, 24, 1024);
+
+static bool uselocalpcss()
+{
+    return localshapes && localpcss && glGenSamplers_ && glDeleteSamplers_ && glBindSampler_ && glSamplerParameteri_;
+}
+
 struct lightinfo
 {
     int ent, shadowmap;
@@ -3159,7 +3173,7 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
     }
     glActiveTexture_(GL_TEXTURE12);
     glBindTexture(GL_TEXTURE_3D, skyvistex);
-    if(usecsmpcss() && csm.rendered && drawtex != DRAWTEX_MINIMAP)
+    if((uselocalpcss() || (usecsmpcss() && csm.rendered)) && drawtex != DRAWTEX_MINIMAP)
     {
         if(!csmpcsssampler)
         {
@@ -3173,12 +3187,16 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
         glActiveTexture_(GL_TEXTURE13);
         glBindTexture(shadowatlastarget, shadowatlastex);
         glBindSampler_(13, csmpcsssampler);
+        glActiveTexture_(GL_TEXTURE14);
+        glBindTexture(shadowatlastarget, shadowatlastex);
+        glBindSampler_(14, csmpcsssampler);
     }
     glActiveTexture_(GL_TEXTURE0);
 }
 
 static inline void setlightglobals(bool transparent = false)
 {
+    GLOBALPARAMF(localpcssdistance, localpcssdist, 1.0f/max(localpcssdist*0.25f, 1.0f));
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
     if(skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
     {
@@ -3269,8 +3287,26 @@ static LocalShaderParam lightpos("lightpos"), lightcolor("lightcolor"), spotpara
 static vec4 lightposv[8], lightcolorv[8], spotparamsv[8], shadowparamsv[8];
 static vec2 shadowoffsetv[8];
 
+static LocalShaderParam emitterparams("emitterparams"), emitterx("emitterx"), emittery("emittery"), emitterpcss("emitterpcss");
+static vec4 emitterparamsv[8], emitterxv[8], emitteryv[8], emitterpcssv[8];
+
 static inline void setlightparams(int i, const lightinfo &l)
 {
+    lightshape shape;
+    // Attached spotlights retain their existing cone and filtering.
+    if(localshapes && l.ent >= 0 && !l.spot) shape = entities::getents()[l.ent]->emitter;
+    vec x, y;
+    shape.axes(x, y);
+    emitterparamsv[i] = vec4(shape.type, shape.radius/l.radius, shape.width*0.5f/l.radius, shape.height*0.5f/l.radius);
+    emitterxv[i] = vec4(x, 0);
+    emitteryv[i] = vec4(y, 0);
+    float pixels = min((l.sx2-l.sx1)*vieww, (l.sy2-l.sy1)*viewh)*0.5f;
+    float lod = clamp((localpcssdist - max(l.dist-l.radius, 0.0f))/max(localpcssdist*0.25f, 1.0f), 0.0f, 1.0f);
+    lod *= clamp((pixels-localpcssminpixels)/max(localpcssminpixels, 1.0f), 0.0f, 1.0f);
+    if(!uselocalpcss() || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
+    emitterpcssv[i] = vec4(lod, localpcssmaxpenumbra,
+                         max(1.0f, floorf(min(localpcssblockers, 8 << localpcssquality)*lod)),
+                         max(1.0f, floorf(min(localpcsssamples, 16 << localpcssquality)*lod)));
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
     if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
@@ -3306,6 +3342,10 @@ static inline void setlightshader(Shader *s, int n, bool baselight, bool shadowm
     s->setvariant(n - (variant&7 ? 1 : 0), variant);
     lightpos.setv(lightposv, n);
     lightcolor.setv(lightcolorv, n);
+    emitterparams.setv(emitterparamsv, n);
+    emitterx.setv(emitterxv, n);
+    emittery.setv(emitteryv, n);
+    emitterpcss.setv(emitterpcssv, n);
     if(spotlight) spotparams.setv(spotparamsv, n);
     if(shadowmap)
     {
@@ -3587,7 +3627,7 @@ void renderlights(float bsx1 = -1, float bsy1 = -1, float bsx2 = 1, float bsy2 =
     }
     else if(avatar && !stencilmask) glDisable(GL_STENCIL_TEST);
 
-    if(usecsmpcss() && csm.rendered && drawtex != DRAWTEX_MINIMAP) glBindSampler_(13, 0);
+    if((uselocalpcss() || (usecsmpcss() && csm.rendered)) && drawtex != DRAWTEX_MINIMAP) { glBindSampler_(13, 0); glBindSampler_(14, 0); }
 
     glDisable(GL_BLEND);
 
@@ -4871,6 +4911,11 @@ void rendershadowmaps(int offset = 0)
             sidemask = drawtex == DRAWTEX_MINIMAP ? 0x2F : (smsidecull ? cullfrustumsides(l.o, l.radius, sm.size, border) : 0x3F);
         }
 
+        if(!l.spot && localshapes && l.ent >= 0)
+        {
+            const lightshape &shape = entities::getents()[l.ent]->emitter;
+            if(shape.radius > 0 || shape.width > 0 || shape.height > 0) sidemask = 0x3F;
+        }
         sm.sidemask = sidemask;
 
         shadoworigin = l.o;
