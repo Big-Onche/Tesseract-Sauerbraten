@@ -1759,11 +1759,12 @@ extern int smminradius;
 
 VARP(localshapes, 0, 1, 1);
 VARP(localpcss, 0, 1, 1);
+VARP(localpcssadaptive, 0, 1, 1);
 VARP(localpcssquality, 0, 1, 2);
-VARP(localpcssblockers, 1, 12, 32);
-VARP(localpcsssamples, 1, 16, 64);
+VARP(localpcssblockers, 1, 8, 32);
+VARP(localpcsssamples, 1, 8, 64);
 FVARP(localpcssmaxpenumbra, 0, 16, 128);
-FVARP(localpcssdist, 0, 512, 16384);
+FVARP(localpcssdist, 0, 128, 16384);
 FVARP(localpcssminpixels, 0, 24, 1024);
 
 static bool uselocalpcss()
@@ -3276,7 +3277,7 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
 
 static inline void setlightglobals(bool transparent = false)
 {
-    GLOBALPARAMF(localpcssdistance, localpcssdist, 1.0f/max(localpcssdist*0.25f, 1.0f));
+    GLOBALPARAMF(localpcssadaptive, localpcssadaptive);
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
     if(skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
     {
