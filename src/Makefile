@@ -559,3 +559,6 @@ standalone/engine/engine.h.gch: engine/world.h
 standalone/game/game.h.gch: shared/cube.h shared/tools.h shared/geom.h
 standalone/game/game.h.gch: shared/ents.h shared/command.h shared/iengine.h
 standalone/game/game.h.gch: shared/igame.h game/ai.h game/monster.h
+
+# Named-property light sidecar codec.
+engine/world.o: engine/lightfile.h

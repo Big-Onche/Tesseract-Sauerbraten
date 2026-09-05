@@ -1640,64 +1640,136 @@ void mpeditent(int i, const vec &o, int type, int attr1, int attr2, int attr3, i
 int getworldsize() { return worldsize; }
 int getmapversion() { return mapversion; }
 
-void saveLightEntities() // Sauerract | Save light entities in a separate file to fix lights on some maps
+#include "lightfile.h"
+
+static lightfile::record lightrecord(const extentity &e)
 {
-    defformatstring(filePath, "packages/map/%s.lit", game::getclientmap());
-    stream *lightFile = openutf8file(filePath, "w"); // Open a file to write the light data
-    if(!lightFile) { conoutf(CON_ERROR, "unable to create light file"); return; }
-
-    const vector<extentity *> &ents = entities::getents(); // Get all entities on the loaded map
-    int numLights = 0;
-
-    loopv(ents) // Loop through ents vector length (= all entities)
-    {
-        const extentity &e = *ents[i];
-        if(e.type==ET_LIGHT) // Write light coordinates and attributes on each line
-        {
-            lightFile->printf("%s\n", tempformatstring("%f %f %f %d %d %d %d %d", e.o.x, e.o.y, e.o.z, e.attr1, e.attr2, e.attr3, e.attr4, e.attr5));
-            numLights++;
-        }
-    }
-    conoutf("saved %d lights in %s", numLights, filePath);
-    lightFile->close();
+    using namespace lightfile;
+    record r;
+    loopi(3) { r.values[POSITION+i] = e.o[i]; }
+    r.positioned = true;
+    r.values[COLOR] = e.attr2; r.values[COLOR+1] = e.attr3; r.values[COLOR+2] = e.attr4;
+    r.values[RANGE] = e.attr1; r.values[FLAGS] = e.attr5;
+    r.values[SHAPE] = e.emitter.type; r.values[SOURCE_RADIUS] = e.emitter.radius;
+    r.values[WIDTH] = e.emitter.width; r.values[HEIGHT] = e.emitter.height;
+    r.values[ORIENTATION] = e.emitter.yaw; r.values[ORIENTATION+1] = e.emitter.pitch; r.values[ORIENTATION+2] = e.emitter.roll;
+    r.values[PCSS_ENABLED] = e.shadow.enabled; r.values[PCSS_QUALITY] = e.shadow.quality;
+    r.values[PCSS_BLOCKERS] = e.shadow.blockers; r.values[PCSS_SAMPLES] = e.shadow.samples;
+    r.values[PCSS_PENUMBRA] = e.shadow.penumbra; r.values[PCSS_DISTANCE] = e.shadow.distance; r.values[PCSS_MINPIXELS] = e.shadow.minpixels;
+    r.values[SHADOW_ENABLED] = !(e.attr5&L_NOSHADOW);
+    return r;
 }
-ICOMMAND(savelights, "", (), saveLightEntities());
 
-void loadLightEntities(bool msg = true, const char *mapName = NULL) // Sauerract | Load lights from a .lit file
+static void applylightrecord(extentity &e, const lightfile::record &r)
 {
-    defformatstring(filePath, "packages/map/%s.lit", mapName ? mapName : game::getclientmap());
-    stream *lightFile = openfile(filePath, "r"); // Open a file to read the light data
-
-    if(!lightFile)
+    using namespace lightfile;
+    e.emitter.type = int(r.values[SHAPE]); e.emitter.radius = r.values[SOURCE_RADIUS];
+    e.emitter.width = r.values[WIDTH]; e.emitter.height = r.values[HEIGHT];
+    e.emitter.yaw = r.values[ORIENTATION]; e.emitter.pitch = r.values[ORIENTATION+1]; e.emitter.roll = r.values[ORIENTATION+2];
+    e.shadow.enabled = int(r.values[PCSS_ENABLED]); e.shadow.quality = int(r.values[PCSS_QUALITY]);
+    e.shadow.blockers = int(r.values[PCSS_BLOCKERS]); e.shadow.samples = int(r.values[PCSS_SAMPLES]);
+    e.shadow.penumbra = r.values[PCSS_PENUMBRA]; e.shadow.distance = r.values[PCSS_DISTANCE]; e.shadow.minpixels = r.values[PCSS_MINPIXELS];
+    if(r.values[SHADOW_ENABLED] >= 0)
     {
-        if(msg) conoutf(CON_ERROR, "unable to read light file");
+        if(r.values[SHADOW_ENABLED] == 0) e.attr5 |= L_NOSHADOW;
+        else e.attr5 &= ~L_NOSHADOW;
+    }
+}
+
+void saveLightEntities()
+{
+    defformatstring(filename, "packages/map/%s.lit", game::getclientmap());
+    defformatstring(tempname, "%s.tmp", filename);
+    vector<lightfile::record> records;
+    const vector<extentity *> &ents = entities::getents();
+    loopv(ents) if(ents[i]->type == ET_LIGHT) records.add(lightrecord(*ents[i]));
+    vector<char> data;
+    lightfile::serialize(records, data);
+    stream *file = openfile(tempname, "wb");
+    if(!file) { conoutf(CON_ERROR, "unable to create light file %s", tempname); return; }
+    bool written = file->write(data.getbuf(), data.length()-1) == size_t(data.length()-1) && file->flush();
+    delete file;
+    string source, destination;
+    copystring(source, findfile(tempname, "wb"));
+    copystring(destination, findfile(filename, "wb"));
+    bool replaced = false;
+    if(written)
+    {
+#ifdef WIN32
+        replaced = MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        replaced = rename(source, destination) == 0;
+#endif
+    }
+    if(!replaced)
+    {
+        conoutf(CON_ERROR, "unable to save %s; original retained, temporary file: %s", filename, tempname);
         return;
     }
-
-    const vector<extentity *> &ents = entities::getents(); // Get all entities on the loaded map
-
-    loopv(ents) // Loop through ents vector length (= all entities)
-    {
-        extentity &e = *ents[i];
-        if(e.type==ET_LIGHT) e.type = ET_EMPTY; // Delete current lights
-    }
-
-    int numLights = 0;
-    float coords[3] = {0};
-    int attrs[5] = {0};
-    char buf[128];
-
-    while(lightFile->getline(buf, sizeof(buf))) // Read each light file lines
-    {
-        sscanf(buf, "%f %f %f %d %d %d %d %d", &coords[0], &coords[1], &coords[2], &attrs[0], &attrs[1], &attrs[2], &attrs[3], &attrs[4]);
-        int idx;
-        newentity(true, vec(coords[0], coords[1], coords[2]), ET_LIGHT, attrs[0], attrs[1], attrs[2], attrs[3], attrs[4], idx); // Add new light entities from the file
-        numLights++;
-    }
-
-    if(msg) conoutf("loaded %d lights in %s", numLights, filePath);
-    lightFile->close();
+    conoutf("saved %d lights in %s (version 1)", int(records.length()), filename);
 }
+ICOMMAND(savelight, "", (), saveLightEntities());
+ICOMMAND(savelights, "", (), saveLightEntities());
+
+void loadLightEntities(bool msg = true, const char *mapName = NULL)
+{
+    defformatstring(filename, "packages/map/%s.lit", mapName ? mapName : game::getclientmap());
+    stream *file = openutf8file(filename, "r");
+    if(!file)
+    {
+        if(msg) conoutf(CON_ERROR, "unable to read light file %s", filename);
+        return;
+    }
+    lightfile::parser parser;
+    char line[4096];
+    int linenumber = 0;
+    bool valid = true;
+    while(file->getline(line, sizeof(line)))
+    {
+        ++linenumber;
+        if(strlen(line) == sizeof(line)-1 || !parser.line(line)) { valid = false; break; }
+    }
+    valid = valid && file->end() && parser.finish();
+    delete file;
+    if(!valid)
+    {
+        conoutf(CON_ERROR, "invalid light file %s near line %d; current lights retained", filename, linenumber);
+        return;
+    }
+    const vector<extentity *> &ents = entities::getents();
+    int occupied = 0;
+    loopv(ents) if(ents[i]->type != ET_EMPTY && ents[i]->type != ET_LIGHT) ++occupied;
+    if(parser.records.length() > MAXENTS-occupied)
+    {
+        conoutf(CON_ERROR, "too many lights in %s; current lights retained", filename);
+        return;
+    }
+    // Only commit after the complete file has passed validation.
+    entcancel();
+    loopv(ents) if(ents[i]->type == ET_LIGHT)
+    {
+        removeentityedit(i);
+        detachentity(*ents[i]);
+        ents[i]->type = ET_EMPTY;
+    }
+    for(int i = 0; i < parser.records.length(); ++i)
+    {
+        using namespace lightfile;
+        const record &r = parser.records[i];
+        int idx;
+        extentity *e = newentity(true, vec(r.values[POSITION], r.values[POSITION+1], r.values[POSITION+2]), ET_LIGHT,
+                                int(r.values[RANGE]), int(r.values[COLOR]), int(r.values[COLOR+1]), int(r.values[COLOR+2]),
+                                int(r.values[FLAGS]), idx, false);
+        if(!e) break;
+        applylightrecord(*e, r);
+        addentityedit(idx);
+    }
+    attachentities();
+    clearshadowcache();
+    commitchanges();
+    if(msg) conoutf("loaded %d lights from %s", int(parser.records.length()), filename);
+}
+ICOMMAND(loadlight, "", (), loadLightEntities());
 ICOMMAND(loadlights, "", (), loadLightEntities());
 
 VARR(maxspotangle, 0, 90, 90);

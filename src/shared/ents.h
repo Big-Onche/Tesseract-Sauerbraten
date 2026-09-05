@@ -27,7 +27,7 @@ enum
     EF_NOPICKUP  = 1<<9
 };
 
-// Runtime emitter geometry. Never serialized with entity or the .lit sidecar.
+// Emitter geometry is stored in the .lit sidecar, never in the legacy map entity.
 enum { LIGHT_POINT = 0, LIGHT_SPHERE, LIGHT_DISK, LIGHT_CAPSULE, LIGHT_RECTANGLE };
 struct lightshape
 {
@@ -43,11 +43,21 @@ struct lightshape
     }
 };
 
+// Negative values inherit the global renderer setting; stored only in the .lit sidecar.
+struct lightshadow
+{
+    int enabled, quality, blockers, samples;
+    float penumbra, distance, minpixels;
+
+    lightshadow() : enabled(-1), quality(-1), blockers(-1), samples(-1), penumbra(-1), distance(-1), minpixels(-1) {}
+};
+
 struct extentity : entity                       // part of the entity that doesn't get saved to disk
 {
     int flags;  // the only dynamic state of a map entity
     extentity *attached;
     lightshape emitter;
+    lightshadow shadow;
 
     extentity() : flags(0), attached(NULL) {}
 

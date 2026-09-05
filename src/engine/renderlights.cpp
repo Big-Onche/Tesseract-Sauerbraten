@@ -3289,6 +3289,8 @@ static vec2 shadowoffsetv[8];
 
 static LocalShaderParam emitterparams("emitterparams"), emitterx("emitterx"), emittery("emittery"), emitterpcss("emitterpcss");
 static vec4 emitterparamsv[8], emitterxv[8], emitteryv[8], emitterpcssv[8];
+static LocalShaderParam emitterdistance("emitterdistance");
+static vec2 emitterdistancev[8];
 
 static inline void setlightparams(int i, const lightinfo &l)
 {
@@ -3300,13 +3302,21 @@ static inline void setlightparams(int i, const lightinfo &l)
     emitterparamsv[i] = vec4(shape.type, shape.radius/l.radius, shape.width*0.5f/l.radius, shape.height*0.5f/l.radius);
     emitterxv[i] = vec4(x, 0);
     emitteryv[i] = vec4(y, 0);
+    lightshadow shadow;
+    if(l.ent >= 0) shadow = entities::getents()[l.ent]->shadow;
+    int quality = shadow.quality < 0 ? localpcssquality : shadow.quality,
+        blockers = shadow.blockers < 0 ? localpcssblockers : shadow.blockers,
+        samples = shadow.samples < 0 ? localpcsssamples : shadow.samples;
+    float distance = shadow.distance < 0 ? localpcssdist : shadow.distance,
+          minpixels = shadow.minpixels < 0 ? localpcssminpixels : shadow.minpixels,
+          penumbra = shadow.penumbra < 0 ? localpcssmaxpenumbra : shadow.penumbra;
+    emitterdistancev[i] = vec2(distance, 1.0f/max(distance*0.25f, 1.0f));
     float pixels = min((l.sx2-l.sx1)*vieww, (l.sy2-l.sy1)*viewh)*0.5f;
-    float lod = clamp((localpcssdist - max(l.dist-l.radius, 0.0f))/max(localpcssdist*0.25f, 1.0f), 0.0f, 1.0f);
-    lod *= clamp((pixels-localpcssminpixels)/max(localpcssminpixels, 1.0f), 0.0f, 1.0f);
-    if(!uselocalpcss() || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
-    emitterpcssv[i] = vec4(lod, localpcssmaxpenumbra,
-                         max(1.0f, floorf(min(localpcssblockers, 8 << localpcssquality)*lod)),
-                         max(1.0f, floorf(min(localpcsssamples, 16 << localpcssquality)*lod)));
+    float lod = clamp((distance - max(l.dist-l.radius, 0.0f))*emitterdistancev[i].y, 0.0f, 1.0f);
+    lod *= clamp((pixels-minpixels)/max(minpixels, 1.0f), 0.0f, 1.0f);
+    if(!uselocalpcss() || shadow.enabled == 0 || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
+    emitterpcssv[i] = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
+                         max(1.0f, floorf(min(samples, 16 << quality)*lod)));
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
     if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
@@ -3346,6 +3356,7 @@ static inline void setlightshader(Shader *s, int n, bool baselight, bool shadowm
     emitterx.setv(emitterxv, n);
     emittery.setv(emitteryv, n);
     emitterpcss.setv(emitterpcssv, n);
+    emitterdistance.setv(emitterdistancev, n);
     if(spotlight) spotparams.setv(spotparamsv, n);
     if(shadowmap)
     {
