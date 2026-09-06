@@ -44,12 +44,17 @@ struct lightshape
 };
 
 // Negative values inherit the global renderer setting; stored only in the .lit sidecar.
+enum { LIGHT_SHADOW_NORMAL = 0, LIGHT_SHADOW_SOFT, LIGHT_SHADOW_PCSS };
 struct lightshadow
 {
     int enabled, quality, blockers, samples;
     float penumbra, distance, minpixels;
+    int mode, softsamples;
+    float softness, softradius, softdistance, softminpixels;
 
-    lightshadow() : enabled(-1), quality(-1), blockers(-1), samples(-1), penumbra(-1), distance(-1), minpixels(-1) {}
+    // New lights use normal shadows. Older sidecar modes are resolved when loaded.
+    lightshadow() : enabled(-1), quality(-1), blockers(-1), samples(-1), penumbra(-1), distance(-1), minpixels(-1),
+                    mode(LIGHT_SHADOW_NORMAL), softsamples(-1), softness(-1), softradius(-1), softdistance(-1), softminpixels(-1) {}
 };
 
 struct lightanimation

@@ -17,7 +17,8 @@ namespace lightfile
         SHADOW_ENABLED, INTENSITY, FLICKER_AMPLITUDE, FLICKER_FREQUENCY, FLICKER_NOISE, FLICKER_SEED,
         OFFSET_AMPLITUDE, OFFSET_FREQUENCY, OFFSET_NOISE, OFFSET_SEED, OFFSET_AXES, OFFSET_QUANTIZE = OFFSET_AXES+3,
         BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE,
-        ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, SECONDARY_COLOR, SECONDARY_RADIUS, NUMVALUES
+        ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, SECONDARY_COLOR, SECONDARY_RADIUS,
+        SHADOW_MODE, SOFT_MULTIPLIER, SOFT_RADIUS, SOFT_SAMPLES, SOFT_DISTANCE, SOFT_MINPIXELS, NUMVALUES
     };
 
     struct record
@@ -31,6 +32,7 @@ namespace lightfile
             values[COLOR] = values[COLOR+1] = values[COLOR+2] = 255;
             values[RANGE] = 128;
             for(int i = PCSS_ENABLED; i <= SHADOW_ENABLED; ++i) values[i] = -1;
+            for(int i = SHADOW_MODE; i <= SOFT_MINPIXELS; ++i) values[i] = -1;
             values[INTENSITY] = 1;
             values[FLICKER_FREQUENCY] = values[FLICKER_NOISE] = 1;
             values[OFFSET_FREQUENCY] = values[OFFSET_NOISE] = 1;
@@ -96,7 +98,13 @@ namespace lightfile
         { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true },
         { "attenuation.enabled", ATTENUATION_ENABLED, 1, 0, 1, true, true },
         { "secondary.color", SECONDARY_COLOR, 1, 0, 16777215, true, true },
-        { "secondary.radius", SECONDARY_RADIUS, 1, 0, 32767, false, true }
+        { "secondary.radius", SECONDARY_RADIUS, 1, 0, 32767, false, true },
+        { "shadow.mode", SHADOW_MODE, 1, -1, 2, true, true },
+        { "soft.multiplier", SOFT_MULTIPLIER, 1, -1, 16, false, true },
+        { "soft.max_radius", SOFT_RADIUS, 1, -1, 16, false, true },
+        { "soft.samples", SOFT_SAMPLES, 1, -1, 8, true, true },
+        { "soft.distance", SOFT_DISTANCE, 1, -1, 16384, false, true },
+        { "soft.min_pixels", SOFT_MINPIXELS, 1, -1, 1024, false, true }
     };
     static const char *const shapes[] = { "point", "sphere", "disk", "capsule", "rectangle" };
 
@@ -208,9 +216,10 @@ namespace lightfile
                     return false;
                 }
                 if(!numbers(value, &current.values[p.index], p.count, p.minimum, p.maximum, p.integral)) return false;
-                if(p.index >= PCSS_ENABLED && p.index <= SHADOW_ENABLED && current.values[p.index] < 0 && current.values[p.index] != -1)
+                if(((p.index >= PCSS_ENABLED && p.index <= SHADOW_ENABLED) || (p.index >= SHADOW_MODE && p.index <= SOFT_MINPIXELS)) &&
+                   current.values[p.index] < 0 && current.values[p.index] != -1)
                     return false;
-                if((p.index == PCSS_BLOCKERS || p.index == PCSS_SAMPLES) && current.values[p.index] == 0) return false;
+                if((p.index == PCSS_BLOCKERS || p.index == PCSS_SAMPLES || p.index == SOFT_SAMPLES) && current.values[p.index] == 0) return false;
                 if(p.index == POSITION) current.positioned = true;
                 if(p.index == ATTENUATION_ENABLED) current.attenuationexplicit = true;
                 else if(p.index >= ATTENUATION_EXPONENT && p.index <= ATTENUATION_EDGE && !current.attenuationexplicit)

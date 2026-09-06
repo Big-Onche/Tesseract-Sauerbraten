@@ -1675,6 +1675,9 @@ static lightfile::record lightrecord(const extentity &e)
     r.values[PCSS_BLOCKERS] = e.shadow.blockers; r.values[PCSS_SAMPLES] = e.shadow.samples;
     r.values[PCSS_PENUMBRA] = e.shadow.penumbra; r.values[PCSS_DISTANCE] = e.shadow.distance; r.values[PCSS_MINPIXELS] = e.shadow.minpixels;
     r.values[SHADOW_ENABLED] = !(e.attr5&L_NOSHADOW);
+    r.values[SHADOW_MODE] = e.shadow.mode; r.values[SOFT_SAMPLES] = e.shadow.softsamples;
+    r.values[SOFT_MULTIPLIER] = e.shadow.softness; r.values[SOFT_RADIUS] = e.shadow.softradius;
+    r.values[SOFT_DISTANCE] = e.shadow.softdistance; r.values[SOFT_MINPIXELS] = e.shadow.softminpixels;
     const lightanimation &a = e.animation;
     r.values[INTENSITY] = a.intensity;
     r.values[FLICKER_AMPLITUDE] = a.flickeramp; r.values[FLICKER_FREQUENCY] = a.flickerfrequency;
@@ -1701,6 +1704,11 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
     e.shadow.enabled = int(r.values[PCSS_ENABLED]); e.shadow.quality = int(r.values[PCSS_QUALITY]);
     e.shadow.blockers = int(r.values[PCSS_BLOCKERS]); e.shadow.samples = int(r.values[PCSS_SAMPLES]);
     e.shadow.penumbra = r.values[PCSS_PENUMBRA]; e.shadow.distance = r.values[PCSS_DISTANCE]; e.shadow.minpixels = r.values[PCSS_MINPIXELS];
+    // Resolve old sidecars once; the editor and renderer only see the three explicit modes.
+    e.shadow.mode = r.values[SHADOW_MODE] < 0 ? (e.shadow.enabled == 0 ? LIGHT_SHADOW_NORMAL : LIGHT_SHADOW_PCSS) : int(r.values[SHADOW_MODE]);
+    e.shadow.softsamples = int(r.values[SOFT_SAMPLES]);
+    e.shadow.softness = r.values[SOFT_MULTIPLIER]; e.shadow.softradius = r.values[SOFT_RADIUS];
+    e.shadow.softdistance = r.values[SOFT_DISTANCE]; e.shadow.softminpixels = r.values[SOFT_MINPIXELS];
     lightanimation &a = e.animation;
     a.intensity = r.values[INTENSITY];
     a.flickeramp = r.values[FLICKER_AMPLITUDE]; a.flickerfrequency = r.values[FLICKER_FREQUENCY];

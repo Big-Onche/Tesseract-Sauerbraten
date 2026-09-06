@@ -1766,6 +1766,12 @@ VARP(localpcsssamples, 1, 6, 64);
 FVARP(localpcssmaxpenumbra, 0, 16, 128);
 FVARP(localpcssdist, 0, 128, 16384);
 FVARP(localpcssminpixels, 0, 24, 1024);
+VARP(localsoftshadow, 0, 1, 1);
+FVARP(localsoftshadowsoftness, 0, 1, 64);
+FVARP(localsoftshadowmaxradius, 0, 4, 256);
+VARP(localsoftshadowsamples, 1, 4, 8);
+FVARP(localsoftshadowdist, 0, 256, 16384);
+FVARP(localsoftshadowminpixels, 0, 12, 1024);
 
 static bool uselocalpcss()
 {
@@ -3372,6 +3378,9 @@ static LocalShaderParam emitterparams("emitterparams"), emitterx("emitterx"), em
 static vec4 emitterparamsv[8], emitterxv[8], emitteryv[8], emitterpcssv[8];
 static LocalShaderParam emitterdistance("emitterdistance");
 static vec2 emitterdistancev[8];
+static LocalShaderParam emittersoft("emittersoft"), emittersoftdistance("emittersoftdistance");
+static vec4 emittersoftv[8];
+static vec2 emittersoftdistancev[8];
 static LocalShaderParam lightattenuationparam("lightattenuation");
 static vec4 lightattenuationv[8];
 static LocalShaderParam lightsecondaryparam("lightsecondary");
@@ -3399,9 +3408,20 @@ static inline void setlightparams(int i, const lightinfo &l)
     float pixels = min((l.sx2-l.sx1)*vieww, (l.sy2-l.sy1)*viewh)*0.5f;
     float lod = clamp((distance - max(l.dist-l.radius, 0.0f))*emitterdistancev[i].y, 0.0f, 1.0f);
     lod *= clamp((pixels-minpixels)/max(minpixels, 1.0f), 0.0f, 1.0f);
-    if(!uselocalpcss() || shadow.enabled == 0 || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
+    int mode = shadow.mode;
+    if(!uselocalpcss() || mode != LIGHT_SHADOW_PCSS || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
     emitterpcssv[i] = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
                          max(1.0f, floorf(min(samples, 16 << quality)*lod)));
+    float softdistance = shadow.softdistance < 0 ? localsoftshadowdist : shadow.softdistance,
+          softminpixels = shadow.softminpixels < 0 ? localsoftshadowminpixels : shadow.softminpixels,
+          softness = shadow.softness < 0 ? localsoftshadowsoftness : shadow.softness;
+    emittersoftdistancev[i] = vec2(softdistance, 1.0f/max(softdistance*0.25f, 1.0f));
+    float softlod = softdistance > 0 ? clamp((softdistance-max(l.dist-l.radius, 0.0f))*emittersoftdistancev[i].y, 0.0f, 1.0f) : 1;
+    if(softminpixels > 0) softlod *= clamp((pixels-softminpixels)/max(softminpixels, 1.0f), 0.0f, 1.0f);
+    if(!localshapes || !localsoftshadow || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) softlod = 0;
+    emittersoftv[i] = vec4(mode == LIGHT_SHADOW_SOFT ? softness*softlod : -1,
+                          shadow.softradius < 0 ? localsoftshadowmaxradius : shadow.softradius,
+                          shadow.softsamples < 0 ? localsoftshadowsamples : shadow.softsamples, 0);
     lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation && l.attenuation.enabled);
     lightposv[i] = vec4(l.o, 1).div(l.radius);
     lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
@@ -3445,6 +3465,8 @@ static inline void setlightshader(Shader *s, int n, bool baselight, bool shadowm
     emittery.setv(emitteryv, n);
     emitterpcss.setv(emitterpcssv, n);
     emitterdistance.setv(emitterdistancev, n);
+    emittersoft.setv(emittersoftv, n);
+    emittersoftdistance.setv(emittersoftdistancev, n);
     lightattenuationparam.setv(lightattenuationv, n);
     if(spotlight) spotparams.setv(spotparamsv, n);
     if(shadowmap)
