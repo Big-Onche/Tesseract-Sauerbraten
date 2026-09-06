@@ -118,3 +118,17 @@ struct animatedlightstate
     vec o, color, secondarycolor;
 };
 extern animatedlightstate evaluatelight(const extentity &e, int millis);
+
+// Conservative source displacement for visibility culling and prebuilt shadow geometry.
+inline vec lightmovementbounds(const extentity &e)
+{
+    const lightanimation &a = e.animation;
+    vec movement(0, 0, 0);
+    if(a.offsetamp > 0 && a.offsetfrequency > 0)
+    {
+        movement = vec(a.offsetaxes).abs().mul(a.offsetamp);
+        if(a.offsetquantize > 0) movement.add(0.5f*a.offsetquantize);
+        loopi(3) movement[i] += 1e-6f*max(fabsf(e.o[i]), 1.0f);
+    }
+    return movement;
+}

@@ -1848,6 +1848,17 @@ animatedlightstate evaluatelight(const extentity &e, int millis)
     return state;
 }
 
+// Cached for this collected view, shared by tiled, transparent, avatar and volumetric passes.
+struct lightshaderparams
+{
+    vec4 emitter, emitterx, emittery, pcss, soft, attenuation, position, color, secondary, spot, shadow;
+    vec2 distance, softdistance, shadowoffset;
+    int shadowmap;
+    bool ready;
+
+    lightshaderparams() : shadowmap(-1), ready(false) {}
+};
+
 struct lightinfo
 {
     int ent, shadowmap;
@@ -1860,6 +1871,7 @@ struct lightinfo
     int spot;
     float sx1, sy1, sx2, sy2, sz1, sz2;
     occludequery *query;
+    mutable lightshaderparams shaderparams;
 
     lightinfo() {}
     lightinfo(const vec &o, const vec &color, float radius, ushort flags = 0, const vec &dir = vec(0, 0, 0), int spot = 0)
@@ -1889,7 +1901,6 @@ struct lightinfo
             spot = clamp(int(e.attached->attr1), 1, 89);
             calcspot();
         }
-        calcscissor();
     }
 
     void calcspot()
@@ -2199,6 +2210,11 @@ VARFP(smalphaprec, 0, 0, 2, cleanupshadowatlas());
 VAR(lightpassesused, 1, 0, 0);
 VAR(lightsvisible, 1, 0, 0);
 VAR(lightsoccluded, 1, 0, 0);
+VAR(lightparamcalculations, 1, 0, 0);
+VAR(lightparamreuses, 1, 0, 0);
+VAR(lightboundculled, 1, 0, 0);
+VAR(lightshadowmeshused, 1, 0, 0);
+VAR(lightshadowfaces, 1, 0, 0);
 VARN(lightbatches, lightbatchesused, 1, 0, 0);
 VARN(lightbatchrects, lightbatchrectsused, 1, 0, 0);
 VARN(lightbatchstacks, lightbatchstacksused, 1, 0, 0);
@@ -3039,6 +3055,7 @@ void calctilesize()
 
 void resetlights()
 {
+    lightparamcalculations = lightparamreuses = lightboundculled = lightshadowmeshused = lightshadowfaces = 0;
     shadowcache.reset();
     if(smcache)
     {
@@ -3386,16 +3403,16 @@ static vec4 lightattenuationv[8];
 static LocalShaderParam lightsecondaryparam("lightsecondary");
 static vec4 lightsecondaryv[8];
 
-static inline void setlightparams(int i, const lightinfo &l)
+static void calclightparams(const lightinfo &l, lightshaderparams &p)
 {
     lightshape shape;
     // Attached spotlights retain their existing cone and filtering.
     if(localshapes && l.ent >= 0 && !l.spot) shape = entities::getents()[l.ent]->emitter;
-    vec x, y;
-    shape.axes(x, y);
-    emitterparamsv[i] = vec4(shape.type, shape.radius/l.radius, shape.width*0.5f/l.radius, shape.height*0.5f/l.radius);
-    emitterxv[i] = vec4(x, 0);
-    emitteryv[i] = vec4(y, 0);
+    vec x(1, 0, 0), y(0, 1, 0);
+    if(shape.type >= LIGHT_DISK) shape.axes(x, y);
+    p.emitter = vec4(shape.type, shape.radius/l.radius, shape.width*0.5f/l.radius, shape.height*0.5f/l.radius);
+    p.emitterx = vec4(x, 0);
+    p.emittery = vec4(y, 0);
     lightshadow shadow;
     if(l.ent >= 0) shadow = entities::getents()[l.ent]->shadow;
     int quality = shadow.quality < 0 ? localpcssquality : shadow.quality,
@@ -3404,29 +3421,29 @@ static inline void setlightparams(int i, const lightinfo &l)
     float distance = shadow.distance < 0 ? localpcssdist : shadow.distance,
           minpixels = shadow.minpixels < 0 ? localpcssminpixels : shadow.minpixels,
           penumbra = shadow.penumbra < 0 ? localpcssmaxpenumbra : shadow.penumbra;
-    emitterdistancev[i] = vec2(distance, 1.0f/max(distance*0.25f, 1.0f));
+    p.distance = vec2(distance, 1.0f/max(distance*0.25f, 1.0f));
     float pixels = min((l.sx2-l.sx1)*vieww, (l.sy2-l.sy1)*viewh)*0.5f;
-    float lod = clamp((distance - max(l.dist-l.radius, 0.0f))*emitterdistancev[i].y, 0.0f, 1.0f);
+    float lod = clamp((distance - max(l.dist-l.radius, 0.0f))*p.distance.y, 0.0f, 1.0f);
     lod *= clamp((pixels-minpixels)/max(minpixels, 1.0f), 0.0f, 1.0f);
     int mode = shadow.mode;
     if(!uselocalpcss() || mode != LIGHT_SHADOW_PCSS || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) lod = 0;
-    emitterpcssv[i] = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
+    p.pcss = vec4(lod, penumbra, max(1.0f, floorf(min(blockers, 8 << quality)*lod)),
                          max(1.0f, floorf(min(samples, 16 << quality)*lod)));
     float softdistance = shadow.softdistance < 0 ? localsoftshadowdist : shadow.softdistance,
           softminpixels = shadow.softminpixels < 0 ? localsoftshadowminpixels : shadow.softminpixels,
           softness = shadow.softness < 0 ? localsoftshadowsoftness : shadow.softness;
-    emittersoftdistancev[i] = vec2(softdistance, 1.0f/max(softdistance*0.25f, 1.0f));
-    float softlod = softdistance > 0 ? clamp((softdistance-max(l.dist-l.radius, 0.0f))*emittersoftdistancev[i].y, 0.0f, 1.0f) : 1;
+    p.softdistance = vec2(softdistance, 1.0f/max(softdistance*0.25f, 1.0f));
+    float softlod = softdistance > 0 ? clamp((softdistance-max(l.dist-l.radius, 0.0f))*p.softdistance.y, 0.0f, 1.0f) : 1;
     if(softminpixels > 0) softlod *= clamp((pixels-softminpixels)/max(softminpixels, 1.0f), 0.0f, 1.0f);
     if(!localshapes || !localsoftshadow || drawtex == DRAWTEX_MINIMAP || l.spot || l.shadowmap < 0) softlod = 0;
-    emittersoftv[i] = vec4(mode == LIGHT_SHADOW_SOFT ? softness*softlod : -1,
+    p.soft = vec4(mode == LIGHT_SHADOW_SOFT ? softness*softlod : -1,
                           shadow.softradius < 0 ? localsoftshadowmaxradius : shadow.softradius,
                           shadow.softsamples < 0 ? localsoftshadowsamples : shadow.softsamples, 0);
-    lightattenuationv[i] = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation && l.attenuation.enabled);
-    lightposv[i] = vec4(l.o, 1).div(l.radius);
-    lightcolorv[i] = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
-    lightsecondaryv[i] = vec4(vec(l.secondarycolor).mul(2*ldrscaleb), l.secondaryradius/l.radius);
-    if(l.spot > 0) spotparamsv[i] = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
+    p.attenuation = vec4(l.attenuation.exponent, l.attenuation.mindistance/l.radius, l.attenuation.edge, localattenuation && l.attenuation.enabled);
+    p.position = vec4(l.o, 1).div(l.radius);
+    p.color = vec4(vec(l.color).mul(2*ldrscaleb), l.nospec() ? 0 : 1);
+    p.secondary = vec4(vec(l.secondarycolor).mul(2*ldrscaleb), l.secondaryradius/l.radius);
+    if(l.spot > 0) p.spot = vec4(vec(l.dir).neg(), 1/(1 - cos360(l.spot)));
     if(l.shadowmap >= 0)
     {
         shadowmapinfo &sm = shadowmaps[l.shadowmap];
@@ -3435,7 +3452,7 @@ static inline void setlightparams(int i, const lightinfo &l)
         int border = smfilter > 2 ? smborder2 : smborder;
         if(l.spot > 0)
         {
-            shadowparamsv[i] = vec4(
+            p.shadow = vec4(
                 -0.5f * sm.size * cotan360(l.spot),
                 (-smnearclip * smfarclip / (smfarclip - smnearclip) - 0.5f*bias),
                 1 / (1 + fabs(l.dir.z)),
@@ -3443,13 +3460,50 @@ static inline void setlightparams(int i, const lightinfo &l)
         }
         else
         {
-            shadowparamsv[i] = vec4(
+            p.shadow = vec4(
                 -0.5f * (sm.size - border),
                 -smnearclip * smfarclip / (smfarclip - smnearclip) - 0.5f*bias,
                 sm.size,
                 0.5f + 0.5f * (smfarclip + smnearclip) / (smfarclip - smnearclip));
         }
-        shadowoffsetv[i] = vec2(sm.x + 0.5f*sm.size, sm.y + 0.5f*sm.size);
+        p.shadowoffset = vec2(sm.x + 0.5f*sm.size, sm.y + 0.5f*sm.size);
+    }
+}
+
+static const lightshaderparams &getlightparams(const lightinfo &l)
+{
+    lightshaderparams &p = l.shaderparams;
+    // Atlas assignment can happen after collection (including work during occlusion queries).
+    if(!p.ready || p.shadowmap != l.shadowmap)
+    {
+        lightparamcalculations++;
+        calclightparams(l, p);
+        p.shadowmap = l.shadowmap;
+        p.ready = true;
+    }
+    else lightparamreuses++;
+    return p;
+}
+
+static inline void setlightparams(int i, const lightinfo &l)
+{
+    const lightshaderparams &p = getlightparams(l);
+    emitterparamsv[i] = p.emitter;
+    emitterxv[i] = p.emitterx;
+    emitteryv[i] = p.emittery;
+    emitterpcssv[i] = p.pcss;
+    emitterdistancev[i] = p.distance;
+    emittersoftv[i] = p.soft;
+    emittersoftdistancev[i] = p.softdistance;
+    lightattenuationv[i] = p.attenuation;
+    lightposv[i] = p.position;
+    lightcolorv[i] = p.color;
+    lightsecondaryv[i] = p.secondary;
+    if(l.spot > 0) spotparamsv[i] = p.spot;
+    if(l.shadowmap >= 0)
+    {
+        shadowparamsv[i] = p.shadow;
+        shadowoffsetv[i] = p.shadowoffset;
     }
 }
 
@@ -4029,6 +4083,7 @@ VARR(keeplargelights, 0 , 0, 1);
 void collectlights()
 {
     if(lights.length()) return;
+    timer *collecttimer = begintimer("light collection", false);
 
     // point lights processed here
     const vector<extentity *> &ents = entities::getents();
@@ -4047,14 +4102,25 @@ void collectlights()
             continue;
         }
 
-        const lightinfo candidate(i, *e);
-        if(candidate.color.iszero() && (candidate.secondaryradius <= 0 || candidate.secondarycolor.iszero())) continue;
         if(smviscull)
+        {
+            float bounds = e->attr1 + lightmovementbounds(*e).magnitude();
+            if(isfoggedsphere(bounds, e->o) || pvsoccludedsphere(e->o, bounds))
+            {
+                lightboundculled++;
+                continue;
+            }
+        }
+
+        lightinfo candidate(i, *e);
+        if(candidate.color.iszero() && (candidate.secondaryradius <= 0 || candidate.secondarycolor.iszero())) continue;
+        if(smviscull && candidate.o != e->o)
         {
             if(isfoggedsphere(candidate.radius, candidate.o)) continue;
             if(pvsoccludedsphere(candidate.o, candidate.radius)) continue;
         }
 
+        candidate.calcscissor();
         lightinfo &l = lights.add(candidate);
         if(l.validscissor()) lightorder.add(lights.length()-1);
     }
@@ -4148,6 +4214,7 @@ void collectlights()
 
         smused += w*h;
     }
+    endtimer(collecttimer);
 }
 
 static bool inoq = false;
@@ -5044,8 +5111,11 @@ void rendershadowmaps(int offset = 0)
 
         if(!l.spot && localshapes && l.ent >= 0)
         {
-            const lightshape &shape = entities::getents()[l.ent]->emitter;
-            if(shape.radius > 0 || shape.width > 0 || shape.height > 0) sidemask = 0x3F;
+            const lightshaderparams &p = getlightparams(l);
+            bool shaped = p.emitter.y > 0 || (p.emitter.x >= LIGHT_CAPSULE && (p.emitter.z > 0 || p.emitter.w > 0));
+            // Only active wide filters need off-frustum faces for seam-crossing taps.
+            // Normal, disabled and distant shaped lights retain ordinary face culling.
+            if(shaped && ((p.pcss.x > 0 && p.pcss.y >= 0.5f) || (p.soft.x > 0 && p.soft.y >= 0.5f))) sidemask = 0x3F;
         }
         sm.sidemask = sidemask;
 
@@ -5055,7 +5125,7 @@ void rendershadowmaps(int offset = 0)
         shadowdir = l.dir;
         shadowspot = l.spot;
 
-        shadowmesh *mesh = e && l.o == e->o ? findshadowmesh(l.ent, *e) : NULL;
+        shadowmesh *mesh = e ? findshadowmesh(l.ent, *e) : NULL;
 
         findshadowvas(smalpha > 1 && alphashadow > (l.colorshadow() ? 0 : 1));
         if(shadowtransparent)
@@ -5085,6 +5155,8 @@ void rendershadowmaps(int offset = 0)
             if(!sidemask) { clearbatchedmapmodels(); continue; }
         }
 
+        if(mesh) lightshadowmeshused++;
+        loop(side, 6) if(sidemask&(1<<side)) lightshadowfaces++;
         float smnearclip = SQRT3 / l.radius, smfarclip = SQRT3;
         matrix4 smprojmatrix(vec4(float(sm.size - border) / sm.size, 0, 0, 0),
                               vec4(0, float(sm.size - border) / sm.size, 0, 0),

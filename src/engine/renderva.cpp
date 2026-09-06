@@ -2540,6 +2540,7 @@ void renderdecals()
 struct shadowmesh
 {
     vec origin;
+    vec movement;
     float radius;
     vec spotloc;
     int spotangle;
@@ -2646,16 +2647,32 @@ static inline void addshadowmeshtri(shadowmesh &m, int sides, shadowdrawinfo dra
 {
     extern int smcullside;
     vec l0 = vec(v0).sub(shadoworigin);
-    float side = l0.scalartriple(vec(v1).sub(v0), vec(v2).sub(v0));
-    if(smcullside ? side > 0 : side < 0) return;
+    vec normal = vec().cross(vec(v1).sub(v0), vec(v2).sub(v0));
+    float side = l0.dot(normal), margin = vec(normal).abs().dot(m.movement);
+    // Reject only faces that stay back-facing throughout the entire source movement box.
+    if(smcullside ? side > margin : side < -margin) return;
     vec l1 = vec(v1).sub(shadoworigin), l2 = vec(v2).sub(shadoworigin);
-    if(l0.squaredlen() > shadowradius*shadowradius && l1.squaredlen() > shadowradius*shadowradius && l2.squaredlen() > shadowradius*shadowradius)
-        return;
+    if(m.movement.iszero())
+    {
+        if(l0.squaredlen() > shadowradius*shadowradius && l1.squaredlen() > shadowradius*shadowradius &&
+           l2.squaredlen() > shadowradius*shadowradius) return;
+    }
+    else if(shadoworigin.dist_to_bb(vec(v0).min(v1).min(v2), vec(v0).max(v1).max(v2)) > shadowradius) return;
     int sidemask = 0;
     switch(m.type)
     {
         case SM_SPOT: sidemask = bbinsidespot(shadoworigin, shadowdir, shadowspot, ivec(vec(v0).min(v1).min(v2)), ivec(vec(v0).max(v1).max(v2).add(1))) ? 1 : 0; break;
-        case SM_CUBEMAP: sidemask = calctrisidemask(l0.div(shadowradius), l1.div(shadowradius), l2.div(shadowradius), shadowbias); break;
+        case SM_CUBEMAP:
+            if(m.movement.iszero()) sidemask = calctrisidemask(l0.div(shadowradius), l1.div(shadowradius), l2.div(shadowradius), shadowbias);
+            else
+            {
+                // Include any cube face the triangle can enter as the source moves.
+                vec bbmin = vec(v0).min(v1).min(v2).sub(m.movement), bbmax = vec(v0).max(v1).max(v2).add(m.movement);
+                ivec imin, imax;
+                loopi(3) { imin[i] = int(floorf(bbmin[i])); imax[i] = int(ceilf(bbmax[i])); }
+                sidemask = calcbbsidemask(imin, imax, shadoworigin, shadowradius, shadowbias);
+            }
+            break;
     }
     if(!sidemask) return;
     if(shadowverts.verts.length() + 3 >= USHRT_MAX) flushshadowmeshdraws(m, sides, draws);
@@ -2723,10 +2740,11 @@ static void genshadowmesh(int idx, extentity &e)
     m.type = calcshadowinfo(e, m.origin, m.radius, m.spotloc, m.spotangle, shadowbias);
     if(!m.type) return;
     memset(m.draws, -1, sizeof(m.draws));
+    m.movement = m.type == SM_CUBEMAP ? lightmovementbounds(e) : vec(0, 0, 0);
 
     shadowmapping = m.type;
     shadoworigin = m.origin;
-    shadowradius = m.radius;
+    shadowradius = m.radius + m.movement.magnitude();
     shadowdir = m.type == SM_SPOT ? vec(m.spotloc).sub(m.origin).normalize() : vec(0, 0, 0);
     shadowspot = m.spotangle;
 
@@ -2786,7 +2804,9 @@ void genshadowmeshes()
 shadowmesh *findshadowmesh(int idx, extentity &e)
 {
     shadowmesh *m = shadowmeshes.access(idx);
-    if(!m || m->type != shadowmapping || m->origin != shadoworigin || m->radius < shadowradius) return NULL;
+    if(!m || m->type != shadowmapping || m->radius < shadowradius) return NULL;
+    vec offset = vec(shadoworigin).sub(m->origin).abs();
+    if(offset.x > m->movement.x || offset.y > m->movement.y || offset.z > m->movement.z) return NULL;
     switch(m->type)
     {
         case SM_SPOT:
