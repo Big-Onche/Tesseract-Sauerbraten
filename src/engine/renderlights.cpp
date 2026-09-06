@@ -1,5 +1,89 @@
 #include "engine.h"
 
+namespace lightdebug
+{
+    enum
+    {
+        COLLECT, PACK, BATCH, SHADOWATLAS, LOCALSHADOWS, SUNSHADOWS, SHADOWFILTER, LIGHTS, VOLUMETRIC, RADIANCE,
+        SM_BATCH, SM_RENDERMESH, SM_MODELS,
+        SM_TRANSPARENTSETUP, SM_TRANSPARENTCLEAR, SM_TRANSPARENT, SM_TRANSPARENTCLEANUP, SM_CLEARBATCH, SM_FLUSH,
+        ATLAS_SUN, ATLAS_PACK, ATLAS_LOCAL, ATLAS_FILTER, ATLAS_BATCH, NUMTIMERS
+    };
+    static const char *names[NUMTIMERS] =
+    {
+        "collectlights", "packlights", "batchlights", "rendershadowatlas (inclusive)", "rendershadowmaps",
+        "rendercsmshadowmaps", "filtershadowcolors", "renderlights", "rendervolumetric", "renderradiancehints",
+        "  batchshadowmapmodels", "  rendershadowmesh",
+        "  rendershadowmodelbatches", "  setupshadowtransparent", "  clearshadowtransparent",
+        "  rendershadowtransparent", "  cleanupshadowtransparent", "  clearbatchedmapmodels", "  glFlush",
+        "  rendercsmshadowmaps", "  packlights", "  rendershadowmaps", "  filtershadowcolors", "  batchlights"
+    };
+    static double elapsed[NUMTIMERS] = { 0 }, displayed[NUMTIMERS] = { 0 };
+    static int frames = 0, lastupdate = 0;
+
+    static void reset()
+    {
+        loopi(NUMTIMERS) elapsed[i] = displayed[i] = 0;
+        frames = 0;
+        lastupdate = totalmillis;
+    }
+
+    VARF(debuglights, 0, 0, 3, reset());
+
+    // CPU wall time includes driver calls, without forcing GPU synchronization.
+    struct scope
+    {
+        int id;
+        Uint64 start;
+
+        scope(int id) : id(id), start(!drawtex && (id < SM_BATCH ? debuglights > 0 :
+            (id < ATLAS_SUN ? debuglights == 2 : debuglights == 3)) ? SDL_GetPerformanceCounter() : 0)
+        {
+        }
+
+        ~scope()
+        {
+            if(start) elapsed[id] += double(SDL_GetPerformanceCounter() - start) * 1000.0 / double(SDL_GetPerformanceFrequency());
+        }
+    };
+}
+
+void drawlighttimers()
+{
+    if(!lightdebug::debuglights) return;
+    using namespace lightdebug;
+    ++frames;
+    if(totalmillis - lastupdate >= 200)
+    {
+        loopi(NUMTIMERS)
+        {
+            displayed[i] = elapsed[i] / frames;
+            elapsed[i] = 0;
+        }
+        frames = 0;
+        lastupdate = totalmillis;
+    }
+    draw_text("Light CPU ms/frame (200 ms average; nested times overlap)", FONTH, 4*FONTH);
+    if(lightdebug::debuglights == 2)
+    {
+        draw_textf("%s: %.3f ms (inclusive)", FONTH, 5*FONTH, names[LOCALSHADOWS], displayed[LOCALSHADOWS]);
+        loopi(ATLAS_SUN - SM_BATCH) draw_textf("%s: %.3f ms", FONTH, (6 + i)*FONTH, names[SM_BATCH + i], displayed[SM_BATCH + i]);
+    }
+    else if(lightdebug::debuglights == 3)
+    {
+        draw_textf("%s: %.3f ms", FONTH, 5*FONTH, names[SHADOWATLAS], displayed[SHADOWATLAS]);
+        double subtotal = 0;
+        loopi(NUMTIMERS - ATLAS_SUN)
+        {
+            subtotal += displayed[ATLAS_SUN + i];
+            draw_textf("%s: %.3f ms", FONTH, (6 + i)*FONTH, names[ATLAS_SUN + i], displayed[ATLAS_SUN + i]);
+        }
+        draw_textf("  other atlas work / timer overhead: %.3f ms", FONTH, (6 + NUMTIMERS - ATLAS_SUN)*FONTH,
+                   max(displayed[SHADOWATLAS] - subtotal, 0.0));
+    }
+    else loopi(SM_BATCH) draw_textf("%s: %.3f ms", FONTH, (5 + i)*FONTH, names[i], displayed[i]);
+}
+
 int gw = -1, gh = -1, bloomw = -1, bloomh = -1, lasthdraccum = 0;
 GLuint gfbo = 0, gdepthtex = 0, gcolortex = 0, gnormaltex = 0, gglowtex = 0, gdepthrb = 0, gstencilrb = 0;
 bool gdepthinit = false;
@@ -3719,6 +3803,7 @@ static void renderlightbatches(Shader *s, int stencilref, bool transparent, floa
 
 void renderlights(float bsx1 = -1, float bsy1 = -1, float bsx2 = 1, float bsy2 = 1, const uint *tilemask = NULL, int stencilmask = 0, int msaapass = 0, bool transparent = false)
 {
+    lightdebug::scope lighttimer(lightdebug::LIGHTS);
     Shader *s = drawtex == DRAWTEX_MINIMAP ? deferredminimapshader : (msaapass <= 0 ? deferredlightshader : (msaapass > 1 ? deferredmsaasampleshader : deferredmsaapixelshader));
     if(!s || s == nullshader) return;
 
@@ -3819,6 +3904,7 @@ extern int volumetriclights;
 
 void rendervolumetric()
 {
+    lightdebug::scope lighttimer(lightdebug::VOLUMETRIC);
     if(!volumetric || !volumetriclights || !volscale) return;
 
     float bsx1 = 1, bsy1 = 1, bsx2 = -1, bsy2 = -1;
@@ -4082,6 +4168,7 @@ VARR(keeplargelights, 0 , 0, 1);
 
 void collectlights()
 {
+    lightdebug::scope lighttimer(lightdebug::COLLECT);
     if(lights.length()) return;
     timer *collecttimer = begintimer("light collection", false);
 
@@ -4338,6 +4425,7 @@ static inline bool sortlightbatches(const lightbatch *x, const lightbatch *y)
 
 static void batchlights()
 {
+    lightdebug::scope lighttimer(lightdebug::BATCH);
     lightbatches.setsize(0);
     lightbatchstacksused = 0;
     lightbatchrectsused = 0;
@@ -4354,6 +4442,7 @@ static void batchlights()
 
 void packlights()
 {
+    lightdebug::scope lighttimer(lightdebug::PACK);
     lightsvisible = lightsoccluded = 0;
     lightpassesused = 0;
     batchrects.setsize(0);
@@ -4813,6 +4902,7 @@ void radiancehints::renderslices()
 
 void renderradiancehints()
 {
+    lightdebug::scope lighttimer(lightdebug::RADIANCE);
     if(rhinoq && !inoq && shouldworkinoq()) return;
     if(!useradiancehints()) return;
 
@@ -4930,6 +5020,7 @@ void rendershadowtransparent(int idx, int side, bool cullside = false)
 
 void rendercsmshadowmaps()
 {
+    lightdebug::scope lighttimer(lightdebug::SUNSHADOWS);
     if(csminoq && !debugshadowatlas && !inoq && shouldworkinoq()) return;
 
     csm.rendered = 0;
@@ -5063,8 +5154,11 @@ int calcshadowinfo(const extentity &e, vec &origin, float &radius, vec &spotloc,
 
 matrix4 shadowmatrix;
 
+VAR(smcubemodelbatch, 0, 1, 1);
+
 void rendershadowmaps(int offset = 0)
 {
+    lightdebug::scope lighttimer(lightdebug::LOCALSHADOWS);
     if(!(sminoq && !debugshadowatlas && !inoq && shouldworkinoq())) offset = 0;
 
     for(; offset < shadowmaps.length(); offset++) if(shadowmaps[offset].light >= 0) break;
@@ -5136,7 +5230,10 @@ void rendershadowmaps(int offset = 0)
         findshadowmms();
 
         shadowmaskbatchedmodels(!(l.flags&L_NODYNSHADOW) && smdynshadow);
-        batchshadowmapmodels(mesh != NULL);
+        {
+            lightdebug::scope steptimer(lightdebug::SM_BATCH);
+            batchshadowmapmodels(mesh != NULL);
+        }
 
         shadowcacheval *cached = NULL;
         int cachemask = 0;
@@ -5152,7 +5249,14 @@ void rendershadowmaps(int offset = 0)
             sm.sidemask &= ~dynmask;
 
             sidemask &= ~cachemask;
-            if(!sidemask) { clearbatchedmapmodels(); continue; }
+            if(!sidemask)
+            {
+                {
+                    lightdebug::scope cleartimer(lightdebug::SM_CLEARBATCH);
+                    clearbatchedmapmodels();
+                }
+                continue;
+            }
         }
 
         if(mesh) lightshadowmeshused++;
@@ -5179,14 +5283,31 @@ void rendershadowmaps(int offset = 0)
 
             shadowside = 0;
 
-            if(mesh) rendershadowmesh(mesh); else rendershadowmapworld();
-            rendershadowmodelbatches();
+            if(mesh)
+            {
+                lightdebug::scope worldtimer(lightdebug::SM_RENDERMESH);
+                rendershadowmesh(mesh);
+            }
+            else rendershadowmapworld();
+            {
+                lightdebug::scope steptimer(lightdebug::SM_MODELS);
+                rendershadowmodelbatches();
+            }
 
             if(shadowtransparent)
             {
-                setupshadowtransparent();
-                rendershadowtransparent(i, 0, (l.dir.z >= 0) == !smcullside);
-                cleanupshadowtransparent();
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_TRANSPARENTSETUP);
+                    setupshadowtransparent();
+                }
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_TRANSPARENT);
+                    rendershadowtransparent(i, 0, (l.dir.z >= 0) == !smcullside);
+                }
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_TRANSPARENTCLEANUP);
+                    cleanupshadowtransparent();
+                }
             }
         }
         else
@@ -5200,6 +5321,7 @@ void rendershadowmaps(int offset = 0)
                 glScissor(sm.x + cx1, sm.y + cy1, cx2 - cx1, cy2 - cy1);
                 glClear(GL_DEPTH_BUFFER_BIT);
             }
+            matrix4 sidematrices[6];
             loop(side, 6) if(sidemask&(1<<side))
             {
                 int sidex = (side>>1)*sm.size, sidey = (side&1)*sm.size;
@@ -5211,21 +5333,42 @@ void rendershadowmaps(int offset = 0)
                 cubematrix.scale(1.0f/l.radius);
                 cubematrix.translate(vec(l.o).neg());
                 shadowmatrix.mul(smprojmatrix, cubematrix);
+                if(smcubemodelbatch) sidematrices[side] = shadowmatrix;
                 GLOBALPARAM(shadowmatrix, shadowmatrix);
 
                 glCullFace((side & 1) ^ (side >> 2) ^ smcullside ? GL_FRONT : GL_BACK);
 
                 shadowside = side;
 
-                if(mesh) rendershadowmesh(mesh); else rendershadowmapworld();
-                rendershadowmodelbatches();
+                if(mesh)
+                {
+                    lightdebug::scope worldtimer(lightdebug::SM_RENDERMESH);
+                    rendershadowmesh(mesh);
+                }
+                else rendershadowmapworld();
+                if(!smcubemodelbatch)
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_MODELS);
+                    rendershadowmodelbatches();
+                }
+            }
+            if(smcubemodelbatch)
+            {
+                lightdebug::scope steptimer(lightdebug::SM_MODELS);
+                rendercubeshadowmodelbatches(sidemask, sidematrices, sm.x, sm.y, sm.size, smcullside);
             }
             if(shadowtransparent)
             {
-                setupshadowtransparent();
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_TRANSPARENTSETUP);
+                    setupshadowtransparent();
+                }
                 loop(side, 6) if(sidemask&(1<<side))
                 {
-                    if(clearshadowtransparent(i, side)) continue;
+                    {
+                        lightdebug::scope cleartimer(lightdebug::SM_TRANSPARENTCLEAR);
+                        if(clearshadowtransparent(i, side)) continue;
+                    }
 
                     matrix4 cubematrix(cubeshadowviewmatrix[side]);
                     cubematrix.scale(1.0f/l.radius);
@@ -5233,13 +5376,22 @@ void rendershadowmaps(int offset = 0)
                     shadowmatrix.mul(smprojmatrix, cubematrix);
                     GLOBALPARAM(shadowmatrix, shadowmatrix);
 
-                    rendershadowtransparent(i, side, (side & 1) ^ (side >> 2) ^ smcullside);
+                    {
+                        lightdebug::scope steptimer(lightdebug::SM_TRANSPARENT);
+                        rendershadowtransparent(i, side, (side & 1) ^ (side >> 2) ^ smcullside);
+                    }
                 }
-                cleanupshadowtransparent();
+                {
+                    lightdebug::scope steptimer(lightdebug::SM_TRANSPARENTCLEANUP);
+                    cleanupshadowtransparent();
+                }
             }
         }
 
-        clearbatchedmapmodels();
+        {
+            lightdebug::scope cleartimer(lightdebug::SM_CLEARBATCH);
+            clearbatchedmapmodels();
+        }
     }
 
     glCullFace(GL_BACK);
@@ -5254,12 +5406,16 @@ void rendershadowmaps(int offset = 0)
         glBindFramebuffer_(GL_FRAMEBUFFER, msaasamples ? msfbo : gfbo);
         glViewport(0, 0, vieww, viewh);
 
-        glFlush();
+        {
+            lightdebug::scope steptimer(lightdebug::SM_FLUSH);
+            glFlush();
+        }
     }
 }
 
 void filtershadowcolors()
 {
+    lightdebug::scope lighttimer(lightdebug::SHADOWFILTER);
     if(shadowfilterfbo)
     {
         glBindFramebuffer_(GL_FRAMEBUFFER, shadowfilterfbo);
@@ -5338,6 +5494,7 @@ void filtershadowcolors()
 
 void rendershadowatlas()
 {
+    lightdebug::scope lighttimer(lightdebug::SHADOWATLAS);
     timer *smcputimer = begintimer("shadow map", false);
     timer *smtimer = begintimer("shadow map");
 
@@ -5359,20 +5516,38 @@ void rendershadowatlas()
     }
 
     // sun light
-    rendercsmshadowmaps();
+    {
+        lightdebug::scope atlastimer(lightdebug::ATLAS_SUN);
+        rendercsmshadowmaps();
+    }
 
+    // The occlusion-query pass already handled existing allocations. Only newly
+    // packed lights need the second local-shadow pass when sminoq is active.
     int smoffset = shadowmaps.length();
 
-    packlights();
+    {
+        lightdebug::scope atlastimer(lightdebug::ATLAS_PACK);
+        packlights();
+    }
 
     // point lights
-    rendershadowmaps(smoffset);
+    {
+        lightdebug::scope atlastimer(lightdebug::ATLAS_LOCAL);
+        rendershadowmaps(smoffset);
+    }
 
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    if(shadowcolorclears.length() || shadowcolorblurs.length()) filtershadowcolors();
+    if(shadowcolorclears.length() || shadowcolorblurs.length())
+    {
+        lightdebug::scope atlastimer(lightdebug::ATLAS_FILTER);
+        filtershadowcolors();
+    }
 
-    batchlights();
+    {
+        lightdebug::scope atlastimer(lightdebug::ATLAS_BATCH);
+        batchlights();
+    }
 
     endtimer(smtimer);
     endtimer(smcputimer);

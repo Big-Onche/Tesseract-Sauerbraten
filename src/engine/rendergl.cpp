@@ -2852,6 +2852,7 @@ void gl_drawhud()
     debuglights();
 
     glEnable(GL_BLEND);
+    drawlighttimers();
 
     debugparticles();
 

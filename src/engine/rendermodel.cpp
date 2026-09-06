@@ -743,6 +743,44 @@ void rendershadowmodelbatches(bool dynmodel)
     }
 }
 
+// Keep each model's buffers, textures and shader state bound across its cube faces.
+// The caller has already cleared and rendered world geometry for all requested faces.
+void rendercubeshadowmodelbatches(int sidemask, const matrix4 *sidematrices, int x, int y, int size, int cullside)
+{
+    static vector<int> sidemodels[6];
+    loopv(batches)
+    {
+        modelbatch &b = batches[i];
+        if(!b.m->shadow) continue;
+
+        loop(side, 6) sidemodels[side].setsize(0);
+        int batchmask = 0;
+        for(int j = b.batched; j >= 0; j = batchedmodels[j].next)
+        {
+            int visible = batchedmodels[j].visible & sidemask;
+            batchmask |= visible;
+            loop(side, 6) if(visible&(1<<side)) sidemodels[side].add(j);
+        }
+        if(!batchmask) continue;
+
+        b.m->startrender();
+        loop(side, 6) if(batchmask&(1<<side))
+        {
+            int sidex = x + (side>>1)*size, sidey = y + (side&1)*size;
+            glViewport(sidex, sidey, size, size);
+            glScissor(sidex, sidey, size, size);
+            glCullFace((side & 1) ^ (side >> 2) ^ cullside ? GL_FRONT : GL_BACK);
+            shadowside = side;
+            shadowmatrix = sidematrices[side];
+            GLOBALPARAM(shadowmatrix, shadowmatrix);
+
+            const vector<int> &models = sidemodels[side];
+            loopvj(models) renderbatchedmodel(b.m, batchedmodels[models[j]]);
+        }
+        b.m->endrender();
+    }
+}
+
 void rendermapmodelbatches()
 {
     enableaamask();

@@ -366,6 +366,7 @@ extern void setupgbuffer();
 extern GLuint shouldscale();
 extern void doscale(GLuint outfbo = 0);
 extern bool debuglights();
+extern void drawlighttimers();
 extern void cleanuplights();
 
 extern int avatarmask;
@@ -689,6 +690,7 @@ extern void resetmodelbatches();
 extern void startmodelquery(occludequery *query);
 extern void endmodelquery();
 extern void rendershadowmodelbatches(bool dynmodel = true);
+extern void rendercubeshadowmodelbatches(int sidemask, const matrix4 *sidematrices, int x, int y, int size, int cullside);
 extern void shadowmaskbatchedmodels(bool dynshadow = true);
 extern void rendermapmodelbatches();
 extern void rendermodelbatches();
