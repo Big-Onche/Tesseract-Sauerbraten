@@ -7,6 +7,8 @@ extern GLuint hdrfbo;
 
 namespace renderer
 {
+    extern float pbrroughnessscale, pbrspecularscale;
+
     namespace worldbvh
     {
         static const uint LEAF_BIT = 0x80000000u;
@@ -61,10 +63,17 @@ namespace renderer
             uint triangleCount, vertexOffset, vertexCount, reserved;
         };
 
+        struct GPUMaterial
+        {
+            float albedo[3], roughness;
+            float emission[3], specular;
+        };
+
         static_assert(sizeof(GPUNode) == 32, "GPUNode must match the std430 BVHNode layout");
         static_assert(sizeof(GPUVertex) == 32, "GPUVertex must match the std430 BVHVertex layout");
         static_assert(sizeof(GPUTriangle) == 32, "GPUTriangle must match the std430 BVHTriangle layout");
         static_assert(sizeof(GPUBlas) == 48, "GPUBlas must match the std430 BVHBlas layout");
+        static_assert(sizeof(GPUMaterial) == 32, "GPUMaterial must match the std430 BVHMaterial layout");
         static_assert(offsetof(GPUNode, data0) == 12 && offsetof(GPUNode, bmax) == 16 && offsetof(GPUNode, data1) == 28,
                       "GPUNode std430 offsets changed");
         static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, triangle) == 16,
@@ -116,7 +125,8 @@ namespace renderer
         static vector<GPUTriangle> gpuTriangles;
         static vector<GPUBlas> gpuBlases;
         static vector<uint> gpuInstances;
-        static GLuint buffers[5] = { 0, 0, 0, 0, 0 };
+        static vector<GPUMaterial> gpuMaterials;
+        static GLuint buffers[6] = { 0, 0, 0, 0, 0, 0 };
         static Statistics stats;
         static bool sceneReady = false, forceRebuild = true;
         static uint tlasRoot = 0;
@@ -355,18 +365,61 @@ namespace renderer
 
         static void upload()
         {
-            if(!buffers[0]) glGenBuffers_(5, buffers);
+            if(!buffers[0]) glGenBuffers_(6, buffers);
             int start = getclockmillis();
             uploadbuffer(0, gpuNodes.empty() ? NULL : gpuNodes.getbuf(), gpuNodes.length()*sizeof(GPUNode));
             uploadbuffer(1, gpuTriangles.empty() ? NULL : gpuTriangles.getbuf(), gpuTriangles.length()*sizeof(GPUTriangle));
             uploadbuffer(2, gpuVertices.empty() ? NULL : gpuVertices.getbuf(), gpuVertices.length()*sizeof(GPUVertex));
             uploadbuffer(3, gpuBlases.empty() ? NULL : gpuBlases.getbuf(), gpuBlases.length()*sizeof(GPUBlas));
             uploadbuffer(4, gpuInstances.empty() ? NULL : gpuInstances.getbuf(), gpuInstances.length()*sizeof(uint));
+            uploadbuffer(5, gpuMaterials.empty() ? NULL : gpuMaterials.getbuf(), gpuMaterials.length()*sizeof(GPUMaterial));
             glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
             stats.uploadMillis = getclockmillis() - start;
             stats.gpuBytes = gpuNodes.length()*sizeof(GPUNode) + gpuTriangles.length()*sizeof(GPUTriangle) +
                              gpuVertices.length()*sizeof(GPUVertex) + gpuBlases.length()*sizeof(GPUBlas) +
-                             gpuInstances.length()*sizeof(uint);
+                             gpuInstances.length()*sizeof(uint) + gpuMaterials.length()*sizeof(GPUMaterial);
+        }
+
+        static const float *findmaterialparam(const VSlot &vslot, const char *name)
+        {
+            loopv(vslot.params) if(vslot.params[i].name && !strcmp(vslot.params[i].name, name)) return vslot.params[i].val;
+            if(vslot.slot) loopv(vslot.slot->params)
+            {
+                if(vslot.slot->params[i].name && !strcmp(vslot.slot->params[i].name, name)) return vslot.slot->params[i].val;
+            }
+            return NULL;
+        }
+
+        static void buildmaterials()
+        {
+            uint maximumSurface = 0;
+            loopv(gpuTriangles) maximumSurface = max(maximumSurface, gpuTriangles[i].surface);
+            gpuMaterials.shrink(0);
+            if(gpuTriangles.empty()) return;
+            resizevector(gpuMaterials, int(maximumSurface + 1));
+            loopv(gpuMaterials)
+            {
+                GPUMaterial &material = gpuMaterials[i];
+                memset(&material, 0, sizeof(material));
+                material.specular = -1.0f;
+                if(!vslots.inrange(i) || !vslots[i] || !vslots[i]->slot) continue;
+                const VSlot &vslot = *vslots[i];
+                material.albedo[0] = vslot.colorscale.x;
+                material.albedo[1] = vslot.colorscale.y;
+                material.albedo[2] = vslot.colorscale.z;
+                const float *gloss = findmaterialparam(vslot, "gloss"), *specscale = findmaterialparam(vslot, "specscale");
+                float glossBucket = clamp(gloss ? gloss[0] : 1.0f, 0.0f, 2.0f);
+                float exponent = 5.0f + 17.0f*glossBucket;
+                material.roughness = clamp(sqrtf(2.0f/(exponent + 2.0f))*renderer::pbrroughnessscale, 0.045f, 1.0f);
+                float specular = specscale ? max(specscale[0], 0.0f) : 1.0f;
+                material.specular = clamp(0.08f*specular*renderer::pbrspecularscale, 0.0f, 0.25f);
+                if(vslot.slot->texmask&(1<<TEX_GLOW))
+                {
+                    material.emission[0] = vslot.glowcolor.x;
+                    material.emission[1] = vslot.glowcolor.y;
+                    material.emission[2] = vslot.glowcolor.z;
+                }
+            }
         }
 
         void invalidate(vtxarray *va)
@@ -501,6 +554,8 @@ namespace renderer
                 gpuBlases.add(descriptor);
             }
 
+            buildmaterials();
+
             stats.triangles = uint(gpuTriangles.length());
             stats.blasCount = uint(gpuBlases.length());
             stats.tlasNodes = uint(tlasNodes.length());
@@ -521,6 +576,7 @@ namespace renderer
             gpuTriangles.shrink(0);
             gpuBlases.shrink(0);
             gpuInstances.shrink(0);
+            gpuMaterials.shrink(0);
             sceneReady = false;
             forceRebuild = true;
         }
@@ -530,7 +586,7 @@ namespace renderer
             clear();
             if(buffers[0])
             {
-                glDeleteBuffers_(5, buffers);
+                glDeleteBuffers_(6, buffers);
                 memset(buffers, 0, sizeof(buffers));
             }
         }
@@ -538,11 +594,13 @@ namespace renderer
         void bind()
         {
             if(!sceneReady) return;
-            loopi(5) glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, NODE_BINDING + i, buffers[i]);
+            loopi(6) glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, NODE_BINDING + i, buffers[i]);
         }
 
         bool ready() { return bvh && sceneReady; }
         unsigned int generation() { return stats.generation; }
+        unsigned int root() { return tlasRoot; }
+        unsigned int materialcount() { return uint(gpuMaterials.length()); }
 
         static void settingchanged()
         {

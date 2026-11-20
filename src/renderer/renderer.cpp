@@ -1,4 +1,5 @@
 #include "hdr.h"
+#include "reflections.h"
 
 namespace renderer
 {
@@ -35,6 +36,7 @@ namespace renderer
 
     void cleanup()
     {
+        reflections::cleanup();
         cleanupbloom();
         cleanupeyeadaptation();
         cleanuptonemap();

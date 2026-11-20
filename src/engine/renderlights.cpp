@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "../renderer/bvh/bvh.h"
+#include "../renderer/reflections.h"
 #include "../renderer/renderer.h"
 
 namespace lightdebug
@@ -1178,6 +1179,7 @@ void loadhdrshaders(int aa)
 void processhdr(GLuint outfbo, int aa)
 {
     if(msaalight) resolvemsaacolor();
+    renderer::reflections::render(hdrtex, vieww, viewh);
     renderer::worldbvh::debugdraw();
     GLOBALPARAMF(hdrgamma, hdrgamma, 1.0f/hdrgamma);
     if(!renderer::processhdr(hdrtex, vieww, viewh, outfbo, aa)) fatal("HDR post-processing failed");
@@ -5450,6 +5452,7 @@ void preparegbuffer(bool depthclear)
     GLOBALPARAMF(hdrgamma, hdrgamma, 1.0f/hdrgamma);
     GLOBALPARAM(camera, camera1->o);
     GLOBALPARAMF(millis, lastmillis/1000.0f);
+    GLOBALPARAMF(rtreflectionactive, renderer::reflections::active() ? 1.0f : 0.0f);
 
     GLERROR;
 

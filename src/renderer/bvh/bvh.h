@@ -26,7 +26,8 @@ namespace renderer
             TRIANGLE_BINDING,
             VERTEX_BINDING,
             BLAS_BINDING,
-            INSTANCE_BINDING
+            INSTANCE_BINDING,
+            MATERIAL_BINDING
         };
 
         void invalidate(vtxarray *va);
@@ -37,6 +38,8 @@ namespace renderer
         void debugdraw();
         bool ready();
         unsigned int generation();
+        unsigned int root();
+        unsigned int materialcount();
     }
 }
 

@@ -1,6 +1,8 @@
 #include "engine.h"
 
 Texture *sky[6] = { 0, 0, 0, 0, 0, 0 }, *clouds[6] = { 0, 0, 0, 0, 0, 0 };
+extern float spinsky;
+extern int yawsky;
 static Texture *deepStarsTexture = NULL, *milkyWayTexture = NULL, *milkyWayNoiseTexture = NULL, *atmosphereMoonTexture = NULL;
 extern bvec skyboxcolour;
 extern int atmo;
@@ -334,6 +336,27 @@ static bool haveskyfaces()
 {
     loopi(6) if(sky[i] && sky[i] != notexture) return true;
     return false;
+}
+
+bool hastexturedskybox()
+{
+    loopi(6) if(!sky[i] || sky[i] == notexture) return false;
+    return true;
+}
+
+void bindskyboxtextures(int firstunit)
+{
+    loopi(6)
+    {
+        glActiveTexture_(GL_TEXTURE0 + firstunit + i);
+        glBindTexture(GL_TEXTURE_2D, (sky[i] && sky[i] != notexture ? sky[i] : notexture)->id);
+    }
+    glActiveTexture_(GL_TEXTURE0);
+}
+
+float getskyboxrotation()
+{
+    return (spinsky*lastmillis/1000.0f + yawsky)*RAD;
 }
 
 static void clearskyfaces(Texture *texs[6])

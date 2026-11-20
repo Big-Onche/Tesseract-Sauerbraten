@@ -125,6 +125,7 @@ CLIENT_OBJS= \
 	renderer/bloom.o \
 	renderer/bvh/bvh.o \
 	renderer/pbr.o \
+	renderer/reflections.o \
 	renderer/renderer.o \
 	renderer/tonemap.o \
 	game/ai.o \
