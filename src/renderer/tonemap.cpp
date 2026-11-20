@@ -13,8 +13,13 @@ namespace renderer
 
     namespace
     {
+        const int MAX_EYE_MIPS = 16;
         GLuint tonefbo = 0, compositetex = 0, tonylut = 0;
+        GLuint eyefbo = 0, eyelumtex[MAX_EYE_MIPS] = { 0 }, eyeadapttex[2] = { 0 };
         int tonew = -1, toneh = -1;
+        int eyew = -1, eyeh = -1, eyelevels = 0, eyelumw[MAX_EYE_MIPS] = { 0 }, eyelumh[MAX_EYE_MIPS] = { 0 }, eyeadaptindex = 0;
+        int lastadaptmillis = 0, lastadaptdebug = 0;
+        bool eyeadaptvalid = false;
         bool lutattempted = false;
 
         void bindrect(GLenum unit, GLuint tex)
@@ -29,6 +34,17 @@ namespace renderer
             if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) return true;
             conoutf(CON_ERROR, "postfx: incomplete %s framebuffer", label);
             return false;
+        }
+
+        void allocrect(GLuint &tex, int width, int height)
+        {
+            if(!tex) glGenTextures(1, &tex);
+            glBindTexture(GL_TEXTURE_RECTANGLE, tex);
+            glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
         }
 
         bool loadtonylut()
@@ -91,6 +107,130 @@ namespace renderer
             return true;
         }
     }
+
+    void reseteyeadaptation()
+    {
+        eyeadaptvalid = false;
+        lastadaptmillis = 0;
+    }
+
+    void cleanupeyeadaptation()
+    {
+        loopi(MAX_EYE_MIPS) if(eyelumtex[i]) { glDeleteTextures(1, &eyelumtex[i]); eyelumtex[i] = 0; }
+        loopi(2) if(eyeadapttex[i]) { glDeleteTextures(1, &eyeadapttex[i]); eyeadapttex[i] = 0; }
+        if(eyefbo) { glDeleteFramebuffers_(1, &eyefbo); eyefbo = 0; }
+        eyew = eyeh = -1;
+        eyelevels = eyeadaptindex = 0;
+        lastadaptdebug = 0;
+        reseteyeadaptation();
+    }
+
+    bool prepareeyeadaptation(int width, int height)
+    {
+        if(eyew == width && eyeh == height && eyelevels && eyeadapttex[0] && eyeadapttex[1]) return true;
+        cleanupeyeadaptation();
+
+        eyew = width;
+        eyeh = height;
+        int levelw = max((width + 1)/2, 1), levelh = max((height + 1)/2, 1);
+        while(eyelevels < MAX_EYE_MIPS)
+        {
+            eyelumw[eyelevels] = levelw;
+            eyelumh[eyelevels] = levelh;
+            ++eyelevels;
+            if(levelw == 1 && levelh == 1) break;
+            levelw = max((levelw + 1)/2, 1);
+            levelh = max((levelh + 1)/2, 1);
+        }
+        if(eyelumw[eyelevels - 1] != 1 || eyelumh[eyelevels - 1] != 1)
+        {
+            conoutf(CON_ERROR, "postfx: eye-adaptation reduction exceeded %d levels", MAX_EYE_MIPS);
+            cleanupeyeadaptation();
+            return false;
+        }
+
+        glGenFramebuffers_(1, &eyefbo);
+        glBindFramebuffer_(GL_FRAMEBUFFER, eyefbo);
+        loopi(eyelevels)
+        {
+            allocrect(eyelumtex[i], eyelumw[i], eyelumh[i]);
+            if(!attach(eyelumtex[i], "eye-adaptation luminance")) { cleanupeyeadaptation(); return false; }
+        }
+        loopi(2)
+        {
+            allocrect(eyeadapttex[i], 1, 1);
+            if(!attach(eyeadapttex[i], "eye-adaptation history")) { cleanupeyeadaptation(); return false; }
+        }
+        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+        return true;
+    }
+
+    bool updateeyeadaptation(GLuint hdrtex, int width, int height)
+    {
+        if(drawtex || (eyeadaptvalid && lastadaptmillis == lastmillis)) return true;
+        if(!prepareeyeadaptation(width, height)) return false;
+
+        timer *timer = begintimer("eye adaptation");
+        Shader *luminanceshader = useshaderbyname("eyeluminance"), *reduceshader = useshaderbyname("eyereduce"),
+               *adaptshader = useshaderbyname("eyeadapt");
+        if(!luminanceshader || !reduceshader || !adaptshader)
+        {
+            endtimer(timer);
+            return false;
+        }
+
+        glBindFramebuffer_(GL_FRAMEBUFFER, eyefbo);
+        if(!attach(eyelumtex[0], "eye-adaptation luminance")) { endtimer(timer); return false; }
+        glViewport(0, 0, eyelumw[0], eyelumh[0]);
+        luminanceshader->set();
+        bindrect(GL_TEXTURE0, hdrtex);
+        glActiveTexture_(GL_TEXTURE0);
+        screenquad(width, height);
+
+        reduceshader->set();
+        loopi(eyelevels - 1)
+        {
+            const int level = i + 1;
+            if(!attach(eyelumtex[level], "eye-adaptation reduction")) { endtimer(timer); return false; }
+            glViewport(0, 0, eyelumw[level], eyelumh[level]);
+            bindrect(GL_TEXTURE0, eyelumtex[i]);
+            glActiveTexture_(GL_TEXTURE0);
+            screenquad(eyelumw[i], eyelumh[i]);
+        }
+
+        const int nextadapt = 1 - eyeadaptindex;
+        if(!attach(eyeadapttex[nextadapt], "eye-adaptation history")) { endtimer(timer); return false; }
+        glViewport(0, 0, 1, 1);
+        adaptshader->set();
+        const float elapsed = eyeadaptvalid ? max(lastmillis - lastadaptmillis, 0)/1000.0f : 0.0f;
+        const float brightenretention = expf(-eyeadaptbrightenspeed*elapsed), darkenretention = expf(-eyeadaptdarkenspeed*elapsed);
+        LOCALPARAMF(adaptParams, brightenretention, darkenretention, eyeadaptvalid ? 1.0f : 0.0f, 0.0f);
+        bindrect(GL_TEXTURE0, eyelumtex[eyelevels - 1]);
+        bindrect(GL_TEXTURE1, eyeadapttex[eyeadaptindex]);
+        glActiveTexture_(GL_TEXTURE0);
+        screenquad(1, 1);
+        eyeadaptindex = nextadapt;
+        eyeadaptvalid = true;
+        lastadaptmillis = lastmillis;
+
+        if(eyeadaptationdebug && lastmillis - lastadaptdebug >= 500)
+        {
+            float pixel[3] = { 0, 0, 0 };
+            glReadPixels(0, 0, 1, 1, GL_RGB, GL_FLOAT, pixel);
+            const float minimum = min(eyeadaptminexposure, eyeadaptmaxexposure), maximum = max(eyeadaptminexposure, eyeadaptmaxexposure);
+            const float automatic = clamp(eyeadaptsensitivity/max(pixel[0], 1e-4f), minimum, maximum);
+            conoutf(CON_INFO, "eye adaptation: luminance %.4f, automatic %.3fx, final %.3fx", pixel[0], automatic, automatic*exposure);
+            lastadaptdebug = lastmillis;
+        }
+
+        glActiveTexture_(GL_TEXTURE0);
+        endtimer(timer);
+        return true;
+    }
+
+    GLuint eyeadaptationtexture() { return eyeadapttex[eyeadaptindex]; }
+    bool eyeadaptationready() { return eyeadaptvalid; }
 
     bool preparehdr(int width, int height, bool needbloom)
     {
@@ -172,9 +312,13 @@ namespace renderer
         int selected = debug ? 7 : tonemap;
         if(selected == 1 && !loadtonylut()) selected = 0;
         LOCALPARAMF(toneParams, exposure, float(selected), tonylut ? 1.0f : 0.0f, 0.0f);
+        const float minimum = min(eyeadaptminexposure, eyeadaptmaxexposure), maximum = max(eyeadaptminexposure, eyeadaptmaxexposure);
+        const bool adapt = eyeadaptation && eyeadaptationready();
+        LOCALPARAMF(eyeParams, eyeadaptsensitivity, minimum, maximum, adapt ? 1.0f : 0.0f);
         glBindFramebuffer_(GL_FRAMEBUFFER, outfbo);
         glViewport(0, 0, width, height);
         bindrect(GL_TEXTURE0, compositetex);
+        bindrect(GL_TEXTURE1, adapt ? eyeadaptationtexture() : 0);
         glActiveTexture_(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_3D, tonylut);
         glActiveTexture_(GL_TEXTURE0);
