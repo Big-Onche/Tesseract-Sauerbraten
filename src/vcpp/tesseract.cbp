@@ -193,8 +193,10 @@
 		<Unit filename="../game/weapon.cpp" />
 		<Unit filename="../renderer/bloom.cpp" />
 		<Unit filename="../renderer/hdr.h" />
+		<Unit filename="../renderer/pbr.cpp" />
 		<Unit filename="../renderer/renderer.cpp" />
 		<Unit filename="../renderer/renderer.h" />
+		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/tonemap.cpp" />
 		<Unit filename="../../config/glsl/hdr.cfg" />
 		<Unit filename="../shared/command.h" />

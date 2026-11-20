@@ -2973,6 +2973,7 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
 
 static inline void setlightglobals(bool transparent = false)
 {
+    GLOBALPARAMF(pbrparams, renderer::pbrroughnessscale, renderer::pbrspecularscale);
     GLOBALPARAMF(localpcssadaptive, localpcssadaptive);
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
     if(skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
@@ -5533,6 +5534,7 @@ void shademodelpreview(int x, int y, int w, int h, bool background, bool scissor
     GLOBALPARAMF(lightscale, 0.1f*lightscale, 0.1f*lightscale, 0.1f*lightscale, lightscale);
     GLOBALPARAM(sunlightdir, vec(0, -1, 2).normalize());
     GLOBALPARAMF(sunlightcolor, 0.6f*lightscale, 0.6f*lightscale, 0.6f*lightscale);
+    GLOBALPARAMF(pbrparams, renderer::pbrroughnessscale, renderer::pbrspecularscale);
 
     SETSHADER(modelpreview);
 

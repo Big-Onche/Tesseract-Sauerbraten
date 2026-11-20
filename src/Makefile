@@ -123,6 +123,7 @@ CLIENT_OBJS= \
 	engine/world.o \
 	engine/worldio.o \
 	renderer/bloom.o \
+	renderer/pbr.o \
 	renderer/renderer.o \
 	renderer/tonemap.o \
 	game/ai.o \

@@ -5,6 +5,8 @@
 
 namespace renderer
 {
+    extern float pbrroughnessscale, pbrspecularscale;
+
     bool processhdr(GLuint hdrtex, int width, int height, GLuint outfbo, int aatype);
     void cleanup();
 }
