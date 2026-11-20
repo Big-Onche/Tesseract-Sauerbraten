@@ -10,7 +10,7 @@ ifdef OS
     endif
 endif
 
-INCLUDES= -Ishared -Iengine -Igame -Ienet/include
+INCLUDES= -Ishared -Iengine -Igame -Irenderer -Ienet/include
 
 STRIP=
 ifeq (,$(findstring -g,$(CXXFLAGS)))
@@ -122,6 +122,9 @@ CLIENT_OBJS= \
 	engine/water.o \
 	engine/world.o \
 	engine/worldio.o \
+	renderer/bloom.o \
+	renderer/renderer.o \
+	renderer/tonemap.o \
 	game/ai.o \
 	game/client.o \
 	game/entities.o \
@@ -185,6 +188,7 @@ $(CLIENT_PCH): %.h.gch: %.h
 $(CLIENT_OBJS): CXXFLAGS += $(CLIENT_INCLUDES)
 $(filter shared/%,$(CLIENT_OBJS)): $(filter shared/%,$(CLIENT_PCH))
 $(filter engine/%,$(CLIENT_OBJS)): $(filter engine/%,$(CLIENT_PCH))
+$(filter renderer/%,$(CLIENT_OBJS)): $(filter engine/%,$(CLIENT_PCH))
 $(filter game/%,$(CLIENT_OBJS)): $(filter game/%,$(CLIENT_PCH))
 
 $(filter-out standalone/shared/%,$(SERVER_PCH)): $(filter standalone/shared/%,$(SERVER_PCH))

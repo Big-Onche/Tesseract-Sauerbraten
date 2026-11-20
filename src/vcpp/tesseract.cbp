@@ -103,13 +103,14 @@
 			<Add alias="All" targets="client32;client64;" />
 		</VirtualTargets>
 		<Unit filename="../engine/aa.cpp" />
-		<Unit filename="../engine/animmodel.h" />
 		<Unit filename="../engine/acoustics.cpp" />
 		<Unit filename="../engine/acoustics.h" />
+		<Unit filename="../engine/animmodel.h" />
 		<Unit filename="../engine/bih.cpp" />
 		<Unit filename="../engine/bih.h" />
 		<Unit filename="../engine/blend.cpp" />
 		<Unit filename="../engine/client.cpp" />
+		<Unit filename="../engine/clouds.cpp" />
 		<Unit filename="../engine/command.cpp" />
 		<Unit filename="../engine/console.cpp" />
 		<Unit filename="../engine/dynlight.cpp" />
@@ -118,10 +119,12 @@
 			<Option weight="0" />
 		</Unit>
 		<Unit filename="../engine/explosion.h" />
+		<Unit filename="../engine/godrays.cpp" />
 		<Unit filename="../engine/grass.cpp" />
 		<Unit filename="../engine/heathaze.cpp" />
 		<Unit filename="../engine/hitzone.h" />
 		<Unit filename="../engine/iqm.h" />
+		<Unit filename="../engine/lensflare.cpp" />
 		<Unit filename="../engine/lensflare.h" />
 		<Unit filename="../engine/light.cpp" />
 		<Unit filename="../engine/light.h" />
@@ -163,7 +166,6 @@
 		<Unit filename="../engine/texture.h" />
 		<Unit filename="../engine/ui.cpp" />
 		<Unit filename="../engine/vertmodel.h" />
-		<Unit filename="../engine/volumetric.cpp" />
 		<Unit filename="../engine/water.cpp" />
 		<Unit filename="../engine/world.cpp" />
 		<Unit filename="../engine/world.h" />
@@ -189,6 +191,12 @@
 		<Unit filename="../game/server.cpp" />
 		<Unit filename="../game/waypoint.cpp" />
 		<Unit filename="../game/weapon.cpp" />
+		<Unit filename="../renderer/bloom.cpp" />
+		<Unit filename="../renderer/hdr.h" />
+		<Unit filename="../renderer/renderer.cpp" />
+		<Unit filename="../renderer/renderer.h" />
+		<Unit filename="../renderer/tonemap.cpp" />
+		<Unit filename="../../config/glsl/hdr.cfg" />
 		<Unit filename="../shared/command.h" />
 		<Unit filename="../shared/crypto.cpp" />
 		<Unit filename="../shared/cube.h">

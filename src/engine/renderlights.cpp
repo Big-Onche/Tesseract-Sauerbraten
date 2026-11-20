@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "../renderer/renderer.h"
 
 namespace lightdebug
 {
@@ -84,15 +85,15 @@ void drawlighttimers()
     else loopi(SM_BATCH) draw_textf("%s: %.3f ms", FONTH, (5 + i)*FONTH, names[i], displayed[i]);
 }
 
-int gw = -1, gh = -1, bloomw = -1, bloomh = -1, lasthdraccum = 0;
+int gw = -1, gh = -1;
 GLuint gfbo = 0, gdepthtex = 0, gcolortex = 0, gnormaltex = 0, gglowtex = 0, gdepthrb = 0, gstencilrb = 0;
 bool gdepthinit = false;
 int scalew = -1, scaleh = -1;
 GLuint scalefbo[2] = { 0, 0 }, scaletex[2] = { 0, 0 };
-GLuint hdrfbo = 0, hdrtex = 0, bloompbo = 0, bloomfbo[6] = { 0, 0, 0, 0, 0, 0 }, bloomtex[6] = { 0, 0, 0, 0, 0, 0 };
+GLuint hdrfbo = 0, hdrtex = 0;
 int hdrclear = 0;
 GLuint refractfbo = 0, refracttex = 0;
-GLenum bloomformat = 0, hdrformat = 0, stencilformat = 0;
+GLenum hdrformat = 0, stencilformat = 0;
 bool hdrfloat = false;
 GLuint msfbo = 0, msdepthtex = 0, mscolortex = 0, msnormaltex = 0, msglowtex = 0, msdepthrb = 0, msstencilrb = 0, mshdrfbo = 0, mshdrtex = 0, msrefractfbo = 0, msrefracttex = 0;
 vector<vec2> msaapositions;
@@ -274,71 +275,6 @@ int gethdrformat(int prec, int fallback = GL_RGB)
     if(prec >= 2 && hasPF && !amd_pf_bug) return GL_R11F_G11F_B10F;
     if(prec >= 1) return GL_RGB10;
     return fallback;
-}
-
-extern int bloomsize, bloomprec;
-
-void setupbloom(int w, int h)
-{
-    int maxsize = ((1<<bloomsize)*5)/4;
-    while(w >= maxsize || h >= maxsize)
-    {
-        w /= 2;
-        h /= 2;
-    }
-    w = max(w, 1);
-    h = max(h, 1);
-    if(w == bloomw && h == bloomh) return;
-    bloomw = w;
-    bloomh = h;
-
-    loopi(5) if(!bloomtex[i]) glGenTextures(1, &bloomtex[i]);
-
-    loopi(5) if(!bloomfbo[i]) glGenFramebuffers_(1, &bloomfbo[i]);
-
-    bloomformat = gethdrformat(bloomprec);
-    createtexture(bloomtex[0], max(gw/2, bloomw), max(gh/2, bloomh), NULL, 3, 1, bloomformat, GL_TEXTURE_RECTANGLE);
-    createtexture(bloomtex[1], max(gw/4, bloomw), max(gh/4, bloomh), NULL, 3, 1, bloomformat, GL_TEXTURE_RECTANGLE);
-    createtexture(bloomtex[2], bloomw, bloomh, NULL, 3, 1, GL_RGB, GL_TEXTURE_RECTANGLE);
-    createtexture(bloomtex[3], bloomw, bloomh, NULL, 3, 1, GL_RGB, GL_TEXTURE_RECTANGLE);
-    if(bloomformat != GL_RGB)
-    {
-        if(!bloomtex[5]) glGenTextures(1, &bloomtex[5]);
-        if(!bloomfbo[5]) glGenFramebuffers_(1, &bloomfbo[5]);
-        createtexture(bloomtex[5], bloomw, bloomh, NULL, 3, 1, bloomformat, GL_TEXTURE_RECTANGLE);
-    }
-
-    if(hwvtexunits < 4)
-    {
-        glGenBuffers_(1, &bloompbo);
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER, bloompbo);
-        glBufferData_(GL_PIXEL_PACK_BUFFER, 4*(hasTF ? sizeof(GLfloat) : sizeof(GLushort))*(hasTRG ? 1 : 3), NULL, GL_DYNAMIC_COPY);
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
-    }
-
-    static const uchar gray[12] = { 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32 };
-    static const float grayf[12] = { 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f, 0.125f };
-    createtexture(bloomtex[4], bloompbo ? 4 : 1, 1, hasTF ? (const void *)grayf : (const void *)gray, 3, 1, hasTF ? (hasTRG ? GL_R16F : GL_RGB16F) : (hasTRG ? GL_R16 : GL_RGB16));
-
-    loopi(5 + (bloomformat != GL_RGB ? 1 : 0))
-    {
-        glBindFramebuffer_(GL_FRAMEBUFFER, bloomfbo[i]);
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, i==4 ? GL_TEXTURE_2D : GL_TEXTURE_RECTANGLE, bloomtex[i], 0);
-
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            fatal("failed allocating bloom buffer!");
-    }
-
-    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
-}
-
-void cleanupbloom()
-{
-    if(bloompbo) { glDeleteBuffers_(1, &bloompbo); bloompbo = 0; }
-    loopi(6) if(bloomfbo[i]) { glDeleteFramebuffers_(1, &bloomfbo[i]); bloomfbo[i] = 0; }
-    loopi(6) if(bloomtex[i]) { glDeleteTextures(1, &bloomtex[i]); bloomtex[i] = 0; }
-    bloomw = bloomh = -1;
-    lasthdraccum = 0;
 }
 
 extern int ao, aotaps, aoreduce, aoreducedepth, aonoise, aobilateral, aobilateralupscale, aopackdepth, aodepthformat, aoprec, aoderivnormal;
@@ -715,8 +651,6 @@ VARF(msaadepthstencil, 0, 2, 2, initwarning("MSAA setup", INIT_LOAD, CHANGE_SHAD
 VARF(msaastencil, 0, 0, 1, initwarning("MSAA setup", INIT_LOAD, CHANGE_SHADERS));
 VARF(msaaedgedetect, 0, 1, 1, cleanupgbuffer());
 VARFP(msaalineardepth, -1, -1, 3, initwarning("MSAA setup", INIT_LOAD, CHANGE_SHADERS));
-VARFP(msaatonemap, 0, 0, 1, cleanupgbuffer());
-VARF(msaatonemapblit, 0, 0, 1, cleanupgbuffer());
 VAR(msaamaxsamples, 1, 0, 0);
 VAR(msaamaxdepthtexsamples, 1, 0, 0);
 VAR(msaamaxcolortexsamples, 1, 0, 0);
@@ -965,14 +899,7 @@ void setupmsbuffer(int w, int h)
 
     useshaderbyname("msaaedgedetect");
     useshaderbyname("msaaresolve");
-    useshaderbyname("msaareducew");
-    useshaderbyname("msaareduce");
     if(!msaalight) useshaderbyname("msaaresolvedepth");
-    if(msaalight > 1 && msaatonemap)
-    {
-        useshaderbyname("msaatonemap");
-        if(msaalight > 2) useshaderbyname("msaatonemapsample");
-    }
 }
 
 void bindgdepth()
@@ -1003,7 +930,6 @@ void setupgbuffer()
     if(gw == sw && gh == sh && ((sw == hudw && sh == hudh && !scalefbo[0]) || (scalew == hudw && scaleh == hudh))) return;
 
     cleanupscale();
-    cleanupbloom();
     cleanupao();
     cleanupvolumetric();
     godrays::geometry::cleanup();
@@ -1092,7 +1018,7 @@ void setupgbuffer()
     if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         fatal("failed allocating HDR buffer!");
 
-    if(!msaalight || (msaalight > 2 && msaatonemap && msaatonemapblit))
+    if(!msaalight)
     {
         if(!refracttex) glGenTextures(1, &refracttex);
         if(!refractfbo) glGenFramebuffers_(1, &refractfbo);
@@ -1115,6 +1041,7 @@ void setupgbuffer()
 
 void cleanupgbuffer()
 {
+    renderer::cleanup();
     if(gfbo) { glDeleteFramebuffers_(1, &gfbo); gfbo = 0; }
     if(gdepthtex) { glDeleteTextures(1, &gdepthtex); gdepthtex = 0; }
     if(gcolortex) { glDeleteTextures(1, &gcolortex); gcolortex = 0; }
@@ -1198,21 +1125,8 @@ void resolvemsaacolor(int w = vieww, int h = viewh)
     endtimer(resolvetimer);
 }
 
-FVAR(bloomthreshold, 1e-3f, 0.85f, 1e3f);
-FVARP(bloomscale, 0, 1.0f, 1e3f);
-VARP(bloomblur, 0, 7, 7);
-VARP(bloomiter, 0, 0, 4);
-VARFP(bloomsize, 6, 9, 11, cleanupbloom());
-VARFP(bloomprec, 0, 2, 3, cleanupbloom());
-FVAR(hdraccumscale, 0, 0.98f, 1);
-VAR(hdraccummillis, 1, 33, 1000);
-VAR(hdrreduce, 0, 2, 2);
 VARFP(hdrprec, 0, 2, 3, cleanupgbuffer());
 FVARFP(hdrgamma, 1e-3f, 2, 1e3f, initwarning("HDR setup", INIT_LOAD, CHANGE_SHADERS));
-FVARR(hdrbright, 1e-4f, 1.2f, 1e4f);
-FVAR(hdrsaturate, 1e-3f, 0.85f, 1e3f);
-FVAR(hdrminexposure, 0, 0.03f, 1);
-FVAR(hdrmaxexposure, 0, 0.3f, 1);
 VARFP(gscale, 25, 100, 100, cleanupgbuffer());
 VARFP(gscalecubic, 0, 0, 1, cleanupgbuffer());
 VARFP(gscalenearest, 0, 0, 1, cleanupgbuffer());
@@ -1248,349 +1162,23 @@ void copyhdr(int sw, int sh, GLuint fbo, int dw, int dh, bool flipx, bool flipy,
 
 void loadhdrshaders(int aa)
 {
+    const char *shadername = "tonemap";
     switch(aa)
     {
-        case AA_LUMA:
-            useshaderbyname("hdrtonemapluma");
-            useshaderbyname("hdrnopluma");
-            if(msaalight > 1 && msaatonemap) useshaderbyname("msaatonemapluma");
-            break;
-        case AA_MASKED:
-            if(!msaasamples && ghasstencil) useshaderbyname("hdrtonemapstencil");
-            else
-            {
-                useshaderbyname("hdrtonemapmasked");
-                useshaderbyname("hdrnopmasked");
-                if(msaalight > 1 && msaatonemap) useshaderbyname("msaatonemapmasked");
-            }
-            break;
-        case AA_SPLIT:
-            useshaderbyname("msaatonemapsplit");
-            break;
-        case AA_SPLIT_LUMA:
-            useshaderbyname("msaatonemapsplitluma");
-            break;
-        case AA_SPLIT_MASKED:
-            useshaderbyname("msaatonemapsplitmasked");
-            break;
-        default:
-            break;
+        case AA_LUMA: shadername = "tonemapluma"; break;
+        case AA_MASKED: shadername = "tonemapmasked"; break;
+        case AA_SPLIT: shadername = "tonemapsplit"; break;
+        case AA_SPLIT_LUMA: shadername = "tonemapsplitluma"; break;
+        case AA_SPLIT_MASKED: shadername = "tonemapsplitmasked"; break;
     }
+    useshaderbyname(shadername);
 }
 
 void processhdr(GLuint outfbo, int aa)
 {
-    timer *hdrtimer = begintimer("hdr processing");
-
-    GLOBALPARAMF(hdrparams, hdrbright, hdrsaturate, bloomthreshold, bloomscale);
-
-    GLuint b0fbo = bloomfbo[1], b0tex = bloomtex[1], b1fbo =  bloomfbo[0], b1tex = bloomtex[0], ptex = hdrtex;
-    int b0w = max(vieww/4, bloomw), b0h = max(viewh/4, bloomh), b1w = max(vieww/2, bloomw), b1h = max(viewh/2, bloomh),
-        pw = vieww, ph = viewh;
-    if(msaalight)
-    {
-        if(aa < AA_SPLIT && (msaalight <= 1 || !msaatonemap))
-        {
-            glBindFramebuffer_(GL_READ_FRAMEBUFFER, mshdrfbo);
-            glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, hdrfbo);
-            glBlitFramebuffer_(0, 0, vieww, viewh, 0, 0, vieww, viewh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
-        else if(hasFBMSBS && (vieww > bloomw || viewh > bloomh))
-        {
-            int cw = max(vieww/2, bloomw), ch = max(viewh/2, bloomh);
-            glBindFramebuffer_(GL_READ_FRAMEBUFFER, mshdrfbo);
-            glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, hdrfbo);
-            glBlitFramebuffer_(0, 0, vieww, viewh, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT, GL_SCALED_RESOLVE_FASTEST_EXT);
-            pw = cw;
-            ph = ch;
-        }
-        else
-        {
-            glBindFramebuffer_(GL_FRAMEBUFFER, hdrfbo);
-            if(vieww/2 >= bloomw)
-            {
-                pw = vieww/2;
-                if(viewh/2 >= bloomh)
-                {
-                    ph = viewh/2;
-                    glViewport(0, 0, pw, ph);
-                    SETSHADER(msaareduce);
-                }
-                else
-                {
-                    glViewport(0, 0, pw, viewh);
-                    SETSHADER(msaareducew);
-                }
-            }
-            else
-            {
-                glViewport(0, 0, vieww, viewh);
-                SETSHADER(msaaresolve);
-            }
-            glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, mshdrtex);
-            screenquad(vieww, viewh);
-        }
-    }
-    if(hdrreduce) while(pw > bloomw || ph > bloomh)
-    {
-        GLuint cfbo = b1fbo, ctex = b1tex;
-        int cw = max(pw/2, bloomw), ch = max(ph/2, bloomh);
-
-        if(hdrreduce > 1 && cw/2 >= bloomw)
-        {
-            cw /= 2;
-            if(ch/2 >= bloomh)
-            {
-                ch /= 2;
-                SETSHADER(hdrreduce2);
-            }
-            else SETSHADER(hdrreduce2w);
-        }
-        else SETSHADER(hdrreduce);
-        if(cw == bloomw && ch == bloomh) { if(bloomfbo[5]) { cfbo = bloomfbo[5]; ctex = bloomtex[5]; } else { cfbo = bloomfbo[2]; ctex = bloomtex[2]; } }
-        glBindFramebuffer_(GL_FRAMEBUFFER, cfbo);
-        glViewport(0, 0, cw, ch);
-        glBindTexture(GL_TEXTURE_RECTANGLE, ptex);
-        screenquad(pw, ph);
-
-        ptex = ctex;
-        pw = cw;
-        ph = ch;
-        swap(b0fbo, b1fbo);
-        swap(b0tex, b1tex);
-        swap(b0w, b1w);
-        swap(b0h, b1h);
-    }
-
-    if(!lasthdraccum || lastmillis - lasthdraccum >= hdraccummillis)
-    {
-        GLuint ltex = ptex;
-        int lw = pw, lh = ph;
-        for(int i = 0; lw > 2 || lh > 2; i++)
-        {
-            int cw = max(lw/2, 2), ch = max(lh/2, 2);
-
-            if(hdrreduce > 1 && cw/2 >= 2)
-            {
-                cw /= 2;
-                if(ch/2 >= 2)
-                {
-                    ch /= 2;
-                    if(i) SETSHADER(hdrreduce2); else SETSHADER(hdrluminance2);
-                }
-                else if(i) SETSHADER(hdrreduce2w); else SETSHADER(hdrluminance2w);
-            }
-            else if(i) SETSHADER(hdrreduce); else SETSHADER(hdrluminance);
-            glBindFramebuffer_(GL_FRAMEBUFFER, b1fbo);
-            glViewport(0, 0, cw, ch);
-            glBindTexture(GL_TEXTURE_RECTANGLE, ltex);
-            screenquad(lw, lh);
-
-            ltex = b1tex;
-            lw = cw;
-            lh = ch;
-            swap(b0fbo, b1fbo);
-            swap(b0tex, b1tex);
-            swap(b0w, b1w);
-            swap(b0h, b1h);
-        }
-
-        glBindFramebuffer_(GL_FRAMEBUFFER, bloomfbo[4]);
-        glViewport(0, 0, bloompbo ? 4 : 1, 1);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-        SETSHADER(hdraccum);
-        glBindTexture(GL_TEXTURE_RECTANGLE, b0tex);
-        LOCALPARAMF(accumscale, lasthdraccum ? pow(hdraccumscale, float(lastmillis - lasthdraccum)/hdraccummillis) : 0);
-        screenquad(2, 2);
-        glDisable(GL_BLEND);
-
-        if(bloompbo)
-        {
-            glBindBuffer_(GL_PIXEL_PACK_BUFFER, bloompbo);
-            glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glReadPixels(0, 0, 4, 1, hasTRG ? GL_RED : GL_RGB, hasTF ? GL_FLOAT : GL_UNSIGNED_SHORT, NULL);
-            glBindBuffer_(GL_PIXEL_PACK_BUFFER, 0);
-        }
-
-        lasthdraccum = lastmillis;
-    }
-
-    if(bloompbo)
-    {
-        gle::bindvbo(bloompbo);
-        gle::enablecolor();
-        gle::colorpointer(hasTF ? sizeof(GLfloat) : sizeof(GLushort), (const void *)0, hasTF ? GL_FLOAT : GL_UNSIGNED_SHORT, 1);
-        gle::clearvbo();
-    }
-
-    b0fbo = bloomfbo[3];
-    b0tex = bloomtex[3];
-    b1fbo = bloomfbo[2];
-    b1tex = bloomtex[2];
-    b0w = b1w = bloomw;
-    b0h = b1h = bloomh;
-
-    glActiveTexture_(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, bloomtex[4]);
-    glActiveTexture_(GL_TEXTURE0);
-
-    glBindFramebuffer_(GL_FRAMEBUFFER, b0fbo);
-    glViewport(0, 0, b0w, b0h);
-    SETSHADER(hdrbloom);
-    glBindTexture(GL_TEXTURE_RECTANGLE, ptex);
-    screenquad(pw, ph);
-
-    if(bloomblur)
-    {
-        float blurweights[MAXBLURRADIUS+1], bluroffsets[MAXBLURRADIUS+1];
-        setupblurkernel(bloomblur, blurweights, bluroffsets);
-        loopi(2 + 2*bloomiter)
-        {
-            glBindFramebuffer_(GL_FRAMEBUFFER, b1fbo);
-            glViewport(0, 0, b1w, b1h);
-            setblurshader(i%2, 1, bloomblur, blurweights, bluroffsets, GL_TEXTURE_RECTANGLE);
-            glBindTexture(GL_TEXTURE_RECTANGLE, b0tex);
-            screenquad(b0w, b0h);
-            swap(b0w, b1w);
-            swap(b0h, b1h);
-            swap(b0tex, b1tex);
-            swap(b0fbo, b1fbo);
-        }
-    }
-
-    if(aa >= AA_SPLIT)
-    {
-        glBindFramebuffer_(GL_FRAMEBUFFER, outfbo);
-        glViewport(0, 0, vieww, viewh);
-        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, mshdrtex);
-        glActiveTexture_(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_RECTANGLE, b0tex);
-        glActiveTexture_(GL_TEXTURE0);
-        switch(aa)
-        {
-            case AA_SPLIT_LUMA: SETSHADER(msaatonemapsplitluma); break;
-            case AA_SPLIT_MASKED:
-                SETSHADER(msaatonemapsplitmasked);
-                setaavelocityparams(GL_TEXTURE3);
-                break;
-            default: SETSHADER(msaatonemapsplit); break;
-        }
-        screenquad(vieww, viewh, b0w, b0h);
-    }
-    else if(msaalight <= 1 || !msaatonemap)
-    {
-        glBindFramebuffer_(GL_FRAMEBUFFER, outfbo);
-        glViewport(0, 0, vieww, viewh);
-        glBindTexture(GL_TEXTURE_RECTANGLE, hdrtex);
-        glActiveTexture_(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_RECTANGLE, b0tex);
-        glActiveTexture_(GL_TEXTURE0);
-        switch(aa)
-        {
-            case AA_LUMA: SETSHADER(hdrtonemapluma); break;
-            case AA_MASKED:
-                if(!msaasamples && ghasstencil)
-                {
-                    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-                    glStencilFunc(GL_EQUAL, 0, 0x80);
-                    glEnable(GL_STENCIL_TEST);
-                    SETSHADER(hdrtonemap);
-                    screenquad(vieww, viewh, b0w, b0h);
-
-                    glStencilFunc(GL_EQUAL, 0x80, 0x80);
-                    SETSHADER(hdrtonemapstencil);
-                    screenquad(vieww, viewh, b0w, b0h);
-                    glDisable(GL_STENCIL_TEST);
-                    goto done;
-                }
-                SETSHADER(hdrtonemapmasked);
-                setaavelocityparams(GL_TEXTURE3);
-                break;
-            default: SETSHADER(hdrtonemap); break;
-        }
-        screenquad(vieww, viewh, b0w, b0h);
-    }
-    else
-    {
-        bool blit = msaalight > 2 && msaatonemapblit && (!aa || !outfbo);
-
-        glBindFramebuffer_(GL_FRAMEBUFFER, blit ? msrefractfbo : outfbo);
-        glViewport(0, 0, vieww, viewh);
-        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, mshdrtex);
-        glActiveTexture_(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_RECTANGLE, b0tex);
-        glActiveTexture_(GL_TEXTURE0);
-
-        if(blit) SETSHADER(msaatonemapsample);
-        else switch(aa)
-        {
-            case AA_LUMA: SETSHADER(msaatonemapluma); break;
-            case AA_MASKED:
-                SETSHADER(msaatonemapmasked);
-                setaavelocityparams(GL_TEXTURE3);
-                break;
-            default: SETSHADER(msaatonemap); break;
-        }
-        screenquad(vieww, viewh, b0w, b0h);
-
-        if(blit)
-        {
-            glBindFramebuffer_(GL_READ_FRAMEBUFFER, msrefractfbo);
-            glBindFramebuffer_(GL_DRAW_FRAMEBUFFER, aa || !outfbo ? refractfbo : outfbo);
-            glBlitFramebuffer_(0, 0, vieww, viewh, 0, 0, vieww, viewh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-            if(!outfbo)
-            {
-                glBindFramebuffer_(GL_FRAMEBUFFER, outfbo);
-                glViewport(0, 0, vieww, viewh);
-                if(!blit) SETSHADER(hdrnop);
-                else switch(aa)
-                {
-                    case AA_LUMA: SETSHADER(hdrnopluma); break;
-                    case AA_MASKED:
-                        SETSHADER(hdrnopmasked);
-                        setaavelocityparams(GL_TEXTURE3);
-                        break;
-                    default: SETSHADER(hdrnop); break;
-                }
-                glBindTexture(GL_TEXTURE_RECTANGLE, refracttex);
-                screenquad(vieww, viewh);
-            }
-        }
-    }
-
-done:
-    if(bloompbo) gle::disablecolor();
-
-    endtimer(hdrtimer);
-}
-
-void getavglum(int *numargs, ident *id)
-{
-    if(!bloomfbo[4]) return;
-    glBindFramebuffer_(GL_FRAMEBUFFER, bloomfbo[4]);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    float avglum = -1;
-    glReadPixels(0, 0, 1, 1, GL_RED, GL_FLOAT, &avglum);
-    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
-    if(avglum < 0) return;
-    avglum *= 4;
-    if(*numargs < 0) floatret(avglum);
-    else printfvar(id, avglum);
-}
-
-COMMANDN(avglum, getavglum, "N$");
-
-VAR(debugbloom, 0, 0, 1);
-
-void viewbloom()
-{
-    int w = min(hudw, hudh)/2, h = (w*hudh)/hudw;
-    SETSHADER(hudrect);
-    gle::colorf(1, 1, 1);
-    glBindTexture(GL_TEXTURE_RECTANGLE, bloomtex[3]);
-    debugquad(0, 0, w, h, 0, 0, bloomw, bloomh);
+    if(msaalight) resolvemsaacolor();
+    GLOBALPARAMF(hdrgamma, hdrgamma, 1.0f/hdrgamma);
+    if(!renderer::processhdr(hdrtex, vieww, viewh, outfbo, aa)) fatal("HDR post-processing failed");
 }
 
 VAR(debugdepth, 0, 0, 1);
@@ -6005,7 +5593,6 @@ void setuplights()
     int skyvisres = calcskyvisibilityres();
     if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres || skyvisworldsize != worldsize) setupskyvisibility();
     else updateskyvisibility();
-    if(bloomw < 0 || bloomh < 0) setupbloom(gw, gh);
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
     if(volumetriclights && volumetric && (volw < 0 || volh < 0)) setupvolumetric(gw, gh);
     if(!shadowatlasfbo) setupshadowatlas();
@@ -6020,7 +5607,6 @@ bool debuglights()
 {
     if(debugshadowatlas) viewshadowatlas();
     else if(debugao) viewao();
-    else if(debugbloom) viewbloom();
     else if(debugdepth) viewdepth();
     else if(debugstencil) viewstencil();
     else if(debugrefract) viewrefract();
@@ -6037,7 +5623,6 @@ void cleanuplights()
 {
     cleanupgbuffer();
     cleanupskyvisibility();
-    cleanupbloom();
     cleanupao();
     cleanupvolumetric();
     cleanupshadowatlas();
