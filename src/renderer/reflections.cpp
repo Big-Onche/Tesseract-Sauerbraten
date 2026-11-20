@@ -180,7 +180,7 @@ namespace renderer
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, float(worldbvh::root()), 0.0f);
+                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, float(worldbvh::root()), rtdebug == 14 ? 1.0f : 0.0f);
                 LOCALPARAMF(rtTraceOptions, float(rtadaptive), float(worldbvh::materialcount()), hastexturedskybox() ? 1.0f : 0.0f,
                             getskyboxrotation());
                 LOCALPARAMF(rtAdaptiveParams, rtadaptivehigh, min(rtadaptivemedium, rtadaptivehigh),
@@ -190,6 +190,23 @@ namespace renderer
                 float sunscale = 2.0f*ldrscaleb*getdirectionallightscale()*getdirectionallightvisibility();
                 LOCALPARAM(rtSunDirection, direction);
                 LOCALPARAMF(rtSunColor, sun.x*sunscale, sun.y*sunscale, sun.z*sunscale);
+                static const int maximumTraceLights = 32;
+                tracelight traceLights[maximumTraceLights];
+                vec4 lightPositionRadius[maximumTraceLights], lightColor[maximumTraceLights], lightDirectionCone[maximumTraceLights];
+                int lightCount = collectlights(traceLights, maximumTraceLights);
+                loopi(lightCount)
+                {
+                    lightPositionRadius[i] = traceLights[i].positionRadius;
+                    lightColor[i] = traceLights[i].color;
+                    lightDirectionCone[i] = traceLights[i].directionCone;
+                }
+                LOCALPARAMI(rtLightCount, lightCount);
+                if(lightCount)
+                {
+                    LOCALPARAMV(rtLightPositionRadius, lightPositionRadius, lightCount);
+                    LOCALPARAMV(rtLightColor, lightColor, lightCount);
+                    LOCALPARAMV(rtLightDirectionCone, lightDirectionCone, lightCount);
+                }
                 vec skycolors[6];
                 vec2 skyfront;
                 getskycubetints(skycolors, skyfront);
@@ -220,7 +237,8 @@ namespace renderer
                 timer *temporaltimer = begintimer("RT reflection temporal");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtTemporalParams, historyvalid && rtdenoise ? 1.0f : 0.0f, float(rtspecularhistory), float(rtreconstruction), 0.0f);
+                LOCALPARAMF(rtTemporalParams, historyvalid && rtdenoise ? 1.0f : 0.0f, float(rtspecularhistory), float(rtreconstruction),
+                            rtdebug == 14 ? 1.0f : 0.0f);
                 bindgbuffer();
                 bindrectangle(GL_TEXTURE3, rawtexture);
                 bindrectangle(GL_TEXTURE4, auxiliarytexture);
@@ -249,7 +267,7 @@ namespace renderer
                     if(!bindtarget(destination, resourcewidth, resourceheight, "spatial filter")) return 0;
                     shader->set();
                     setcommonparams();
-                    LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, 0.0f);
+                    LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, rtdebug == 14 ? 1.0f : 0.0f);
                     bindgbuffer();
                     bindrectangle(GL_TEXTURE3, source);
                     bindrectangle(GL_TEXTURE4, historyvalidation[historyindex]);
@@ -307,8 +325,8 @@ namespace renderer
         VARFP(rtspecularspatial, 0, 2, 3, settingschanged());
         VARFP(rtreconstruction, 0, 2, 2, settingschanged());
         // 0 composite; 1 raw; 2 temporal; 3 spatial; 4 validity; 5 hit distance; 6 ray direction; 7 hit normal;
-        // 8 traversal cost; 9 roughness; 10 allocation; 11 final contribution; 12 history length; 13 Fresnel weight.
-        VARP(rtdebug, 0, 0, 13);
+        // 8 traversal cost; 9 roughness; 10 allocation; 11 final contribution; 12 history length; 13 Fresnel weight; 14 perfect mirrors.
+        VARFP(rtdebug, 0, 0, 14, settingschanged());
 
         static void printstats()
         {
@@ -320,14 +338,16 @@ namespace renderer
             conoutf("RT reflection sampling: deterministic sharp ray, reconstruction %d, history %d, spatial quality %d", rtreconstruction,
                     rtspecularhistory, rtspecularspatial);
             conoutf("RT debug %d (0 composite, 1 raw, 2 temporal, 3 spatial, 4 validity, 5 distance, 6 direction, 7 hit normal)", rtdebug);
-            conoutf("RT debug continued: 8 traversal, 9 roughness, 10 allocation, 11 final, 12 history length, 13 Fresnel");
+            conoutf("RT debug continued: 8 traversal, 9 roughness, 10 allocation, 11 final, 12 history length, 13 Fresnel, 14 perfect mirrors");
             conoutf("RT reflection geometry: opaque world BVH; alpha/refract use material fallback; mapmodels are absent from the M03 BVH");
+            conoutf("RT reflection materials: bindless texture sampling %s, up to 32 visible colored local lights",
+                    hasBindlessTexture ? "available" : "unavailable");
         }
         COMMANDN(rtreflectionstats, printstats, "");
 
         bool active()
         {
-            return rtreflections == 1 && pipelineavailable && glversion >= 430 && worldbvh::ready() && !drawtex && !mainmenu;
+            return rtreflections == 1 && pipelineavailable && glversion >= 430 && hasBindlessTexture && worldbvh::ready() && !drawtex && !mainmenu;
         }
 
         void render(GLuint hdrtexture, int width, int height)

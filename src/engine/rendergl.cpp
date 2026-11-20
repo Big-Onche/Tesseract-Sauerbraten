@@ -7,7 +7,13 @@ void (APIENTRYP glDeleteSamplers_)(GLsizei, const GLuint *) = NULL;
 void (APIENTRYP glBindSampler_)(GLuint, GLuint) = NULL;
 void (APIENTRYP glSamplerParameteri_)(GLuint, GLenum, GLint) = NULL;
 
-bool hasVAO = false, hasTR = false, hasTSW = false, hasPBO = false, hasFBO = false, hasAFBO = false, hasDS = false, hasTF = false, hasCBF = false, hasS3TC = false, hasFXT1 = false, hasLATC = false, hasRGTC = false, hasAF = false, hasFBB = false, hasFBMS = false, hasTMS = false, hasMSS = false, hasFBMSBS = false, hasUBO = false, hasMBR = false, hasDB2 = false, hasDBB = false, hasTG = false, hasTQ = false, hasPF = false, hasTRG = false, hasTI = false, hasHFV = false, hasHFP = false, hasDBT = false, hasDC = false, hasDBGO = false, hasEGPU4 = false, hasGPU4 = false, hasGPU5 = false, hasBFE = false, hasEAL = false, hasCR = false, hasOQ2 = false, hasES2 = false, hasES3 = false, hasCB = false, hasCI = false, hasTS = false;
+bool hasVAO = false, hasTR = false, hasTSW = false, hasPBO = false, hasFBO = false, hasAFBO = false, hasDS = false, hasTF = false;
+bool hasCBF = false, hasS3TC = false, hasFXT1 = false, hasLATC = false, hasRGTC = false, hasAF = false, hasFBB = false;
+bool hasFBMS = false, hasTMS = false, hasMSS = false, hasFBMSBS = false, hasUBO = false, hasMBR = false, hasDB2 = false;
+bool hasDBB = false, hasTG = false, hasTQ = false, hasPF = false, hasTRG = false, hasTI = false, hasHFV = false, hasHFP = false;
+bool hasDBT = false, hasDC = false, hasDBGO = false, hasEGPU4 = false, hasGPU4 = false, hasGPU5 = false, hasBFE = false;
+bool hasEAL = false, hasCR = false, hasOQ2 = false, hasES2 = false, hasES3 = false, hasCB = false, hasCI = false, hasTS = false;
+bool hasBindlessTexture = false;
 bool mesa = false, intel = false, amd = false, nvidia = false;
 
 int hasstencil = 0;
@@ -218,6 +224,9 @@ PFNGLGETACTIVEUNIFORMBLOCKIVPROC glGetActiveUniformBlockiv_ = NULL;
 PFNGLUNIFORMBLOCKBINDINGPROC     glUniformBlockBinding_     = NULL;
 PFNGLBINDBUFFERBASEPROC          glBindBufferBase_          = NULL;
 PFNGLBINDBUFFERRANGEPROC         glBindBufferRange_         = NULL;
+PFNGLGETTEXTUREHANDLEARBPROC glGetTextureHandleARB_ = NULL;
+PFNGLMAKETEXTUREHANDLERESIDENTARBPROC glMakeTextureHandleResidentARB_ = NULL;
+PFNGLMAKETEXTUREHANDLENONRESIDENTARBPROC glMakeTextureHandleNonResidentARB_ = NULL;
 
 // GL_ARB_copy_buffer
 PFNGLCOPYBUFFERSUBDATAPROC glCopyBufferSubData_ = NULL;
@@ -541,6 +550,13 @@ void gl_checkextensions()
     if(glslversion < 120) fatal("GLSL 1.20 or greater is required!");
 
     parseglexts();
+
+    glGetTextureHandleARB_ = (PFNGLGETTEXTUREHANDLEARBPROC)getprocaddress("glGetTextureHandleARB");
+    glMakeTextureHandleResidentARB_ = (PFNGLMAKETEXTUREHANDLERESIDENTARBPROC)getprocaddress("glMakeTextureHandleResidentARB");
+    glMakeTextureHandleNonResidentARB_ =
+        (PFNGLMAKETEXTUREHANDLENONRESIDENTARBPROC)getprocaddress("glMakeTextureHandleNonResidentARB");
+    hasBindlessTexture = hasext("GL_ARB_bindless_texture") && glGetTextureHandleARB_ && glMakeTextureHandleResidentARB_ &&
+        glMakeTextureHandleNonResidentARB_;
 
     glGenSamplers_ = NULL;
     glDeleteSamplers_ = NULL;

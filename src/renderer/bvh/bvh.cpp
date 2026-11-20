@@ -65,6 +65,7 @@ namespace renderer
 
         struct GPUMaterial
         {
+            uint diffuseHandle[2], glowHandle[2];
             float albedo[3], roughness;
             float emission[3], specular;
         };
@@ -73,7 +74,9 @@ namespace renderer
         static_assert(sizeof(GPUVertex) == 32, "GPUVertex must match the std430 BVHVertex layout");
         static_assert(sizeof(GPUTriangle) == 32, "GPUTriangle must match the std430 BVHTriangle layout");
         static_assert(sizeof(GPUBlas) == 48, "GPUBlas must match the std430 BVHBlas layout");
-        static_assert(sizeof(GPUMaterial) == 32, "GPUMaterial must match the std430 BVHMaterial layout");
+        static_assert(sizeof(GPUMaterial) == 48, "GPUMaterial must match the std430 BVHMaterial layout");
+        static_assert(offsetof(GPUMaterial, albedo) == 16 && offsetof(GPUMaterial, emission) == 32,
+                      "GPUMaterial std430 offsets changed");
         static_assert(offsetof(GPUNode, data0) == 12 && offsetof(GPUNode, bmax) == 16 && offsetof(GPUNode, data1) == 28,
                       "GPUNode std430 offsets changed");
         static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, triangle) == 16,
@@ -126,6 +129,7 @@ namespace renderer
         static vector<GPUBlas> gpuBlases;
         static vector<uint> gpuInstances;
         static vector<GPUMaterial> gpuMaterials;
+        static vector<GLuint64> residentHandles;
         static GLuint buffers[6] = { 0, 0, 0, 0, 0, 0 };
         static Statistics stats;
         static bool sceneReady = false, forceRebuild = true;
@@ -390,6 +394,30 @@ namespace renderer
             return NULL;
         }
 
+        static Texture *findmaterialtexture(Slot &slot, int type)
+        {
+            if(!slot.loaded) slot.load();
+            loopv(slot.sts)
+            {
+                Slot::Tex &texture = slot.sts[i];
+                if(texture.type != type) continue;
+                if(texture.t) return texture.t;
+                if(texture.combined >= 0 && slot.sts.inrange(texture.combined)) return slot.sts[texture.combined].t;
+                return NULL;
+            }
+            return NULL;
+        }
+
+        static GLuint64 materialhandle(Texture *texture)
+        {
+            if(!hasBindlessTexture || !texture || !texture->id) return 0;
+            GLuint64 handle = glGetTextureHandleARB_(texture->id);
+            loopv(residentHandles) if(residentHandles[i] == handle) return handle;
+            glMakeTextureHandleResidentARB_(handle);
+            residentHandles.add(handle);
+            return handle;
+        }
+
         static void buildmaterials()
         {
             uint maximumSurface = 0;
@@ -404,6 +432,13 @@ namespace renderer
                 material.specular = -1.0f;
                 if(!vslots.inrange(i) || !vslots[i] || !vslots[i]->slot) continue;
                 const VSlot &vslot = *vslots[i];
+                Slot &slot = *vslot.slot;
+                GLuint64 diffuseHandle = materialhandle(findmaterialtexture(slot, TEX_DIFFUSE));
+                GLuint64 glowHandle = materialhandle(findmaterialtexture(slot, TEX_GLOW));
+                material.diffuseHandle[0] = uint(diffuseHandle);
+                material.diffuseHandle[1] = uint(diffuseHandle>>32);
+                material.glowHandle[0] = uint(glowHandle);
+                material.glowHandle[1] = uint(glowHandle>>32);
                 material.albedo[0] = vslot.colorscale.x;
                 material.albedo[1] = vslot.colorscale.y;
                 material.albedo[2] = vslot.colorscale.z;
@@ -570,6 +605,8 @@ namespace renderer
 
         void clear()
         {
+            if(glMakeTextureHandleNonResidentARB_) loopv(residentHandles) glMakeTextureHandleNonResidentARB_(residentHandles[i]);
+            residentHandles.shrink(0);
             records.shrink(0);
             gpuNodes.shrink(0);
             gpuVertices.shrink(0);

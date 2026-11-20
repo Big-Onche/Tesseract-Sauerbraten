@@ -5,8 +5,14 @@ namespace renderer
 {
     namespace reflections
     {
+        struct tracelight
+        {
+            vec4 positionRadius, color, directionCone;
+        };
+
         extern int rtreflections;
 
+        int collectlights(tracelight *destination, int maximum);
         bool active();
         void render(GLuint hdrtexture, int width, int height);
         void resethistory();

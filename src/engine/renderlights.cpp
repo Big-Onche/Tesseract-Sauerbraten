@@ -2003,6 +2003,22 @@ hashset<lightbatch> lightbatcher(128);
 vector<lightbatch *> lightbatches;
 vector<shadowmapinfo> shadowmaps;
 
+int renderer::reflections::collectlights(renderer::reflections::tracelight *destination, int maximum)
+{
+    int count = 0;
+    loopv(lightorder)
+    {
+        if(count >= maximum) break;
+        const lightinfo &light = lights[lightorder[i]];
+        if(light.radius <= 0 || light.color.iszero()) continue;
+        tracelight &result = destination[count++];
+        result.positionRadius = vec4(light.o, light.radius);
+        result.color = vec4(vec(light.color).mul(2*ldrscaleb), light.nospec() ? 0.0f : 1.0f);
+        result.directionCone = vec4(light.dir, light.spot > 0 ? cos360(light.spot) : -2.0f);
+    }
+    return count;
+}
+
 void clearshadowcache()
 {
     shadowmaps.setsize(0);
