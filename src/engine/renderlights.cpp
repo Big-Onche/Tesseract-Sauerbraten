@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "../renderer/bvh/bvh.h"
 #include "../renderer/renderer.h"
 
 namespace lightdebug
@@ -1177,6 +1178,7 @@ void loadhdrshaders(int aa)
 void processhdr(GLuint outfbo, int aa)
 {
     if(msaalight) resolvemsaacolor();
+    renderer::worldbvh::debugdraw();
     GLOBALPARAMF(hdrgamma, hdrgamma, 1.0f/hdrgamma);
     if(!renderer::processhdr(hdrtex, vieww, viewh, outfbo, aa)) fatal("HDR post-processing failed");
 }
@@ -5623,6 +5625,7 @@ bool debuglights()
 
 void cleanuplights()
 {
+    renderer::worldbvh::cleanup();
     cleanupgbuffer();
     cleanupskyvisibility();
     cleanupao();

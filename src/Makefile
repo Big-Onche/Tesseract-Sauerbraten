@@ -1,4 +1,4 @@
-CXXFLAGS= -O3 -fomit-frame-pointer -ffast-math
+CXXFLAGS= -O3 -fomit-frame-pointer -ffast-math -std=c++17
 override CXXFLAGS+= -Wall -fsigned-char -fno-exceptions -fno-rtti
 
 PLATFORM= $(shell uname -s | tr '[:lower:]' '[:upper:]')
@@ -123,6 +123,7 @@ CLIENT_OBJS= \
 	engine/world.o \
 	engine/worldio.o \
 	renderer/bloom.o \
+	renderer/bvh/bvh.o \
 	renderer/pbr.o \
 	renderer/renderer.o \
 	renderer/tonemap.o \

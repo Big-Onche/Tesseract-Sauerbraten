@@ -1,6 +1,7 @@
 // octarender.cpp: fill vertex arrays with different cube surfaces.
 
 #include "engine.h"
+#include "../renderer/bvh/bvh.h"
 
 struct vboinfo
 {
@@ -1193,6 +1194,7 @@ vtxarray *newva(const ivec &o, int size)
 
 void destroyva(vtxarray *va, bool reparent)
 {
+    renderer::worldbvh::invalidate(va);
     wverts -= va->verts;
     wtris -= va->tris + va->blends + va->alphatris + va->decaltris;
     allocva--;
@@ -1694,6 +1696,7 @@ void octarender()                               // creates va s for all leaf cub
     updateva(worldroot, ivec(0, 0, 0), worldsize/2, csi-1);
     loadprogress = 0;
     flushvbo();
+    renderer::worldbvh::sync();
 
     explicitsky = 0;
     loopv(valist)

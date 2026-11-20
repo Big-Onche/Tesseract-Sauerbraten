@@ -159,6 +159,8 @@ static void compileglslshader(Shader &s, GLenum type, GLuint &obj, const char *d
     int numparts = 0;
     static const struct { int version; const char * const header; } glslversions[] =
     {
+        { 450, "#version 450\n" },
+        { 430, "#version 430\n" },
         { 400, "#version 400\n" },
         { 330, "#version 330\n" },
         { 150, "#version 150\n" },

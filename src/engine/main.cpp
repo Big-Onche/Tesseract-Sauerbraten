@@ -637,7 +637,7 @@ void setupscreen()
 #ifdef __APPLE__
     static const int glversions[] = { 32, 20 };
 #else
-    static const int glversions[] = { 40, 33, 32, 31, 30, 20 };
+    static const int glversions[] = { 45, 43, 40, 33, 32, 31, 30, 20 };
 #endif
     loopi(sizeof(glversions)/sizeof(glversions[0]))
     {

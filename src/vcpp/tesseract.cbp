@@ -14,6 +14,7 @@
 				<Option compiler="gcc" />
 				<Option parameters="-t0 -w640 -h480 -qhome" />
 				<Compiler>
+					<Add option="-std=c++17" />
 					<Add option="-fomit-frame-pointer" />
 					<Add option="-O3" />
 					<Add option="-Wall" />
@@ -60,6 +61,7 @@
 				<Option compiler="gcc" />
 				<Option parameters="-t0 -w640 -h480 -qhome" />
 				<Compiler>
+					<Add option="-std=c++17" />
 					<Add option="-fomit-frame-pointer" />
 					<Add option="-O3" />
 					<Add option="-ffast-math" />
@@ -192,6 +194,8 @@
 		<Unit filename="../game/waypoint.cpp" />
 		<Unit filename="../game/weapon.cpp" />
 		<Unit filename="../renderer/bloom.cpp" />
+		<Unit filename="../renderer/bvh/bvh.cpp" />
+		<Unit filename="../renderer/bvh/bvh.h" />
 		<Unit filename="../renderer/hdr.h" />
 		<Unit filename="../renderer/pbr.cpp" />
 		<Unit filename="../renderer/renderer.cpp" />
@@ -199,6 +203,7 @@
 		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/tonemap.cpp" />
 		<Unit filename="../../config/glsl/hdr.cfg" />
+		<Unit filename="../../config/glsl/bvh.glsl" />
 		<Unit filename="../shared/command.h" />
 		<Unit filename="../shared/crypto.cpp" />
 		<Unit filename="../shared/cube.h">
