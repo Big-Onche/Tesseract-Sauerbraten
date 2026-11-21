@@ -311,12 +311,12 @@ namespace renderer
         }
 
         VARFP(rtreflections, 0, 0, 1, settingschanged());
-        FVARFP(rtresolutionscale, 0.25f, 1.0f, 1.0f, cleanup());
+        FVARFP(rtresolutionscale, 0.25f, 0.5f, 1.0f, cleanup());
         VARFP(rtadaptive, 0, 1, 1, settingschanged());
         FVARFP(rtadaptivehigh, 0.05f, 0.45f, 1.0f, settingschanged());
         FVARFP(rtadaptivemedium, 0.005f, 0.025f, 1.0f, settingschanged());
         FVARFP(rtadaptivelow, 0.0f, 0.008f, 1.0f, settingschanged());
-        FVARFP(rtmaxdistance, 1.0f, 4096.0f, 8192.0f, settingschanged());
+        FVARFP(rtmaxdistance, 1.0f, 2048.0f, 8192.0f, settingschanged());
         FVARP(rtreflectionstrength, 0.0f, 2.0f, 8.0f);
         FVARP(rtreflectionroughnesspower, 0.25f, 3.0f, 8.0f);
         VARFP(rtdenoise, 0, 1, 1, settingschanged());

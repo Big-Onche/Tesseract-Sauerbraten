@@ -294,8 +294,9 @@ extern void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax);
 extern GLuint shadowatlastex;
 extern GLenum shadowatlastarget;
 extern int csmshadowmap, csmsplits;
+extern void bindvolumetriclighting(int shadowunit, int rhunit, int skyunit, int &csmcount, int &rhcount);
 
-extern void rendervolumetric();
+extern void rendervolumetric(bool specialfog = false);
 extern void cleanupvolumetric();
 
 extern void findshadowvas(bool transparent = false);
@@ -335,7 +336,7 @@ static inline bool bbinsidespot(const vec &origin, const vec &dir, int spot, con
     return sphereinsidespot(dir, spot, center.sub(origin), radius.magnitude());
 }
 
-extern matrix4 worldmatrix, screenmatrix;
+extern matrix4 worldmatrix, linearworldmatrix, screenmatrix;
 
 extern int transparentlayer;
 

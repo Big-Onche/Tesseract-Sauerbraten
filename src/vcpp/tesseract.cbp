@@ -202,9 +202,12 @@
 		<Unit filename="../renderer/reflections.h" />
 		<Unit filename="../renderer/renderer.cpp" />
 		<Unit filename="../renderer/renderer.h" />
+		<Unit filename="../renderer/volumetrics.cpp" />
+		<Unit filename="../renderer/volumetrics.h" />
 		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/tonemap.cpp" />
 		<Unit filename="../../config/glsl/hdr.cfg" />
+		<Unit filename="../../config/glsl/volumetrics.cfg" />
 		<Unit filename="../../config/glsl/bvh.glsl" />
 		<Unit filename="../../config/glsl/reflections.cfg" />
 		<Unit filename="../shared/command.h" />

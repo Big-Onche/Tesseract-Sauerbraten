@@ -1,6 +1,7 @@
 // rendergl.cpp: core opengl rendering stuff
 
 #include "engine.h"
+#include "../renderer/volumetrics.h"
 
 void (APIENTRYP glGenSamplers_)(GLsizei, GLuint *) = NULL;
 void (APIENTRYP glDeleteSamplers_)(GLsizei, const GLuint *) = NULL;
@@ -2588,7 +2589,9 @@ void gl_drawview()
     rendertransparent();
     GLERROR;
 
-    godrays::geometry::render();
+    // Candela already integrates CSM-shadowed sunlight along the view ray.
+    // Keep geometry god rays for backend 0 without counting them twice in 1.
+    if(!renderer::volumetrics::candelaactive()) godrays::geometry::render();
     GLERROR;
 
     if(!drawtex)
@@ -2600,7 +2603,7 @@ void gl_drawview()
     rendersounddebug();
     GLERROR;
 
-    rendervolumetric();
+    rendervolumetric(fogmat != MAT_AIR);
     GLERROR;
 
     if(editmode)

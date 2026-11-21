@@ -2,6 +2,7 @@
 #include "../renderer/bvh/bvh.h"
 #include "../renderer/reflections.h"
 #include "../renderer/renderer.h"
+#include "../renderer/volumetrics.h"
 
 namespace lightdebug
 {
@@ -2499,6 +2500,44 @@ bool useradiancehints()
     return !getdirectionallightcolor().iszero() && csmshadowmap && gi && giscale && gidist;
 }
 
+void bindvolumetriclighting(int shadowunit, int rhunit, int skyunit, int &csmcount, int &rhcount)
+{
+    csmcount = csm.rendered ? csmsplits : 0;
+    rhcount = useradiancehints() && rhfbo ? rhsplits : 0;
+
+    glActiveTexture_(GL_TEXTURE0 + shadowunit);
+    glBindTexture(shadowatlastarget, shadowatlastex);
+    setsmcomparemode();
+    if(csmcount) csm.bindparams();
+
+    loopi(4)
+    {
+        glActiveTexture_(GL_TEXTURE0 + rhunit + i);
+        glBindTexture(GL_TEXTURE_3D, rhcount ? rhtex[i] : 0);
+    }
+    if(rhcount) rh.bindparams();
+
+    glActiveTexture_(GL_TEXTURE0 + skyunit);
+    glBindTexture(GL_TEXTURE_3D, skyvistex);
+    if(skyvistex && skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
+    {
+        float invworld = 1.0f/float(worldsize);
+        GLOBALPARAMF(skyocclscale, invworld*(1.0f - 1.0f/skyvisw), invworld*(1.0f - 1.0f/skyvish),
+                     invworld*(1.0f - 1.0f/skyvisd));
+        GLOBALPARAMF(skyoccloffset, 0.5f/skyvisw, 0.5f/skyvish, 0.5f/skyvisd);
+    }
+    else
+    {
+        GLOBALPARAMF(skyocclscale, 0.0f, 0.0f, 0.0f);
+        GLOBALPARAMF(skyoccloffset, 0.0f, 0.0f, 0.0f);
+    }
+    GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
+    float lightscale = 2.0f*ldrscaleb;
+    GLOBALPARAMF(cvolambientcolor, giaoscale*skylight.x*lightscale*skylightscale,
+                 giaoscale*skylight.y*lightscale*skylightscale, giaoscale*skylight.z*lightscale*skylightscale);
+    glActiveTexture_(GL_TEXTURE0);
+}
+
 FVAR(avatarshadowdist, 0, 12, 100);
 FVAR(avatarshadowbias, 0, 8, 100);
 VARF(avatarshadowstencil, 0, 1, 2, initwarning("g-buffer setup", INIT_LOAD, CHANGE_SHADERS));
@@ -2607,6 +2646,7 @@ void cleanupvolumetric()
     volw = volh = -1;
 
     clearvolumetricshaders();
+    renderer::volumetrics::cleanup();
 }
 
 VARFP(volumetric, 0, 1, 1, cleanupvolumetric());
@@ -3511,7 +3551,7 @@ void renderlights(float bsx1 = -1, float bsy1 = -1, float bsx2 = 1, float bsy2 =
 
 extern int volumetriclights;
 
-void rendervolumetric()
+static void renderlocalvolumetric()
 {
     lightdebug::scope lighttimer(lightdebug::VOLUMETRIC);
     if(!volumetric || !volumetriclights || !volscale) return;
@@ -3739,6 +3779,27 @@ void rendervolumetric()
     glDisable(GL_BLEND);
 
     endtimer(voltimer);
+}
+
+void rendervolumetric(bool specialfog)
+{
+    if(!volumetric) return;
+    if(renderer::volumetrics::candelaactive())
+    {
+        if(specialfog)
+        {
+            renderer::volumetrics::resethistory();
+            if(renderer::volumetrics::cvollocallights && volumetriclights) renderlocalvolumetric();
+            return;
+        }
+        bool rendered = renderer::volumetrics::render();
+        if((renderer::volumetrics::cvollocallights || !rendered) && volumetriclights)
+        {
+            if((volw < 0 || volh < 0) && !rendered) setupvolumetric(gw, gh);
+            renderlocalvolumetric();
+        }
+    }
+    else renderlocalvolumetric();
 }
 
 VAR(oqvol, 0, 1, 1);
@@ -5617,7 +5678,8 @@ void setuplights()
     if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres || skyvisworldsize != worldsize) setupskyvisibility();
     else updateskyvisibility();
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
-    if(volumetriclights && volumetric && (volw < 0 || volh < 0)) setupvolumetric(gw, gh);
+    if(volumetriclights && volumetric && (!renderer::volumetrics::candelaactive() || renderer::volumetrics::cvollocallights) &&
+       (volw < 0 || volh < 0)) setupvolumetric(gw, gh);
     if(!shadowatlasfbo) setupshadowatlas();
     if(useradiancehints() && !rhfbo) setupradiancehints();
     if(!deferredlightshader) loaddeferredlightshaders();
