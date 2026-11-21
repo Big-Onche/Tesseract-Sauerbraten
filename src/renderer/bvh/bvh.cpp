@@ -391,6 +391,11 @@ namespace renderer
             {
                 if(vslot.slot->params[i].name && !strcmp(vslot.slot->params[i].name, name)) return vslot.slot->params[i].val;
             }
+            if(vslot.slot && vslot.slot->shader) loopv(vslot.slot->shader->defaultparams)
+            {
+                if(vslot.slot->shader->defaultparams[i].name && !strcmp(vslot.slot->shader->defaultparams[i].name, name))
+                    return vslot.slot->shader->defaultparams[i].val;
+            }
             return NULL;
         }
 
@@ -445,8 +450,8 @@ namespace renderer
                 const float *gloss = findmaterialparam(vslot, "gloss"), *specscale = findmaterialparam(vslot, "specscale");
                 float glossBucket = clamp(gloss ? gloss[0] : 1.0f, 0.0f, 2.0f);
                 float exponent = 5.0f + 17.0f*glossBucket;
-                material.roughness = clamp(sqrtf(2.0f/(exponent + 2.0f))*renderer::pbrroughnessscale, 0.045f, 1.0f);
-                float specular = specscale ? max(specscale[0], 0.0f) : 1.0f;
+                material.roughness = specscale ? clamp(sqrtf(2.0f/(exponent + 2.0f))*renderer::pbrroughnessscale, 0.045f, 1.0f) : 1.0f;
+                float specular = specscale ? max(specscale[0], 0.0f) : 0.0f;
                 material.specular = clamp(0.08f*specular*renderer::pbrspecularscale, 0.0f, 0.25f);
                 if(vslot.slot->texmask&(1<<TEX_GLOW))
                 {
