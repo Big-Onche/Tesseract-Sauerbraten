@@ -67,7 +67,7 @@ namespace renderer
                 glDrawBuffers_(1, &drawbuffer);
                 if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 {
-                    conoutf(CON_ERROR, "Candela volumetrics: incomplete %s framebuffer", label);
+                    conoutf(CON_ERROR, "volumetrics: incomplete %s framebuffer", label);
                     return false;
                 }
                 glViewport(0, 0, width, height);
@@ -84,7 +84,7 @@ namespace renderer
                 glDrawBuffers_(2, drawbuffers);
                 if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 {
-                    conoutf(CON_ERROR, "Candela volumetrics: incomplete raymarch framebuffer");
+                    conoutf(CON_ERROR, "volumetrics: incomplete raymarch framebuffer");
                     return false;
                 }
                 glViewport(0, 0, volumetricwidth, volumetricheight);
@@ -101,7 +101,7 @@ namespace renderer
                 glDrawBuffers_(3, drawbuffers);
                 if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 {
-                    conoutf(CON_ERROR, "Candela volumetrics: incomplete temporal framebuffer");
+                    conoutf(CON_ERROR, "volumetrics: incomplete temporal framebuffer");
                     return false;
                 }
                 glViewport(0, 0, volumetricwidth, volumetricheight);
@@ -179,7 +179,7 @@ namespace renderer
                 Shader *shader = useshaderbyname(msaalight ? (shadowatlastarget == GL_TEXTURE_2D ? "cvolraymarchms2d" : "cvolraymarchmsrect") :
                                                              (shadowatlastarget == GL_TEXTURE_2D ? "cvolraymarch2d" : "cvolraymarchrect"));
                 if(!shader || shader->isnull()) return false;
-                timer *timer = begintimer("Candela volumetric rendering");
+                timer *timer = begintimer("volumetric rendering");
                 shader->set();
                 LOCALPARAM(worldmatrix, worldmatrix);
                 LOCALPARAM(camera, camera1->o);
@@ -231,7 +231,7 @@ namespace renderer
                 if(!bindhistorytargets(destination)) return false;
                 Shader *shader = useshaderbyname("cvoltemporal");
                 if(!shader || shader->isnull()) return false;
-                timer *timer = begintimer("Candela volumetric temporal");
+                timer *timer = begintimer("volumetric temporal");
                 shader->set();
                 LOCALPARAM(linearworldmatrix, linearworldmatrix);
                 LOCALPARAM(camera, camera1->o);
@@ -258,7 +258,7 @@ namespace renderer
                 if(!bindtarget(filteredtexture, volumetricwidth, volumetricheight, "spatial filter")) return 0;
                 Shader *shader = useshaderbyname("cvolspatial");
                 if(!shader || shader->isnull()) return 0;
-                timer *timer = begintimer("Candela volumetric filtering");
+                timer *timer = begintimer("volumetric filtering");
                 shader->set();
                 LOCALPARAMF(cvolFilterParams, float(volumetricwidth), float(volumetricheight), 0.02f, 8.0f);
                 bindrectangle(GL_TEXTURE0, historytexture[historyindex]);
@@ -275,7 +275,7 @@ namespace renderer
                 Shader *shader = useshaderbyname(msaalight ? "cvolcompositems" : "cvolcomposite");
                 Shader *copyshader = useshaderbyname("cvolcopy");
                 if(!shader || shader->isnull() || !copyshader || copyshader->isnull()) return false;
-                timer *timer = begintimer("Candela volumetric composition");
+                timer *timer = begintimer("volumetric composition");
                 shader->set();
                 binddepth(GL_TEXTURE0);
                 glActiveTexture_(GL_TEXTURE1);
@@ -286,6 +286,7 @@ namespace renderer
                 bindrectangle(GL_TEXTURE5, historyvalidity[historyindex]);
                 LOCALPARAMF(cvolCompositeScale, float(volumetricwidth), float(volumetricheight), float(volumetricwidth)/vieww,
                             float(volumetricheight)/viewh);
+                LOCALPARAMF(cvolCompositeParams, volmaxdistance, 0.0f, 0.0f, 0.0f);
                 LOCALPARAMI(cvolDebug, voldebug);
                 glActiveTexture_(GL_TEXTURE0);
                 screenquad();
@@ -312,7 +313,7 @@ namespace renderer
         FVARFP(volextinction, 0.0f, 0.0025f, 0.1f, settingschanged());
         FVARFP(voldirectstrength, 0.0f, 4.0f, 32.0f, settingschanged());
         FVARFP(volindirectstrength, 0.0f, 1.0f, 16.0f, settingschanged());
-        FVARFP(vollocalstrength, 0.0f, 8.0f, 16.0f, settingschanged());
+        FVARFP(vollocalstrength, 0.0f, 4.0f, 16.0f, settingschanged());
         VARFP(volsteps, 4, 32, 128, settingschanged());
         FVARFP(volmaxdistance, 1.0f, 1536.0f, 65536.0f, settingschanged());
         FVARFP(volheight, -65536.0f, 256.0f, 65536.0f, settingschanged());
@@ -320,7 +321,7 @@ namespace renderer
         VARFP(voluniformdensity, 0, 0, 1, settingschanged());
         CVARFR(sunvolcolour, 0, settingschanged());
         // 0 = full, 1 = half on each axis, 2 = quarter on each axis.
-        VARFP(volresolution, 0, 1, 2, cleanupvolumetric());
+        VARFP(volresolution, 0, 0, 2, cleanupvolumetric());
         VARFP(voltemporal, 0, 1, 1, settingschanged());
         VARFP(volspatial, 0, 1, 1, settingschanged());
         // 0 final; 1 filtered volume; 2 raw scattering; 3 transmittance;
@@ -337,7 +338,7 @@ namespace renderer
                 cleanup();
                 pipelineavailable = false;
                 restorehdrtarget();
-                conoutf(CON_ERROR, "Candela volumetrics unavailable");
+                conoutf(CON_ERROR, "volumetrics unavailable");
                 return false;
             }
 
@@ -365,7 +366,7 @@ namespace renderer
                 restorehdrtarget();
                 glDepthMask(GL_TRUE);
                 glEnable(GL_DEPTH_TEST);
-                conoutf(CON_ERROR, "Candela volumetric shader unavailable");
+                conoutf(CON_ERROR, "volumetric shader unavailable");
                 return false;
             }
             GLuint filtered = spatialfilter();
@@ -376,7 +377,7 @@ namespace renderer
                 restorehdrtarget();
                 glDepthMask(GL_TRUE);
                 glEnable(GL_DEPTH_TEST);
-                conoutf(CON_ERROR, "Candela volumetric composition failed");
+                conoutf(CON_ERROR, "volumetric composition failed");
                 return false;
             }
 
