@@ -1,7 +1,7 @@
 // CORTAO integration for Tesseract: Sauerbraten.
 // Adapted from the CORTAO Carbon Engine Implementation v1.0.0.
 // Copyright (c) 2026 Fenris Creations. Used under the MIT License.
-// See packages/sauerract/cortao/LICENSE.md for the upstream license.
+// See packages/sauerract/cortao/LICENSE.md for the license.
 
 #include "cortao.h"
 
@@ -9,35 +9,47 @@ namespace renderer
 {
     namespace cortao
     {
-        enum { SOURCE_SHARED = 0, SOURCE_PREPASS, SOURCE_MAIN, SOURCE_FILTER, SOURCE_DENOISE, SOURCE_DEBUG, SOURCE_COUNT };
+        enum { SOURCE_SHARED = 0, SOURCE_PREPASS, SOURCE_MAIN, SOURCE_FILTER, SOURCE_TEMPORAL, SOURCE_DEBUG, SOURCE_COUNT };
 
         static char *sources[SOURCE_COUNT] = { NULL, NULL, NULL, NULL, NULL, NULL };
-        static GLuint prepassprograms[2] = { 0, 0 }, mainprograms[4] = { 0, 0, 0, 0 }, filterprogram = 0, denoiseprogram = 0, debugprogram = 0;
-        static GLuint packedtexture = 0, luttexture = 0, rawtexture = 0, filteredtexture = 0, scratchtexture = 0, finaltexture = 0;
+        static GLuint prepassprograms[2] = { 0, 0 }, mainprograms[5] = { 0, 0, 0, 0, 0 }, filterprogram = 0, temporalprogram = 0;
+        static GLuint debugprogram = 0, packedtexture = 0, luttexture = 0, rawtexture = 0, filteredtexture = 0;
+        static GLuint historytexture[2] = { 0, 0 }, historypacked[2] = { 0, 0 };
         static GLuint debugoutput = 0, clearfbo = 0;
-        static int resourcewidth = -1, resourceheight = -1, mipcount = 0;
-        static bool initialized = false, supported = true, reportedfailure = false;
+        static int resourcewidth = -1, resourceheight = -1, mipcount = 0, historyindex = 0;
+        static int historyquality = -1, historyfilter = -1;
+        static uint temporalframe = 0;
+        static bool initialized = false, supported = true, reportedfailure = false, historyvalid = false;
+        static float historyradius = -1.0f, historymaxscreenratio = -1.0f, historystrength = -1.0f, historymipbias = -1.0f;
+        static float historynormalbias = -1.0f, historyslopecompensation = -1.0f, historybackfacethreshold = -1.0f;
+        static float historybackfaceboost = -1.0f, historyfilterdepth = -1.0f, historyfilternormal = -1.0f;
+        static matrix4 previousscreenmatrix, previousviewmatrix;
 
-        VARP(cortaoquality, 0, 1, 3);
-        FVARP(cortaoradius, 0.01f, 5.0f, 256.0f);
-        FVARP(cortaomaxscreenratio, 0.01f, 0.2f, 0.5f);
-        // Strength is applied only after the spatial resolve, so it does not amplify individual stochastic ray hits.
-        FVARP(cortaostrength, 0.0f, 1.0f, 4.0f);
-        FVARP(cortaomipbias, -8.0f, -4.0f, 2.0f);
-        FVARP(cortaonormalbias, 0.0f, 1.0f, 4.0f);
-        FVARP(cortaoslopecompensation, 1.0f, 4.0f, 16.0f);
-        FVARP(cortaobackfacethreshold, -1.0f, 0.5f, 1.0f);
-        FVARP(cortaobackfaceboost, 0.0f, 0.0f, 2.0f);
-        VARP(cortaofilter, 0, 1, 1);
-        FVARP(cortaofilterdepth, 0.0f, 512.0f, 2048.0f);
-        FVARP(cortaofilternormal, 0.0f, 128.0f, 512.0f);
-        VARP(cortaodebug, 0, 0, 10);
-        VARP(cortaodebugmip, 0, 4, 7);
-        FVARP(cortaodebugdepth, 1.0f, 64.0f, 65536.0f);
-        FVARP(cortaodebugworldscale, 0.01f, 5.0f, 256.0f);
-        FVARP(cortaodebugpixelscale, 1.0f, 128.0f, 4096.0f);
-        FVARP(cortaodebugpositionscale, 1.0f, 64.0f, 65536.0f);
-        VARP(cortaodebuglutslice, 0, 8, 15);
+        VARP(cortaoquality, 0, 1, 4);
+        FVAR(cortaoradius, 0.01f, 7.0f, 256.0f);
+        FVAR(cortaomaxscreenratio, 0.01f, 0.2f, 0.5f);
+        FVARR(cortaostrength, 0.0f, 2.0f, 4.0f);
+        FVAR(cortaomipbias, -8.0f, -4.0f, 2.0f);
+        FVAR(cortaonormalbias, 0.0f, 1.0f, 4.0f);
+        FVAR(cortaoslopecompensation, 1.0f, 4.0f, 16.0f);
+        FVAR(cortaobackfacethreshold, -1.0f, 0.5f, 1.0f);
+        FVAR(cortaobackfaceboost, 0.0f, 0.0f, 2.0f);
+
+        VAR(cortaofilter, 0, 1, 1);
+        FVAR(cortaofilterdepth, 0.0f, 512.0f, 2048.0f);
+        FVAR(cortaofilternormal, 0.0f, 128.0f, 512.0f);
+        VAR(cortaotemporal, 0, 1, 1);
+        FVAR(cortaotemporalweight, 0.0f, 0.9f, 0.98f);
+        FVAR(cortaotemporaldepth, 0.001f, 0.02f, 0.25f);
+        FVAR(cortaotemporalnormal, 0.0f, 0.8f, 1.0f);
+
+        VAR(cortaodebug, 0, 0, 10);
+        VAR(cortaodebugmip, 0, 4, 7);
+        FVAR(cortaodebugdepth, 1.0f, 64.0f, 65536.0f);
+        FVAR(cortaodebugworldscale, 0.01f, 5.0f, 256.0f);
+        FVAR(cortaodebugpixelscale, 1.0f, 128.0f, 4096.0f);
+        FVAR(cortaodebugpositionscale, 1.0f, 64.0f, 65536.0f);
+        VAR(cortaodebuglutslice, 0, 8, 15);
 
         static void deleteprogram(GLuint &program)
         {
@@ -48,15 +60,15 @@ namespace renderer
         static void cleanupprograms()
         {
             loopi(2) deleteprogram(prepassprograms[i]);
-            loopi(4) deleteprogram(mainprograms[i]);
+            loopi(5) deleteprogram(mainprograms[i]);
             deleteprogram(filterprogram);
-            deleteprogram(denoiseprogram);
+            deleteprogram(temporalprogram);
             deleteprogram(debugprogram);
         }
 
         static int sourceindex(const char *name)
         {
-            static const char * const names[SOURCE_COUNT] = { "shared", "prepass", "main", "filter", "denoise", "debug" };
+            static const char * const names[SOURCE_COUNT] = { "shared", "prepass", "main", "filter", "temporal", "debug" };
             loopi(SOURCE_COUNT) if(!strcmp(name, names[i])) return i;
             return -1;
         }
@@ -72,6 +84,8 @@ namespace renderer
             DELETEA(sources[index]);
             sources[index] = newstring(source);
             cleanupprograms();
+            historyvalid = false;
+            temporalframe = 0;
             supported = true;
             reportedfailure = false;
         }
@@ -157,12 +171,6 @@ namespace renderer
             if(location >= 0) glUniform2f_(location, x, y);
         }
 
-        static void uniform2i(GLuint program, const char *name, int x, int y)
-        {
-            GLint location = uniformloc(program, name);
-            if(location >= 0) glUniform2i_(location, x, y);
-        }
-
         static void uniform3f(GLuint program, const char *name, float x, float y, float z)
         {
             GLint location = uniformloc(program, name);
@@ -175,15 +183,30 @@ namespace renderer
             if(location >= 0) glUniform4f_(location, x, y, z, w);
         }
 
+        static void uniformmatrix4(GLuint program, const char *name, const matrix4 &value)
+        {
+            GLint location = uniformloc(program, name);
+            if(location >= 0) glUniformMatrix4fv_(location, 1, GL_FALSE, value.a.v);
+        }
+
         static void deleteresources()
         {
-            GLuint textures[] = { packedtexture, luttexture, rawtexture, filteredtexture, scratchtexture, finaltexture, debugoutput };
-            loopi(7) if(textures[i]) glDeleteTextures(1, &textures[i]);
-            packedtexture = luttexture = rawtexture = filteredtexture = scratchtexture = finaltexture = debugoutput = 0;
+            GLuint textures[] =
+            {
+                packedtexture, luttexture, rawtexture, filteredtexture, historytexture[0], historytexture[1], historypacked[0], historypacked[1],
+                debugoutput
+            };
+            loopi(9) if(textures[i]) glDeleteTextures(1, &textures[i]);
+            packedtexture = luttexture = rawtexture = filteredtexture = historytexture[0] = historytexture[1] = 0;
+            historypacked[0] = historypacked[1] = debugoutput = 0;
             if(clearfbo) glDeleteFramebuffers_(1, &clearfbo);
             clearfbo = 0;
             resourcewidth = resourceheight = -1;
             mipcount = 0;
+            historyindex = 0;
+            historyquality = historyfilter = -1;
+            temporalframe = 0;
+            historyvalid = false;
             initialized = false;
         }
 
@@ -262,8 +285,9 @@ namespace renderer
             glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            GLenum external = format == GL_RGBA8 ? GL_RGBA : GL_RED;
-            glTexImage2D(GL_TEXTURE_RECTANGLE, 0, format, resourcewidth, resourceheight, 0, external, GL_UNSIGNED_BYTE, NULL);
+            GLenum external = format == GL_RGBA8 ? GL_RGBA : (format == GL_R32UI ? GL_RED_INTEGER : GL_RED);
+            GLenum type = format == GL_R32UI ? GL_UNSIGNED_INT : GL_UNSIGNED_BYTE;
+            glTexImage2D(GL_TEXTURE_RECTANGLE, 0, format, resourcewidth, resourceheight, 0, external, type, NULL);
         }
 
         static bool allocateresources(int width, int height)
@@ -287,8 +311,13 @@ namespace renderer
 
             allocaterectangle(rawtexture, GL_R8);
             allocaterectangle(filteredtexture, GL_R8);
-            allocaterectangle(scratchtexture, GL_R8);
-            allocaterectangle(finaltexture, GL_R8);
+            loopi(2)
+            {
+                allocaterectangle(historytexture[i], GL_R8);
+                glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                allocaterectangle(historypacked[i], GL_R32UI);
+            }
             allocaterectangle(debugoutput, GL_RGBA8);
             glGenFramebuffers_(1, &clearfbo);
             GLint previousfbo = 0;
@@ -299,6 +328,8 @@ namespace renderer
             glDrawBuffers_(1, &drawbuffer);
             bool complete = glCheckFramebufferStatus_(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
             glBindFramebuffer_(GL_FRAMEBUFFER, previousfbo);
+            previousscreenmatrix.identity();
+            previousviewmatrix.identity();
             return complete && glGetError() == GL_NO_ERROR;
         }
 
@@ -310,17 +341,17 @@ namespace renderer
                 const char *defines = multisample ? "#define CORTAO_MSAA 1\n" : "#define CORTAO_MSAA 0\n";
                 prepassprograms[ms] = compileprogram(multisample ? "prepass-msaa" : "prepass", defines, SOURCE_PREPASS);
             }
-            int quality = clamp(cortaoquality, 0, 3);
+            int quality = clamp(cortaoquality, 0, 4);
             if(!mainprograms[quality])
             {
-                static const int samples[] = { 4, 16, 24, 32 };
+                static const int samples[] = { 4, 16, 24, 32, 64 };
                 defformatstring(defines, "#define CORTAO_SAMPLE_COUNT %d\n#define CORTAO_RAY_COUNT 16\n", samples[quality]);
                 mainprograms[quality] = compileprogram("main", defines, SOURCE_MAIN);
             }
             if(cortaofilter && !filterprogram) filterprogram = compileprogram("filter", "", SOURCE_FILTER);
-            if(!denoiseprogram) denoiseprogram = compileprogram("denoise", "", SOURCE_DENOISE);
+            if(!temporalprogram) temporalprogram = compileprogram("temporal", "", SOURCE_TEMPORAL);
             if(cortaodebug && !debugprogram) debugprogram = compileprogram("debug", "", SOURCE_DEBUG);
-            return prepassprograms[ms] && mainprograms[quality] && (!cortaofilter || filterprogram) && denoiseprogram &&
+            return prepassprograms[ms] && mainprograms[quality] && (!cortaofilter || filterprogram) && temporalprogram &&
                    (!cortaodebug || debugprogram);
         }
 
@@ -400,20 +431,56 @@ namespace renderer
             glActiveTexture_(GL_TEXTURE0);
         }
 
+        static uint getrandomseed(uint frame)
+        {
+            uint value = 0x6D2B79F5u + frame*0x9E3779B9u;
+            return value*(value^(value >> 15u));
+        }
+
+        static bool historyparameterschanged(int quality)
+        {
+            bool changed = historyquality != quality || historyfilter != cortaofilter || historyradius != cortaoradius ||
+                           historymaxscreenratio != cortaomaxscreenratio || historystrength != cortaostrength ||
+                           historymipbias != cortaomipbias || historynormalbias != cortaonormalbias ||
+                           historyslopecompensation != cortaoslopecompensation || historybackfacethreshold != cortaobackfacethreshold ||
+                           historybackfaceboost != cortaobackfaceboost || historyfilterdepth != cortaofilterdepth ||
+                           historyfilternormal != cortaofilternormal;
+            historyquality = quality;
+            historyfilter = cortaofilter;
+            historyradius = cortaoradius;
+            historymaxscreenratio = cortaomaxscreenratio;
+            historystrength = cortaostrength;
+            historymipbias = cortaomipbias;
+            historynormalbias = cortaonormalbias;
+            historyslopecompensation = cortaoslopecompensation;
+            historybackfacethreshold = cortaobackfacethreshold;
+            historybackfaceboost = cortaobackfaceboost;
+            historyfilterdepth = cortaofilterdepth;
+            historyfilternormal = cortaofilternormal;
+            return changed;
+        }
+
         bool render(GLuint depthtexture, GLuint normaltexture, bool multisample, int depthformat, int width, int height,
-                    const matrix4 &projection, const matrix4 &inverseprojection, const matrix3 &normalmatrix, float nearplanevalue,
-                    float farplanevalue)
+                    const matrix4 &projection, const matrix4 &inverseprojection, const matrix4 &view, const matrix4 &inverseview,
+                    const matrix4 &screen, const matrix3 &normalmatrix, float nearplanevalue, float farplanevalue)
         {
             if(!init(width, height, multisample)) return false;
 
+            int quality = clamp(cortaoquality, 0, 4);
+            if(historyparameterschanged(quality))
+            {
+                historyvalid = false;
+                temporalframe = 0;
+            }
             GLenum inputtarget = multisample ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_RECTANGLE;
             cleartexture(rawtexture, GL_R8);
             cleartexture(filteredtexture, GL_R8);
-            cleartexture(scratchtexture, GL_R8);
-            cleartexture(finaltexture, GL_R8);
             if(cortaodebug) cleartexture(debugoutput, GL_RGBA8);
             clearpackedtexture();
             glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+
+            bool temporalactive = cortaotemporal && !drawtex;
+            uint randomseed = temporalactive ? getrandomseed(temporalframe) : 0x6D2B79F5u;
 
             timer *prepasstimer = begintimer("CORTAO prepass");
             GLuint program = prepassprograms[multisample ? 1 : 0];
@@ -428,7 +495,7 @@ namespace renderer
             uniform1f(program, "uFarPlane", farplanevalue);
             uniform1f(program, "uDepthScale", (nearplanevalue - farplanevalue)/(nearplanevalue*farplanevalue));
             uniform1f(program, "uDepthOffset", 1.0f/nearplanevalue);
-            uniform1ui(program, "uRandomSeed", 0x6D2B79F5u);
+            uniform1ui(program, "uRandomSeed", randomseed);
             GLint normalmatrixloc = uniformloc(program, "uNormalMatrix");
             if(normalmatrixloc >= 0) glUniformMatrix3fv_(normalmatrixloc, 1, GL_FALSE, normalmatrix.a.v);
             glDispatchCompute_((width + 7)/8, (height + 7)/8, 1);
@@ -436,7 +503,6 @@ namespace renderer
             endtimer(prepasstimer);
 
             timer *maintimer = begintimer("CORTAO main pass");
-            int quality = clamp(cortaoquality, 0, 3);
             program = mainprograms[quality];
             glUseProgram_(program);
             bindinput(GL_TEXTURE1, inputtarget, normaltexture);
@@ -446,7 +512,7 @@ namespace renderer
             glBindImageTexture_(0, rawtexture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
             uniform2f(program, "uResolution", float(width), float(height));
             uniform1i(program, "uMultisample", multisample ? 1 : 0);
-            uniform1ui(program, "uRandomSeed", 0x6D2B79F5u);
+            uniform1ui(program, "uRandomSeed", randomseed);
             float invx = inverseprojection.a.x, invy = inverseprojection.b.y;
             uniform1f(program, "uNormalBias", invx/float(width)*sqrtf(2.0f)*cortaonormalbias);
             float maxapparentradius = invy*cortaomaxscreenratio*2.0f;
@@ -460,6 +526,7 @@ namespace renderer
             uniform1f(program, "uInverseMaxSlopeCompensation", 1.0f/max(cortaoslopecompensation, 1.0f));
             uniform1f(program, "uBackfaceThreshold", cortaobackfacethreshold);
             uniform1f(program, "uBackfaceBoost", cortaobackfaceboost);
+            uniform1f(program, "uStrength", cortaostrength);
             normalmatrixloc = uniformloc(program, "uNormalMatrix");
             if(normalmatrixloc >= 0) glUniformMatrix3fv_(normalmatrixloc, 1, GL_FALSE, normalmatrix.a.v);
             glDispatchCompute_((width + 15)/16, (height + 15)/16, 1);
@@ -482,41 +549,46 @@ namespace renderer
                 endtimer(filtertimer);
             }
 
-            timer *denoisetimer = begintimer("CORTAO denoise");
-            program = denoiseprogram;
+            timer *temporaltimer = begintimer("CORTAO temporal resolve");
+            program = temporalprogram;
             glUseProgram_(program);
             bindinput(GL_TEXTURE2, GL_TEXTURE_2D, packedtexture);
+            bindinput(GL_TEXTURE4, GL_TEXTURE_RECTANGLE, cortaofilter ? filteredtexture : rawtexture);
+            bool usehistory = temporalactive && historyvalid;
+            int previousindex = usehistory ? historyindex : 1, writeindex = usehistory ? 1 - historyindex : 0;
+            bindinput(GL_TEXTURE6, GL_TEXTURE_RECTANGLE, historytexture[previousindex]);
+            bindinput(GL_TEXTURE7, GL_TEXTURE_RECTANGLE, historypacked[previousindex]);
+            glBindImageTexture_(0, historytexture[writeindex], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+            glBindImageTexture_(1, historypacked[writeindex], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
             uniform2f(program, "uResolution", float(width), float(height));
-            uniform1f(program, "uDepthSensitivity", cortaofilterdepth);
-            uniform1f(program, "uNormalSensitivity", cortaofilternormal);
-            uniform1f(program, "uStrength", cortaostrength);
-            if(cortaofilter)
-            {
-                bindinput(GL_TEXTURE4, GL_TEXTURE_RECTANGLE, filteredtexture);
-                glBindImageTexture_(0, scratchtexture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-                uniform2i(program, "uDirection", 1, 0);
-                uniform1i(program, "uFilterEnabled", 1);
-                uniform1i(program, "uApplyStrength", 0);
-                glDispatchCompute_((width + 7)/8, (height + 7)/8, 1);
-                glMemoryBarrier_(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+            uniform1i(program, "uHistoryValid", usehistory ? 1 : 0);
+            uniform1f(program, "uHistoryWeight", cortaotemporalweight);
+            uniform1f(program, "uDepthThreshold", cortaotemporaldepth);
+            uniform1f(program, "uNormalThreshold", cortaotemporalnormal);
+            uniform4f(program, "uUnprojectParams", 2.0f*invx, 2.0f*invy, -invx + inverseprojection.d.x,
+                      -invy + inverseprojection.d.y);
+            matrix4 reprojectmatrix, previousviewfromcurrent;
+            reprojectmatrix.muld(previousscreenmatrix, inverseview);
+            previousviewfromcurrent.muld(previousviewmatrix, inverseview);
+            uniformmatrix4(program, "uReprojectMatrix", reprojectmatrix);
+            uniformmatrix4(program, "uPreviousViewFromCurrent", previousviewfromcurrent);
+            glDispatchCompute_((width + 7)/8, (height + 7)/8, 1);
+            glMemoryBarrier_(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+            endtimer(temporaltimer);
 
-                bindinput(GL_TEXTURE4, GL_TEXTURE_RECTANGLE, scratchtexture);
-                glBindImageTexture_(0, finaltexture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-                uniform2i(program, "uDirection", 0, 1);
-                uniform1i(program, "uApplyStrength", 1);
-                glDispatchCompute_((width + 7)/8, (height + 7)/8, 1);
+            historyindex = writeindex;
+            if(temporalactive)
+            {
+                historyvalid = true;
+                ++temporalframe;
+                previousscreenmatrix = screen;
+                previousviewmatrix = view;
             }
             else
             {
-                bindinput(GL_TEXTURE4, GL_TEXTURE_RECTANGLE, rawtexture);
-                glBindImageTexture_(0, finaltexture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-                uniform2i(program, "uDirection", 0, 0);
-                uniform1i(program, "uFilterEnabled", 0);
-                uniform1i(program, "uApplyStrength", 1);
-                glDispatchCompute_((width + 7)/8, (height + 7)/8, 1);
+                historyvalid = false;
+                temporalframe = 0;
             }
-            glMemoryBarrier_(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-            endtimer(denoisetimer);
 
             if(cortaodebug)
             {
@@ -558,11 +630,12 @@ namespace renderer
         }
 
         bool available() { return initialized && supported; }
-        GLuint outputtexture() { return finaltexture; }
+        GLuint outputtexture() { return historytexture[historyindex]; }
         bool debugenabled() { return cortaodebug != 0; }
 
         const char *debugname()
         {
+            if(cortaodebug == 2 && cortaotemporal) return "temporally resolved occlusion";
             static const char * const names[] =
             {
                 "disabled", "raw occlusion", "filtered occlusion", "linear depth", "view-space normals", "packed-depth mip",

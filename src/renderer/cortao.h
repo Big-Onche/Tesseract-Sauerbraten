@@ -13,7 +13,8 @@ namespace renderer
     {
         bool init(int width, int height, bool multisample);
         bool render(GLuint depthtexture, GLuint normaltexture, bool multisample, int depthformat, int width, int height,
-                    const matrix4 &projection, const matrix4 &inverseprojection, const matrix3 &normalmatrix, float nearplane, float farplane);
+                    const matrix4 &projection, const matrix4 &inverseprojection, const matrix4 &view, const matrix4 &inverseview,
+                    const matrix4 &screen, const matrix3 &normalmatrix, float nearplane, float farplane);
         void cleanup();
         bool available();
         bool debugenabled();

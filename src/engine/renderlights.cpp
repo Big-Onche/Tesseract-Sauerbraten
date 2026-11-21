@@ -500,7 +500,8 @@ void renderao()
     if(cortaoactive)
     {
         if(!renderer::cortao::render(msaasamples ? msdepthtex : gdepthtex, msaasamples ? msnormaltex : gnormaltex, msaasamples != 0,
-                                     gdepthformat, vieww, viewh, projmatrix, invprojmatrix, matrix3(cammatrix), nearplane, float(farplane)))
+                                     gdepthformat, vieww, viewh, projmatrix, invprojmatrix, cammatrix, invcammatrix, screenmatrix,
+                                     matrix3(cammatrix), nearplane, float(farplane)))
         {
             cleanupao();
             setupao(gw, gh);
