@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "../renderer/bvh/bvh.h"
+#include "../renderer/cortao.h"
 #include "../renderer/reflections.h"
 #include "../renderer/renderer.h"
 #include "../renderer/volumetrics.h"
@@ -280,7 +281,8 @@ int gethdrformat(int prec, int fallback = GL_RGB)
     return fallback;
 }
 
-extern int ao, aotaps, aoreduce, aoreducedepth, aonoise, aobilateral, aobilateralupscale, aopackdepth, aodepthformat, aoprec, aoderivnormal;
+extern int ao, aobackend, aotaps, aoreduce, aoreducedepth, aonoise, aobilateral, aobilateralupscale, aopackdepth, aodepthformat, aoprec,
+           aoderivnormal;
 extern float skycubelight;
 extern int skycubeocclusion, skycubeocclreduce, skycubeocclblur, skycubeocclblurpasses;
 extern float skycubeoccloffset, skycubeocclmaxdist, skycubeocclsoft;
@@ -334,6 +336,7 @@ void setbilateralshader(int radius, int pass, float depth)
 }
 
 static Shader *ambientobscuranceshader = NULL;
+static bool cortaoactive = false;
 
 static void setupskyvisibility();
 static void cleanupskyvisibility();
@@ -365,6 +368,14 @@ void clearaoshaders()
 
 void setupao(int w, int h)
 {
+    if(aobackend && renderer::cortao::init(w, h, msaasamples != 0))
+    {
+        cortaoactive = true;
+        aow = w;
+        aoh = h;
+        return;
+    }
+    cortaoactive = false;
     int sw = w>>aoreduce, sh = h>>aoreduce;
 
     if(sw == aow && sh == aoh) return;
@@ -417,6 +428,8 @@ void setupao(int w, int h)
 
 void cleanupao()
 {
+    renderer::cortao::cleanup();
+    cortaoactive = false;
     loopi(4) if(aofbo[i]) { glDeleteFramebuffers_(1, &aofbo[i]); aofbo[i] = 0; }
     loopi(4) if(aotex[i]) { glDeleteTextures(1, &aotex[i]); aotex[i] = 0; }
     if(aonoisetex) { glDeleteTextures(1, &aonoisetex); aonoisetex = 0; }
@@ -427,6 +440,7 @@ void cleanupao()
 }
 
 VARFP(ao, 0, 1, 1, { cleanupao(); cleardeferredlightshaders(); });
+VARFP(aobackend, 0, 0, 1, { cleanupao(); cleardeferredlightshaders(); });
 FVARR(aoradius, 0, 5, 256);
 FVAR(aocutoff, 0, 2.0f, 1e3f);
 FVARR(aodark, 1e-3f, 11.0f, 1e3f);
@@ -459,18 +473,44 @@ void initao()
 
 void viewao()
 {
+    bool cortaodebug = renderer::cortao::debugenabled();
+    if(cortaodebug && (!ao || !cortaoactive))
+    {
+        SETSHADER(hudnotexture);
+        gle::colorf(0.15f, 0.0f, 0.0f);
+        debugquad(0, 0, hudw, hudh);
+        gle::colorf(1, 1, 1);
+        draw_text("CORTAO debug unavailable: enable AO and select aobackend 1", FONTH/2, FONTH/2);
+        return;
+    }
     if(!ao) return;
-    int w = min(hudw, hudh)/2, h = (w*hudh)/hudw;
+    int w = cortaodebug ? hudw : min(hudw, hudh)/2, h = cortaodebug ? hudh : (w*hudh)/hudw;
     SETSHADER(hudrect);
     gle::colorf(1, 1, 1);
-    glBindTexture(GL_TEXTURE_RECTANGLE, aotex[2] ? aotex[2] : aotex[0]);
-    int tw = aotex[2] ? gw : aow, th = aotex[2] ? gh : aoh;
+    glBindTexture(GL_TEXTURE_RECTANGLE, cortaoactive ? renderer::cortao::debugtexture() : (aotex[2] ? aotex[2] : aotex[0]));
+    int tw = cortaoactive ? vieww : (aotex[2] ? gw : aow), th = cortaoactive ? viewh : (aotex[2] ? gh : aoh);
     debugquad(0, 0, w, h, 0, 0, tw, th);
+    if(cortaodebug) draw_textf("CORTAO: %s", FONTH/2, FONTH/2, renderer::cortao::debugname());
 }
 
 void renderao()
 {
     if(!ao) return;
+
+    if(cortaoactive)
+    {
+        if(!renderer::cortao::render(msaasamples ? msdepthtex : gdepthtex, msaasamples ? msnormaltex : gnormaltex, msaasamples != 0,
+                                     gdepthformat, vieww, viewh, projmatrix, invprojmatrix, matrix3(cammatrix), nearplane, float(farplane)))
+        {
+            cleanupao();
+            setupao(gw, gh);
+            if(!cortaoactive) renderao();
+            return;
+        }
+        glBindFramebuffer_(GL_FRAMEBUFFER, msaasamples ? msfbo : gfbo);
+        glViewport(0, 0, vieww, viewh);
+        return;
+    }
 
     timer *aotimer = begintimer("ambient obscurance");
 
@@ -2904,7 +2944,7 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
     if(ao)
     {
         glActiveTexture_(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_RECTANGLE, aotex[2] ? aotex[2] : aotex[0]);
+        glBindTexture(GL_TEXTURE_RECTANGLE, cortaoactive ? renderer::cortao::outputtexture() : (aotex[2] ? aotex[2] : aotex[0]));
     }
     if(useradiancehints()) loopi(4)
     {
@@ -2993,7 +3033,7 @@ static inline void setlightglobals(bool transparent = false)
         }
         else
         {
-            GLOBALPARAM(aoscale, aotex[2] ? vec2(1, 1) : vec2(float(aow)/vieww, float(aoh)/viewh));
+            GLOBALPARAM(aoscale, cortaoactive || aotex[2] ? vec2(1, 1) : vec2(float(aow)/vieww, float(aoh)/viewh));
             GLOBALPARAMF(aoparams, aomin, 1.0f-aomin, aosunmin, 1.0f-aosunmin);
         }
     }
@@ -5377,7 +5417,8 @@ void setuplights()
 
 bool debuglights()
 {
-    if(debugshadowatlas) viewshadowatlas();
+    if(renderer::cortao::debugenabled()) viewao();
+    else if(debugshadowatlas) viewshadowatlas();
     else if(debugao) viewao();
     else if(debugdepth) viewdepth();
     else if(debugstencil) viewstencil();

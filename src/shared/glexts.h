@@ -827,6 +827,28 @@ typedef void (APIENTRYP PFNGLTEXSTORAGE2DPROC) (GLenum target, GLsizei levels, G
 // GL_ARB_texture_storage
 extern PFNGLTEXSTORAGE2DPROC glTexStorage2D_;
 
+#ifndef GL_ARB_compute_shader
+#define GL_ARB_compute_shader 1
+#define GL_COMPUTE_SHADER                 0x91B9
+typedef void (APIENTRYP PFNGLDISPATCHCOMPUTEPROC) (GLuint num_groups_x, GLuint num_groups_y, GLuint num_groups_z);
+#endif
+
+#ifndef GL_ARB_shader_image_load_store
+#define GL_ARB_shader_image_load_store 1
+#define GL_READ_ONLY                      0x88B8
+#define GL_WRITE_ONLY                     0x88B9
+#define GL_READ_WRITE                     0x88BA
+#define GL_TEXTURE_FETCH_BARRIER_BIT      0x00000008
+#define GL_SHADER_IMAGE_ACCESS_BARRIER_BIT 0x00000020
+typedef void (APIENTRYP PFNGLBINDIMAGETEXTUREPROC) (GLuint unit, GLuint texture, GLint level, GLboolean layered, GLint layer, GLenum access,
+                                                     GLenum format);
+typedef void (APIENTRYP PFNGLMEMORYBARRIERPROC) (GLbitfield barriers);
+#endif
+
+extern PFNGLDISPATCHCOMPUTEPROC glDispatchCompute_;
+extern PFNGLBINDIMAGETEXTUREPROC glBindImageTexture_;
+extern PFNGLMEMORYBARRIERPROC glMemoryBarrier_;
+
 #ifndef GL_VERSION_4_3
 #define GL_VERSION_4_3 1
 #define GL_ANY_SAMPLES_PASSED_CONSERVATIVE 0x8D6A

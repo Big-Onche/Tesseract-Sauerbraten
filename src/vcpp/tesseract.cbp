@@ -104,6 +104,11 @@
 		<VirtualTargets>
 			<Add alias="All" targets="client32;client64;" />
 		</VirtualTargets>
+		<Unit filename="../../config/glsl/bvh.glsl" />
+		<Unit filename="../../config/glsl/cortao.cfg" />
+		<Unit filename="../../config/glsl/hdr.cfg" />
+		<Unit filename="../../config/glsl/reflections.cfg" />
+		<Unit filename="../../config/glsl/volumetrics.cfg" />
 		<Unit filename="../engine/aa.cpp" />
 		<Unit filename="../engine/acoustics.cpp" />
 		<Unit filename="../engine/acoustics.h" />
@@ -196,20 +201,18 @@
 		<Unit filename="../renderer/bloom.cpp" />
 		<Unit filename="../renderer/bvh/bvh.cpp" />
 		<Unit filename="../renderer/bvh/bvh.h" />
+		<Unit filename="../renderer/cortao.cpp" />
+		<Unit filename="../renderer/cortao.h" />
 		<Unit filename="../renderer/hdr.h" />
 		<Unit filename="../renderer/pbr.cpp" />
 		<Unit filename="../renderer/reflections.cpp" />
 		<Unit filename="../renderer/reflections.h" />
 		<Unit filename="../renderer/renderer.cpp" />
 		<Unit filename="../renderer/renderer.h" />
-		<Unit filename="../renderer/volumetrics.cpp" />
-		<Unit filename="../renderer/volumetrics.h" />
 		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/tonemap.cpp" />
-		<Unit filename="../../config/glsl/hdr.cfg" />
-		<Unit filename="../../config/glsl/volumetrics.cfg" />
-		<Unit filename="../../config/glsl/bvh.glsl" />
-		<Unit filename="../../config/glsl/reflections.cfg" />
+		<Unit filename="../renderer/volumetrics.cpp" />
+		<Unit filename="../renderer/volumetrics.h" />
 		<Unit filename="../shared/command.h" />
 		<Unit filename="../shared/crypto.cpp" />
 		<Unit filename="../shared/cube.h">

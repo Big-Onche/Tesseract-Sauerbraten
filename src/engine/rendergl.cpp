@@ -13,7 +13,7 @@ bool hasCBF = false, hasS3TC = false, hasFXT1 = false, hasLATC = false, hasRGTC 
 bool hasFBMS = false, hasTMS = false, hasMSS = false, hasFBMSBS = false, hasUBO = false, hasMBR = false, hasDB2 = false;
 bool hasDBB = false, hasTG = false, hasTQ = false, hasPF = false, hasTRG = false, hasTI = false, hasHFV = false, hasHFP = false;
 bool hasDBT = false, hasDC = false, hasDBGO = false, hasEGPU4 = false, hasGPU4 = false, hasGPU5 = false, hasBFE = false;
-bool hasEAL = false, hasCR = false, hasOQ2 = false, hasES2 = false, hasES3 = false, hasCB = false, hasCI = false, hasTS = false;
+bool hasEAL = false, hasCR = false, hasOQ2 = false, hasES2 = false, hasES3 = false, hasCB = false, hasCI = false, hasTS = false, hasCompute = false;
 bool hasBindlessTexture = false;
 bool mesa = false, intel = false, amd = false, nvidia = false;
 
@@ -29,6 +29,10 @@ PFNGLGETQUERYOBJECTUI64VEXTPROC glGetQueryObjectui64v_ = NULL;
 #ifndef __APPLE__
 PFNGLQUERYCOUNTERPROC glQueryCounter_ = NULL;
 #endif
+
+PFNGLDISPATCHCOMPUTEPROC glDispatchCompute_ = NULL;
+PFNGLBINDIMAGETEXTUREPROC glBindImageTexture_ = NULL;
+PFNGLMEMORYBARRIERPROC glMemoryBarrier_ = NULL;
 
 // GL_EXT_framebuffer_object
 PFNGLBINDRENDERBUFFERPROC           glBindRenderbuffer_           = NULL;
@@ -1031,6 +1035,16 @@ void gl_checkextensions()
     {
         hasES3 = true;
         if(glversion < 430 && dbgexts) conoutf(CON_INIT, "Using GL_ARB_ES3_compatibility extension.");
+    }
+
+    if(glversion >= 430 || (hasext("GL_ARB_compute_shader") && hasext("GL_ARB_shader_image_load_store")))
+    {
+        glDispatchCompute_ = (PFNGLDISPATCHCOMPUTEPROC)getprocaddress("glDispatchCompute");
+        glBindImageTexture_ = (PFNGLBINDIMAGETEXTUREPROC)getprocaddress("glBindImageTexture");
+        glMemoryBarrier_ = (PFNGLMEMORYBARRIERPROC)getprocaddress("glMemoryBarrier");
+        hasCompute = glDispatchCompute_ && glBindImageTexture_ && glMemoryBarrier_;
+        if(hasCompute && glversion < 430 && dbgexts)
+            conoutf(CON_INIT, "Using GL_ARB_compute_shader and GL_ARB_shader_image_load_store extensions.");
     }
 
     if(glversion >= 430)

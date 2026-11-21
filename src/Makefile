@@ -123,6 +123,7 @@ CLIENT_OBJS= \
 	engine/worldio.o \
 	renderer/bloom.o \
 	renderer/bvh/bvh.o \
+	renderer/cortao.o \
 	renderer/pbr.o \
 	renderer/reflections.o \
 	renderer/renderer.o \
@@ -258,7 +259,8 @@ enet/libenet.a:
 libenet: enet/libenet.a
 
 depend:
-	makedepend -Y -Ishared -Iengine -Igame $(CLIENT_OBJS:.o=.cpp)
+	makedepend -Y -Ishared -Iengine -Igame -Irenderer \
+		$(patsubst %.o,%.cpp,$(CLIENT_OBJS))
 	makedepend -a -o.h.gch -Y -Ishared -Iengine -Igame $(CLIENT_PCH:.h.gch=.h)
 	makedepend -a -pstandalone/ -Y -DSTANDALONE -Ishared -Iengine -Igame $(SERVER_MASTER_OBJS:standalone/%.o=%.cpp)
 	makedepend -a -pstandalone/ -o.h.gch -Y -DSTANDALONE -Ishared -Iengine -Igame $(SERVER_PCH:standalone/%.h.gch=%.h)

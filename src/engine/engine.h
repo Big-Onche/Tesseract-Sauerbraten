@@ -123,7 +123,7 @@ static inline bool pvsoccluded(const ivec &bborigin, int size)
 extern bool hasVAO, hasTR, hasTSW, hasPBO, hasFBO, hasAFBO, hasDS, hasTF, hasCBF, hasS3TC, hasFXT1, hasLATC, hasRGTC, hasAF;
 extern bool hasFBB, hasFBMS, hasTMS, hasMSS, hasFBMSBS, hasUBO, hasMBR, hasDB2, hasDBB, hasTG, hasTQ, hasPF, hasTRG, hasTI, hasHFV;
 extern bool hasHFP, hasDBT, hasDC, hasDBGO, hasEGPU4, hasGPU4, hasGPU5, hasBFE, hasEAL, hasCR, hasOQ2, hasES2, hasES3, hasCB, hasCI;
-extern bool hasTS, hasBindlessTexture;
+extern bool hasTS, hasCompute, hasBindlessTexture;
 extern int glversion, glslversion, glcompat;
 extern int maxdrawbufs, maxdualdrawbufs;
 
