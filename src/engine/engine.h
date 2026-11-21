@@ -876,17 +876,9 @@ namespace volumetricClouds
     extern void cleanup(bool shutdown = false);
 }
 
-// Dedicated cloud crepuscular rays, separate from world volumetric lights.
+// Dedicated cloud crepuscular rays.
 namespace godrays
 {
-    // Raymarched directional-light shafts occluded by CSM world geometry.
-    namespace geometry
-    {
-        extern void render();
-        extern bool debugview();
-        extern void cleanup();
-    }
-
     namespace crepuscular
     {
         extern void init();

@@ -5,9 +5,12 @@ namespace renderer
 {
     namespace volumetrics
     {
-        extern int volumetricbackend, cvollocallights;
+        struct locallight
+        {
+            vec4 positionRadius, color, secondary, directionCone, attenuation, shadowParams, shadowOffsetFlags;
+        };
 
-        bool candelaactive();
+        int collectlocallights(locallight *destination, int maximum);
         bool render();
         void resethistory();
         void cleanup();

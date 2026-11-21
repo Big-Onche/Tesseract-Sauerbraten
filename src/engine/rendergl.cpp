@@ -2589,11 +2589,6 @@ void gl_drawview()
     rendertransparent();
     GLERROR;
 
-    // Candela already integrates CSM-shadowed sunlight along the view ray.
-    // Keep geometry god rays for backend 0 without counting them twice in 1.
-    if(!renderer::volumetrics::candelaactive()) godrays::geometry::render();
-    GLERROR;
-
     if(!drawtex)
     {
         renderparticles();

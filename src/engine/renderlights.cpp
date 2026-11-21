@@ -8,7 +8,7 @@ namespace lightdebug
 {
     enum
     {
-        COLLECT, PACK, BATCH, SHADOWATLAS, LOCALSHADOWS, SUNSHADOWS, SHADOWFILTER, LIGHTS, VOLUMETRIC, RADIANCE,
+        COLLECT, PACK, BATCH, SHADOWATLAS, LOCALSHADOWS, SUNSHADOWS, SHADOWFILTER, LIGHTS, RADIANCE,
         SM_BATCH, SM_RENDERMESH, SM_MODELS,
         SM_TRANSPARENTSETUP, SM_TRANSPARENTCLEAR, SM_TRANSPARENT, SM_TRANSPARENTCLEANUP, SM_CLEARBATCH, SM_FLUSH,
         ATLAS_SUN, ATLAS_PACK, ATLAS_LOCAL, ATLAS_FILTER, ATLAS_BATCH, NUMTIMERS
@@ -16,7 +16,7 @@ namespace lightdebug
     static const char *names[NUMTIMERS] =
     {
         "collectlights", "packlights", "batchlights", "rendershadowatlas (inclusive)", "rendershadowmaps",
-        "rendercsmshadowmaps", "filtershadowcolors", "renderlights", "rendervolumetric", "renderradiancehints",
+        "rendercsmshadowmaps", "filtershadowcolors", "renderlights", "renderradiancehints",
         "  batchshadowmapmodels", "  rendershadowmesh",
         "  rendershadowmodelbatches", "  setupshadowtransparent", "  clearshadowtransparent",
         "  rendershadowtransparent", "  cleanupshadowtransparent", "  clearbatchedmapmodels", "  glFlush",
@@ -935,7 +935,6 @@ void setupgbuffer()
     cleanupscale();
     cleanupao();
     cleanupvolumetric();
-    godrays::geometry::cleanup();
     cleanupaa();
     cleanuppostfx();
 
@@ -1058,7 +1057,6 @@ void cleanupgbuffer()
     if(refracttex) { glDeleteTextures(1, &refracttex); refracttex = 0; }
     gw = gh = -1;
     cleanupscale();
-    godrays::geometry::cleanup();
     cleanupmsbuffer();
     cleardeferredlightshaders();
 }
@@ -1589,7 +1587,6 @@ struct lightinfo
 
     bool noshadow() const { return flags&L_NOSHADOW || radius <= smminradius; }
     bool nospec() const { return (flags&L_NOSPEC) != 0; }
-    bool volumetric() const { return (flags&L_VOLUMETRIC) != 0; }
     bool colorshadow() const { return (flags&L_SMALPHA) != 0; }
 
     void addscissor(float &dx1, float &dy1, float &dx2, float &dy2) const
@@ -2566,102 +2563,15 @@ void disableavatarmask()
     }
 }
 
+extern int spotlights;
 VAR(forcespotlights, 1, 0, 0);
-
-extern int spotlights, volumetricsmalphalights;
-
-static Shader *volumetricshader = NULL, *volumetricbilateralshader[2] = { NULL, NULL };
-
-void clearvolumetricshaders()
-{
-    volumetricshader = NULL;
-
-    loopi(2) volumetricbilateralshader[i] = NULL;
-}
-
-extern int volsteps, volbilateral, volblur, volreduce;
-
-Shader *loadvolumetricshader()
-{
-    string common, shadow;
-    int commonlen = 0, shadowlen = 0;
-
-    if(usegatherforsm()) common[commonlen++] = smfilter > 2 ? 'G' : 'g';
-    else if(smfilter) common[commonlen++] = smfilter > 2 ? 'E' : (smfilter > 1 ? 'F' : 'f');
-    else common[commonlen++] = 'N';
-    if(spotlights || forcespotlights) common[commonlen++] = 's';
-    common[commonlen] = '\0';
-
-    shadow[shadowlen++] = 'p';
-    if(smalpha > 1 && alphashadow && volumetricsmalphalights) shadow[shadowlen++] = 'P';
-    shadow[shadowlen] = '\0';
-
-    defformatstring(name, "volumetric%s%s%d", common, shadow, volsteps);
-    return generateshader(name, "volumetricshader \"%s\" \"%s\" %d", common, shadow, volsteps);
-}
-
-void loadvolumetricshaders()
-{
-    volumetricshader = loadvolumetricshader();
-
-    if(volbilateral) loopi(2)
-    {
-        defformatstring(name, "volumetricbilateral%c%d%d", 'x' + i, volbilateral, volreduce);
-        volumetricbilateralshader[i] = generateshader(name, "volumetricbilateralshader %d %d", volbilateral, volreduce);
-    }
-}
-
-static int volw = -1, volh = -1;
-static GLuint volfbo[2] = { 0, 0 }, voltex[2] = { 0, 0 };
-
-void setupvolumetric(int w, int h)
-{
-    volw = w>>volreduce;
-    volh = h>>volreduce;
-
-    loopi(volbilateral || volblur ? 2 : 1)
-    {
-        if(!voltex[i]) glGenTextures(1, &voltex[i]);
-        if(!volfbo[i]) glGenFramebuffers_(1, &volfbo[i]);
-
-        glBindFramebuffer_(GL_FRAMEBUFFER, volfbo[i]);
-
-        createtexture(voltex[i], volw, volh, NULL, 3, 1, hdrformat, GL_TEXTURE_RECTANGLE);
-
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, voltex[i], 0);
-
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            fatal("failed allocating volumetric buffer!");
-    }
-
-    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
-
-    loadvolumetricshaders();
-}
 
 void cleanupvolumetric()
 {
-    loopi(2) if(volfbo[i]) { glDeleteFramebuffers_(1, &volfbo[i]); volfbo[i] = 0; }
-    loopi(2) if(voltex[i]) { glDeleteTextures(1, &voltex[i]); voltex[i] = 0; }
-    volw = volh = -1;
-
-    clearvolumetricshaders();
     renderer::volumetrics::cleanup();
 }
 
 VARFP(volumetric, 0, 1, 1, cleanupvolumetric());
-VARFP(volreduce, 0, 1, 2, cleanupvolumetric());
-VARFP(volbilateral, 0, 1, 3, cleanupvolumetric());
-FVAR(volbilateraldepth, 0, 4, 1e3f);
-VARFP(volblur, 0, 1, 3, cleanupvolumetric());
-VARFP(volsteps, 1, 12, 64, cleanupvolumetric());
-FVAR(volminstep, 0, 0.0625f, 1e3f);
-FVAR(volprefilter, 0, 4, 1e3f);
-FVAR(voldistclamp, 0, 0.99f, 2);
-CVAR1R(volcolour, 0x808080);
-FVARR(volscale, 0, 1, 16);
-VAR(volderiv, -1, 1, 1);
-
 static Shader *deferredlightshader = NULL, *deferredminimapshader = NULL, *deferredmsaapixelshader = NULL, *deferredmsaasampleshader = NULL;
 
 void cleardeferredlightshaders()
@@ -3218,6 +3128,29 @@ static const lightshaderparams &getlightparams(const lightinfo &l)
     return p;
 }
 
+int renderer::volumetrics::collectlocallights(renderer::volumetrics::locallight *destination, int maximum)
+{
+    int count = 0;
+    loopv(lightorder)
+    {
+        if(count >= maximum) break;
+        const lightinfo &light = lights[lightorder[i]];
+        if(!(light.flags&L_VOLUMETRIC) || light.radius <= 0.0f || light.color.iszero() || light.checkquery()) continue;
+        const lightshaderparams &params = getlightparams(light);
+        locallight &result = destination[count++];
+        result.positionRadius = vec4(light.o, light.radius);
+        result.color = params.color;
+        result.secondary = params.secondary;
+        result.directionCone = light.spot > 0 ? params.spot : vec4(0, 0, 0, 0);
+        result.attenuation = params.attenuation;
+        result.shadowParams = light.shadowmap >= 0 ? params.shadow : vec4(0, 0, 0, 0);
+        result.shadowOffsetFlags = vec4(light.shadowmap >= 0 ? params.shadowoffset.x : 0.0f,
+                                        light.shadowmap >= 0 ? params.shadowoffset.y : 0.0f, light.shadowmap >= 0 ? 1.0f : 0.0f,
+                                        light.spot > 0 ? 1.0f : 0.0f);
+    }
+    return count;
+}
+
 static inline void setlightparams(int i, const lightinfo &l)
 {
     const lightshaderparams &p = getlightparams(l);
@@ -3549,260 +3482,16 @@ void renderlights(float bsx1 = -1, float bsy1 = -1, float bsx2 = 1, float bsy2 =
     }
 }
 
-extern int volumetriclights;
-
-static void renderlocalvolumetric()
-{
-    lightdebug::scope lighttimer(lightdebug::VOLUMETRIC);
-    if(!volumetric || !volumetriclights || !volscale) return;
-
-    float bsx1 = 1, bsy1 = 1, bsx2 = -1, bsy2 = -1;
-    loopv(lightorder)
-    {
-        const lightinfo &l = lights[lightorder[i]];
-        if(!l.volumetric() || l.checkquery()) continue;
-
-        l.addscissor(bsx1, bsy1, bsx2, bsy2);
-    }
-    if(bsx1 >= bsx2 || bsy1 >= bsy2) return;
-
-    timer *voltimer = begintimer("volumetric lights");
-
-    glBindFramebuffer_(GL_FRAMEBUFFER, volfbo[0]);
-    glViewport(0, 0, volw, volh);
-
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glActiveTexture_(GL_TEXTURE3);
-    if(msaalight) glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, msdepthtex);
-    else glBindTexture(GL_TEXTURE_RECTANGLE, gdepthtex);
-    glActiveTexture_(GL_TEXTURE4);
-    glBindTexture(shadowatlastarget, shadowatlastex);
-    if(usesmcomparemode()) setsmcomparemode(); else setsmnoncomparemode();
-    if(smalpha > 1 && alphashadow && volumetricsmalphalights)
-    {
-        glActiveTexture_(GL_TEXTURE11);
-        glBindTexture(GL_TEXTURE_RECTANGLE, smfilter ? shadowfiltertex : shadowcolortex);
-    }
-    glActiveTexture_(GL_TEXTURE0);
-
-    GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
-    GLOBALPARAMF(volscale, float(vieww)/volw, float(viewh)/volh, float(volw)/vieww, float(volh)/viewh);
-    GLOBALPARAMF(volminstep, volminstep);
-    GLOBALPARAMF(volprefilter, volprefilter);
-    GLOBALPARAMF(voldistclamp, farplane*voldistclamp);
-
-    glBlendFunc(GL_ONE, GL_ONE);
-    glEnable(GL_BLEND);
-
-    if(!depthtestlights) glDisable(GL_DEPTH_TEST);
-    else glDepthMask(GL_FALSE);
-
-    lightsphere::enable();
-
-    glEnable(GL_SCISSOR_TEST);
-
-    if(volderiv >= 0) glHint(GL_FRAGMENT_SHADER_DERIVATIVE_HINT, volderiv ? GL_NICEST : GL_FASTEST);
-
-    bool outside = true;
-    loopv(lightorder)
-    {
-        const lightinfo &l = lights[lightorder[i]];
-        if(!l.volumetric() || l.checkquery()) continue;
-
-        matrix4 lightmatrix = camprojmatrix;
-        lightmatrix.translate(l.o);
-        lightmatrix.scale(l.radius*lightradiustweak);
-        GLOBALPARAM(lightmatrix, lightmatrix);
-
-        bool colorshadow = l.colorshadow() && l.shadowmap >= 0 && shadowmaps[l.shadowmap].transparent;
-        if(l.spot > 0)
-        {
-            volumetricshader->setvariant(0, l.shadowmap >= 0 ? (colorshadow ? 4 : 3) : 2);
-            LOCALPARAM(spotparams, vec4(l.dir, 1/(1 - cos360(l.spot))));
-        }
-        else if(l.shadowmap >= 0) volumetricshader->setvariant(0, colorshadow ? 1 : 0);
-        else volumetricshader->set();
-
-        setlightparams(0, l);
-        emitterparams.setv(emitterparamsv, 1);
-        emitterx.setv(emitterxv, 1);
-        emittery.setv(emitteryv, 1);
-        lightattenuationparam.setv(lightattenuationv, 1);
-        LOCALPARAM(lightpos, vec4(l.o, 1).div(l.radius));
-        vec color = vec(l.color).mul(ldrscaleb).mul(volcolour.tocolor().mul(volscale));
-        LOCALPARAM(lightcolor, color);
-        vec innercolor = vec(l.secondarycolor).mul(ldrscaleb).mul(volcolour.tocolor().mul(volscale));
-        LOCALPARAM(lightsecondary, vec4(innercolor, l.secondaryradius/l.radius));
-
-        if(l.shadowmap >= 0)
-        {
-            shadowmapinfo &sm = shadowmaps[l.shadowmap];
-            float smnearclip = SQRT3 / l.radius, smfarclip = SQRT3,
-                  bias = (smfilter > 2 ? smbias2 : smbias) * (smcullside ? 1 : -1) * smnearclip * (1024.0f / sm.size);
-            int border = smfilter > 2 ? smborder2 : smborder;
-            if(l.spot > 0)
-            {
-                LOCALPARAMF(shadowparams,
-                    0.5f * sm.size * cotan360(l.spot),
-                    (-smnearclip * smfarclip / (smfarclip - smnearclip) - 0.5f*bias),
-                    1 / (1 + fabs(l.dir.z)),
-                    0.5f + 0.5f * (smfarclip + smnearclip) / (smfarclip - smnearclip));
-            }
-            else
-            {
-                LOCALPARAMF(shadowparams,
-                    0.5f * (sm.size - border),
-                    -smnearclip * smfarclip / (smfarclip - smnearclip) - 0.5f*bias,
-                    sm.size,
-                    0.5f + 0.5f * (smfarclip + smnearclip) / (smfarclip - smnearclip));
-            }
-            LOCALPARAMF(shadowoffset, sm.x + 0.5f*sm.size, sm.y + 0.5f*sm.size);
-        }
-
-        int tx1 = int(floor((l.sx1*0.5f+0.5f)*volw)), ty1 = int(floor((l.sy1*0.5f+0.5f)*volh)),
-            tx2 = int(ceil((l.sx2*0.5f+0.5f)*volw)), ty2 = int(ceil((l.sy2*0.5f+0.5f)*volh));
-        glScissor(tx1, ty1, tx2-tx1, ty2-ty1);
-
-        if(camera1->o.dist(l.o) <= l.radius*lightradiustweak + nearplane + 1 && depthfaillights)
-        {
-            if(outside)
-            {
-                outside = false;
-                if(depthtestlights) glDisable(GL_DEPTH_TEST);
-                glCullFace(GL_FRONT);
-            }
-        }
-        else if(!outside)
-        {
-            outside = true;
-            if(depthtestlights) glEnable(GL_DEPTH_TEST);
-            glCullFace(GL_BACK);
-        }
-
-        lightsphere::draw();
-    }
-
-    if(!outside)
-    {
-        outside = true;
-        glCullFace(GL_BACK);
-    }
-
-    lightsphere::disable();
-
-    if(volderiv >= 0) glHint(GL_FRAGMENT_SHADER_DERIVATIVE_HINT, GL_DONT_CARE);
-
-    if(depthtestlights)
-    {
-        glDepthMask(GL_TRUE);
-
-        glDisable(GL_DEPTH_TEST);
-    }
-
-    int cx1 = int(floor((bsx1*0.5f+0.5f)*volw))&~1,
-        cy1 = int(floor((bsy1*0.5f+0.5f)*volh))&~1,
-        cx2 = (int(ceil((bsx2*0.5f+0.5f)*volw))&~1) + 2,
-        cy2 = (int(ceil((bsy2*0.5f+0.5f)*volh))&~1) + 2;
-    if(volbilateral || volblur)
-    {
-        int radius = (volbilateral ? volbilateral : volblur)*2;
-        cx1 = max(cx1 - radius, 0);
-        cy1 = max(cy1 - radius, 0);
-        cx2 = min(cx2 + radius, volw);
-        cy2 = min(cy2 + radius, volh);
-        glScissor(cx1, cy1, cx2-cx1, cy2-cy1);
-
-        glDisable(GL_BLEND);
-
-        if(volbilateral) loopi(2)
-        {
-            glBindFramebuffer_(GL_FRAMEBUFFER, volfbo[(i+1)%2]);
-            glViewport(0, 0, volw, volh);
-            volumetricbilateralshader[i]->set();
-            setbilateralparams(volbilateral, volbilateraldepth);
-            glBindTexture(GL_TEXTURE_RECTANGLE, voltex[i%2]);
-            screenquadoffset(0.25f, 0.25f, vieww, viewh);
-        }
-        else
-        {
-            float blurweights[MAXBLURRADIUS+1], bluroffsets[MAXBLURRADIUS+1];
-            setupblurkernel(volblur, blurweights, bluroffsets);
-            loopi(2)
-            {
-                glBindFramebuffer_(GL_FRAMEBUFFER, volfbo[(i+1)%2]);
-                glViewport(0, 0, volw, volh);
-                setblurshader(i%2, 1, volblur, blurweights, bluroffsets, GL_TEXTURE_RECTANGLE);
-                glBindTexture(GL_TEXTURE_RECTANGLE, voltex[i%2]);
-                screenquad(volw, volh);
-            }
-        }
-
-        glEnable(GL_BLEND);
-    }
-
-    glBindFramebuffer_(GL_FRAMEBUFFER, msaalight ? mshdrfbo : hdrfbo);
-    glViewport(0, 0, vieww, viewh);
-
-    int margin = (1<<volreduce) - 1;
-    cx1 = max((cx1 * vieww) / volw - margin, 0);
-    cy1 = max((cy1 * viewh) / volh - margin, 0);
-    cx2 = min((cx2 * vieww + margin + volw - 1) / volw, vieww);
-    cy2 = min((cy2 * viewh + margin + volh - 1) / volh, viewh);
-    glScissor(cx1, cy1, cx2-cx1, cy2-cy1);
-
-    bool avatar = useavatarmask();
-    if(avatar)
-    {
-        glStencilFunc(GL_EQUAL, 0, 0x40);
-        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-        glEnable(GL_STENCIL_TEST);
-    }
-
-    SETSHADER(scalelinear);
-    glBindTexture(GL_TEXTURE_RECTANGLE, voltex[0]);
-    screenquad(volw, volh);
-
-    if(volbilateral || volblur)
-    {
-        swap(volfbo[0], volfbo[1]);
-        swap(voltex[0], voltex[1]);
-    }
-
-    if(avatar) glDisable(GL_STENCIL_TEST);
-
-    glDisable(GL_SCISSOR_TEST);
-
-    glEnable(GL_DEPTH_TEST);
-
-    glDisable(GL_BLEND);
-
-    endtimer(voltimer);
-}
-
 void rendervolumetric(bool specialfog)
 {
     if(!volumetric) return;
-    if(renderer::volumetrics::candelaactive())
+    if(specialfog)
     {
-        if(specialfog)
-        {
-            renderer::volumetrics::resethistory();
-            if(renderer::volumetrics::cvollocallights && volumetriclights) renderlocalvolumetric();
-            return;
-        }
-        bool rendered = renderer::volumetrics::render();
-        if((renderer::volumetrics::cvollocallights || !rendered) && volumetriclights)
-        {
-            if((volw < 0 || volh < 0) && !rendered) setupvolumetric(gw, gh);
-            renderlocalvolumetric();
-        }
+        renderer::volumetrics::resethistory();
+        return;
     }
-    else renderlocalvolumetric();
+    renderer::volumetrics::render();
 }
-
-VAR(oqvol, 0, 1, 1);
 VAR(oqlights, 0, 1, 1);
 VAR(debuglightscissor, 0, 0, 1);
 
@@ -3906,7 +3595,7 @@ void collectlights()
     {
         int idx = lightorder[i];
         lightinfo &l = lights[idx];
-        if((l.noshadow() && (!oqvol || !l.volumetric())) || l.radius >= worldsize) continue;
+        if(l.noshadow() || l.radius >= worldsize) continue;
         vec bbmin, bbmax;
         l.calcbb(bbmin, bbmax);
         if(!camera1->o.insidebb(bbmin, bbmax, 2))
@@ -5678,8 +5367,6 @@ void setuplights()
     if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres || skyvisworldsize != worldsize) setupskyvisibility();
     else updateskyvisibility();
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
-    if(volumetriclights && volumetric && (!renderer::volumetrics::candelaactive() || renderer::volumetrics::cvollocallights) &&
-       (volw < 0 || volh < 0)) setupvolumetric(gw, gh);
     if(!shadowatlasfbo) setupshadowatlas();
     if(useradiancehints() && !rhfbo) setupradiancehints();
     if(!deferredlightshader) loaddeferredlightshaders();
@@ -5698,7 +5385,6 @@ bool debuglights()
     else if(debuglightscissor) viewlightscissor();
     else if(debugrsm) viewrsm();
     else if(debugrh) viewrh();
-    else if(godrays::geometry::debugview()) {}
     else if(volumetricClouds::debugview()) {}
     else if(!debugaa()) return false;
     return true;

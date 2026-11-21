@@ -15,10 +15,11 @@ namespace renderer
 {
     namespace volumetrics
     {
-        extern int volumetricbackend, cvollocallights;
-        extern float cvolstrength, cvoldensity, cvolextinction, cvoldirectstrength, cvolindirectstrength, cvolmaxdistance, cvolheight,
-                     cvolthickness;
-        extern int cvolsteps, cvoluniformdensity, cvolresolution, cvoltemporal, cvolspatial, cvoldebug;
+        extern int _sunvolcolour;
+        extern bvec sunvolcolour;
+        extern float volstrength, voldensity, volextinction, voldirectstrength, volindirectstrength, vollocalstrength, volmaxdistance,
+                     volheight, volthickness;
+        extern int volsteps, voluniformdensity, volresolution, voltemporal, volspatial, voldebug;
 
         namespace
         {
@@ -30,6 +31,8 @@ namespace renderer
             uint frameindex = 0;
             matrix4 previousviewprojection, previousworldmatrix;
             vec previouscamera(0, 0, 0), previoussun(0, 0, 0), previoussuncolor(0, 0, 0), previousambient(0, 0, 0);
+            locallight previousLocalLights[16];
+            int previousLocalLightCount = -1;
             float previousfovy = -1.0f;
 
             void settingschanged()
@@ -39,7 +42,7 @@ namespace renderer
 
             int resolutionshift()
             {
-                return clamp(cvolresolution, 0, 2);
+                return clamp(volresolution, 0, 2);
             }
 
             void allocaterectangle(GLuint &texture, int width, int height, GLenum format, bool linear)
@@ -170,7 +173,7 @@ namespace renderer
                 glBindTexture(msaalight ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_RECTANGLE, msaalight ? msdepthtex : gdepthtex);
             }
 
-            bool renderraymarch(int csmcount, int rhcount)
+            bool renderraymarch(int csmcount, int rhcount, const locallight *localLights, int localLightCount)
             {
                 if(!bindrawtargets()) return false;
                 Shader *shader = useshaderbyname(msaalight ? (shadowatlastarget == GL_TEXTURE_2D ? "cvolraymarchms2d" : "cvolraymarchmsrect") :
@@ -185,12 +188,36 @@ namespace renderer
                 LOCALPARAMF(cvolFullSize, float(vieww), float(viewh), 1.0f/max(vieww, 1), 1.0f/max(viewh, 1));
                 LOCALPARAMF(cvolLowSize, float(volumetricwidth), float(volumetricheight), float(vieww)/volumetricwidth,
                             float(viewh)/volumetricheight);
-                LOCALPARAMF(cvolMedium, cvoldensity, cvolextinction, cvolstrength, cvoluniformdensity ? 1.0f : 0.0f);
-                LOCALPARAMF(cvolLayer, cvolheight, max(cvolthickness, 1.0f), cvolmaxdistance, float(cvolsteps));
-                LOCALPARAMF(cvolLighting, cvoldirectstrength, cvolindirectstrength, float(csmcount), float(rhcount));
+                LOCALPARAMF(cvolMedium, voldensity, volextinction, volstrength, voluniformdensity ? 1.0f : 0.0f);
+                LOCALPARAMF(cvolLayer, volheight, max(volthickness, 1.0f), volmaxdistance, float(volsteps));
+                LOCALPARAMF(cvolLighting, voldirectstrength, volindirectstrength, float(csmcount), float(rhcount));
+                LOCALPARAMF(cvolLocalParams, vollocalstrength, 0.0f, 0.0f, 0.0f);
+                LOCALPARAMI(cvolLocalLightCount, localLightCount);
+                if(localLightCount)
+                {
+                    vec4 positionRadius[16], color[16], secondary[16], directionCone[16], attenuation[16], shadowParams[16],
+                         shadowOffsetFlags[16];
+                    loopi(localLightCount)
+                    {
+                        positionRadius[i] = localLights[i].positionRadius;
+                        color[i] = localLights[i].color;
+                        secondary[i] = localLights[i].secondary;
+                        directionCone[i] = localLights[i].directionCone;
+                        attenuation[i] = localLights[i].attenuation;
+                        shadowParams[i] = localLights[i].shadowParams;
+                        shadowOffsetFlags[i] = localLights[i].shadowOffsetFlags;
+                    }
+                    LOCALPARAMV(cvolLocalLightPositionRadius, positionRadius, localLightCount);
+                    LOCALPARAMV(cvolLocalLightColor, color, localLightCount);
+                    LOCALPARAMV(cvolLocalLightSecondary, secondary, localLightCount);
+                    LOCALPARAMV(cvolLocalLightDirectionCone, directionCone, localLightCount);
+                    LOCALPARAMV(cvolLocalLightAttenuation, attenuation, localLightCount);
+                    LOCALPARAMV(cvolLocalLightShadowParams, shadowParams, localLightCount);
+                    LOCALPARAMV(cvolLocalLightShadowOffsetFlags, shadowOffsetFlags, localLightCount);
+                }
                 LOCALPARAMI(cvolFrame, frameindex++);
                 LOCALPARAM(cvolSunDirection, getdirectionallightdir());
-                const bvec &sun = getdirectionallightcolor();
+                const bvec &sun = _sunvolcolour ? sunvolcolour : getdirectionallightcolor();
                 float sunscale = 2.0f*ldrscaleb*getdirectionallightscale()*getdirectionallightvisibility();
                 LOCALPARAMF(cvolSunColor, sun.x*sunscale, sun.y*sunscale, sun.z*sunscale);
                 screenquad(vieww, viewh);
@@ -212,7 +239,7 @@ namespace renderer
                 LOCALPARAM(cvolPreviousWorldMatrix, previousworldmatrix);
                 LOCALPARAMF(cvolLowSize, float(volumetricwidth), float(volumetricheight), float(vieww)/volumetricwidth,
                             float(viewh)/volumetricheight);
-                LOCALPARAMF(cvolTemporalParams, historyvalid && cvoltemporal ? 1.0f : 0.0f, 0.90f, float(volumetricwidth),
+                LOCALPARAMF(cvolTemporalParams, historyvalid && voltemporal ? 1.0f : 0.0f, 0.90f, float(volumetricwidth),
                             float(volumetricheight));
                 bindrectangle(GL_TEXTURE0, rawtexture);
                 bindrectangle(GL_TEXTURE1, rawdebugtexture);
@@ -227,7 +254,7 @@ namespace renderer
 
             GLuint spatialfilter()
             {
-                if(!cvolspatial) return historytexture[historyindex];
+                if(!volspatial) return historytexture[historyindex];
                 if(!bindtarget(filteredtexture, volumetricwidth, volumetricheight, "spatial filter")) return 0;
                 Shader *shader = useshaderbyname("cvolspatial");
                 if(!shader || shader->isnull()) return 0;
@@ -259,7 +286,7 @@ namespace renderer
                 bindrectangle(GL_TEXTURE5, historyvalidity[historyindex]);
                 LOCALPARAMF(cvolCompositeScale, float(volumetricwidth), float(volumetricheight), float(volumetricwidth)/vieww,
                             float(volumetricheight)/viewh);
-                LOCALPARAMI(cvolDebug, cvoldebug);
+                LOCALPARAMI(cvolDebug, voldebug);
                 glActiveTexture_(GL_TEXTURE0);
                 screenquad();
 
@@ -273,71 +300,72 @@ namespace renderer
 
             bool historydiscontinuity(const vec &sun, const vec &suncolor, const vec &ambientcolor, int csmcount, int rhcount)
             {
-                float teleportdistance = max(64.0f, cvolmaxdistance*0.25f);
+                float teleportdistance = max(64.0f, volmaxdistance*0.25f);
                 return previousfovy < 0.0f || camera1->o.dist(previouscamera) > teleportdistance || fabsf(fovy - previousfovy) > 0.01f ||
                        (!previoussun.iszero() && sun.dot(previoussun) < 0.9995f) || suncolor.dist(previoussuncolor) > 0.05f ||
                        ambientcolor.dist(previousambient) > 0.05f || csmcount != previouscsmcount || rhcount != previousrhcount;
             }
         }
 
-        VARFP(volumetricbackend, 0, 0, 1, cleanupvolumetric());
-        FVARFP(cvolstrength, 0.0f, 1.0f, 8.0f, settingschanged());
-        FVARFP(cvoldensity, 0.0f, 0.35f, 8.0f, settingschanged());
-        FVARFP(cvolextinction, 0.0f, 0.0025f, 0.1f, settingschanged());
-        FVARFP(cvoldirectstrength, 0.0f, 4.0f, 32.0f, settingschanged());
-        FVARFP(cvolindirectstrength, 0.0f, 1.0f, 16.0f, settingschanged());
-        VARFP(cvolsteps, 4, 32, 128, settingschanged());
-        FVARFP(cvolmaxdistance, 1.0f, 1536.0f, 65536.0f, settingschanged());
-        FVARFP(cvolheight, -65536.0f, 256.0f, 65536.0f, settingschanged());
-        FVARFP(cvolthickness, 1.0f, 512.0f, 65536.0f, settingschanged());
-        VARFP(cvoluniformdensity, 0, 0, 1, settingschanged());
+        FVARFP(volstrength, 0.0f, 1.0f, 8.0f, settingschanged());
+        FVARFP(voldensity, 0.0f, 0.35f, 8.0f, settingschanged());
+        FVARFP(volextinction, 0.0f, 0.0025f, 0.1f, settingschanged());
+        FVARFP(voldirectstrength, 0.0f, 4.0f, 32.0f, settingschanged());
+        FVARFP(volindirectstrength, 0.0f, 1.0f, 16.0f, settingschanged());
+        FVARFP(vollocalstrength, 0.0f, 8.0f, 16.0f, settingschanged());
+        VARFP(volsteps, 4, 32, 128, settingschanged());
+        FVARFP(volmaxdistance, 1.0f, 1536.0f, 65536.0f, settingschanged());
+        FVARFP(volheight, -65536.0f, 256.0f, 65536.0f, settingschanged());
+        FVARFP(volthickness, 1.0f, 512.0f, 65536.0f, settingschanged());
+        VARFP(voluniformdensity, 0, 0, 1, settingschanged());
+        CVARFR(sunvolcolour, 0, settingschanged());
         // 0 = full, 1 = half on each axis, 2 = quarter on each axis.
-        VARFP(cvolresolution, 0, 1, 2, cleanupvolumetric());
-        VARFP(cvoltemporal, 0, 1, 1, settingschanged());
-        VARFP(cvolspatial, 0, 1, 1, settingschanged());
-        VARFP(cvollocallights, 0, 1, 1, cleanupvolumetric());
+        VARFP(volresolution, 0, 1, 2, cleanupvolumetric());
+        VARFP(voltemporal, 0, 1, 1, settingschanged());
+        VARFP(volspatial, 0, 1, 1, settingschanged());
         // 0 final; 1 filtered volume; 2 raw scattering; 3 transmittance;
         // 4 density; 5 sun visibility; 6 CSM cascade; 7 temporal rejection.
-        VARFP(cvoldebug, 0, 0, 7, settingschanged());
-
-        bool candelaactive()
-        {
-            return volumetricbackend == 1 && pipelineavailable;
-        }
+        VARFP(voldebug, 0, 0, 7, settingschanged());
 
         bool render()
         {
-            if(!candelaactive() || drawtex || vieww <= 0 || viewh <= 0 || cvolstrength <= 0.0f || cvoldensity <= 0.0f ||
-               cvolmaxdistance <= 0.0f || cvolsteps <= 0)
+            if(!pipelineavailable || drawtex || vieww <= 0 || viewh <= 0 || volstrength <= 0.0f || voldensity <= 0.0f ||
+               volmaxdistance <= 0.0f || volsteps <= 0)
                 return true;
             if(!prepareresources())
             {
                 cleanup();
                 pipelineavailable = false;
                 restorehdrtarget();
-                conoutf(CON_ERROR, "Candela volumetrics unavailable; falling back to Tesseract volumetric lights");
+                conoutf(CON_ERROR, "Candela volumetrics unavailable");
                 return false;
             }
 
             vec sun = getdirectionallightdir();
-            const bvec &sunbytes = getdirectionallightcolor();
+            const bvec &sunbytes = _sunvolcolour ? sunvolcolour : getdirectionallightcolor();
             vec suncolor = sunbytes.tocolor().mul(getdirectionallightscale()*getdirectionallightvisibility());
             vec ambientcolor = skylight.tocolor().mul(skylightscale);
             int csmcount = 0, rhcount = 0;
+            static const int maximumLocalLights = 16;
+            locallight localLights[maximumLocalLights];
+            int localLightCount = vollocalstrength > 0.0f ? collectlocallights(localLights, maximumLocalLights) : 0;
             bindvolumetriclighting(2, 3, 7, csmcount, rhcount);
             if(historydiscontinuity(sun, suncolor, ambientcolor, csmcount, rhcount)) historyvalid = false;
+            if(localLightCount != previousLocalLightCount ||
+               (localLightCount && memcmp(localLights, previousLocalLights, localLightCount*sizeof(locallight))))
+                historyvalid = false;
 
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_BLEND);
             glDepthMask(GL_FALSE);
-            if(!renderraymarch(csmcount, rhcount) || !temporalaccumulation())
+            if(!renderraymarch(csmcount, rhcount, localLights, localLightCount) || !temporalaccumulation())
             {
                 cleanup();
                 pipelineavailable = false;
                 restorehdrtarget();
                 glDepthMask(GL_TRUE);
                 glEnable(GL_DEPTH_TEST);
-                conoutf(CON_ERROR, "Candela volumetric shader unavailable; falling back to Tesseract volumetric lights");
+                conoutf(CON_ERROR, "Candela volumetric shader unavailable");
                 return false;
             }
             GLuint filtered = spatialfilter();
@@ -348,7 +376,7 @@ namespace renderer
                 restorehdrtarget();
                 glDepthMask(GL_TRUE);
                 glEnable(GL_DEPTH_TEST);
-                conoutf(CON_ERROR, "Candela volumetric composition failed; falling back to Tesseract volumetric lights");
+                conoutf(CON_ERROR, "Candela volumetric composition failed");
                 return false;
             }
 
@@ -361,6 +389,8 @@ namespace renderer
             previousambient = ambientcolor;
             previouscsmcount = csmcount;
             previousrhcount = rhcount;
+            previousLocalLightCount = localLightCount;
+            if(localLightCount) memcpy(previousLocalLights, localLights, localLightCount*sizeof(locallight));
             historyvalid = true;
             restorehdrtarget();
             glDepthMask(GL_TRUE);
@@ -387,6 +417,7 @@ namespace renderer
             historyvalid = false;
             previousfovy = -1.0f;
             previouscsmcount = previousrhcount = -1;
+            previousLocalLightCount = -1;
             pipelineavailable = true;
         }
     }

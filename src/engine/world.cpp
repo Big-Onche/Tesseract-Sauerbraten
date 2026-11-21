@@ -199,7 +199,7 @@ void modifyoctaentity(int flags, int id, extentity &e, cube *c, const ivec &cor,
 
 VAR(numoctaents, 1, 0, 0);
 vector<int> outsideents;
-int spotlights = 0, volumetriclights = 0, nospeclights = 0, smalphalights = 0, volumetricsmalphalights = 0;
+int spotlights = 0, nospeclights = 0, smalphalights = 0;
 
 static bool modifyoctaent(int flags, int id, extentity &e)
 {
@@ -231,15 +231,13 @@ static bool modifyoctaent(int flags, int id, extentity &e)
     switch(e.type)
     {
         case ET_LIGHT:
-            if(e.attr5&L_VOLUMETRIC) { if(flags&MODOE_ADD) volumetriclights++; else --volumetriclights; }
             if(e.attr5&L_NOSPEC) { if(!(flags&MODOE_ADD ? nospeclights++ : --nospeclights)) cleardeferredlightshaders(); }
             if(e.attr5&L_SMALPHA)
             {
                 if(!(flags&MODOE_ADD ?  smalphalights++ : --smalphalights)) cleardeferredlightshaders();
-                if(e.attr5&L_VOLUMETRIC) { if(!(flags&MODOE_ADD ?  volumetricsmalphalights++ : --volumetricsmalphalights)) cleanupvolumetric(); }
             }
             break;
-        case ET_SPOTLIGHT: if(!(flags&MODOE_ADD ? spotlights++ : --spotlights)) { cleardeferredlightshaders(); cleanupvolumetric(); } break;
+        case ET_SPOTLIGHT: if(!(flags&MODOE_ADD ? spotlights++ : --spotlights)) cleardeferredlightshaders(); break;
         case ET_PARTICLES: clearparticleemitters(); break;
         case ET_MAPMODEL: if(flags&MODOE_CHANGED) invalidateskyvisibility(o, r); break;
         case ET_DECAL: if(flags&MODOE_CHANGED) changed(o, r, false); break;
@@ -1497,10 +1495,8 @@ void resetmap()
     outsideents.setsize(0);
     numoctaents = 0;
     spotlights = 0;
-    volumetriclights = 0;
     nospeclights = 0;
     smalphalights = 0;
-    volumetricsmalphalights = 0;
 }
 
 void startmap(const char *name)
