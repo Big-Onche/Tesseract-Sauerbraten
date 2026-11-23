@@ -2051,9 +2051,10 @@ int renderer::reflections::collectlights(renderer::reflections::tracelight *dest
         const lightinfo &light = lights[lightorder[i]];
         if(light.radius <= 0 || light.color.iszero()) continue;
         tracelight &result = destination[count++];
-        result.positionRadius = vec4(light.o, light.radius);
+        result.positionInvRadiusSquared = vec4(light.o, 1.0f/(light.radius*light.radius));
         result.color = vec4(vec(light.color).mul(2*ldrscaleb), light.nospec() ? 0.0f : 1.0f);
-        result.directionCone = vec4(light.dir, light.spot > 0 ? cos360(light.spot) : -2.0f);
+        vec direction = light.spot > 0 ? vec(light.dir).safenormalize() : vec(0, 0, 0);
+        result.directionCone = vec4(direction, light.spot > 0 ? cos360(light.spot) : -2.0f);
     }
     return count;
 }

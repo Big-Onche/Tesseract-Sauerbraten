@@ -7,7 +7,7 @@ namespace renderer
     {
         struct tracelight
         {
-            vec4 positionRadius, color, directionCone;
+            vec4 positionInvRadiusSquared, color, directionCone;
         };
 
         extern int rtreflections;

@@ -399,18 +399,18 @@ namespace renderer
                 LOCALPARAMF(rtSunColor, sun.x*sunscale, sun.y*sunscale, sun.z*sunscale);
                 static const int maximumTraceLights = 32;
                 tracelight traceLights[maximumTraceLights];
-                vec4 lightPositionRadius[maximumTraceLights], lightColor[maximumTraceLights], lightDirectionCone[maximumTraceLights];
+                vec4 lightPositionInvRadiusSquared[maximumTraceLights], lightColor[maximumTraceLights], lightDirectionCone[maximumTraceLights];
                 int lightCount = collectlights(traceLights, maximumTraceLights);
                 loopi(lightCount)
                 {
-                    lightPositionRadius[i] = traceLights[i].positionRadius;
+                    lightPositionInvRadiusSquared[i] = traceLights[i].positionInvRadiusSquared;
                     lightColor[i] = traceLights[i].color;
                     lightDirectionCone[i] = traceLights[i].directionCone;
                 }
                 LOCALPARAMI(rtLightCount, lightCount);
                 if(lightCount)
                 {
-                    LOCALPARAMV(rtLightPositionRadius, lightPositionRadius, lightCount);
+                    LOCALPARAMV(rtLightPositionInvRadiusSquared, lightPositionInvRadiusSquared, lightCount);
                     LOCALPARAMV(rtLightColor, lightColor, lightCount);
                     LOCALPARAMV(rtLightDirectionCone, lightDirectionCone, lightCount);
                 }
@@ -439,12 +439,20 @@ namespace renderer
                 int destination = 1 - historyindex;
                 if(!bindhistorytargets(historytexture[destination], historysurface[destination], historyvalidation[destination], resourcewidth,
                                        resourceheight, "temporal")) return false;
-                static const char *shadernames[2][3] =
+                static const char *reconstructionShaders[2][3] =
                 {
-                    { "rtreflectiontemporalq0", "rtreflectiontemporalq1", "rtreflectiontemporal" },
-                    { "rtreflectiontemporalmsq0", "rtreflectiontemporalmsq1", "rtreflectiontemporalms" }
+                    { "rtreflectiontemporalq0", "rtreflectiontemporalq1", "rtreflectiontemporalq2" },
+                    { "rtreflectiontemporalmsq0", "rtreflectiontemporalmsq1", "rtreflectiontemporalmsq2" }
                 };
-                Shader *shader = useshaderbyname(shadernames[msaalight ? 1 : 0][clamp(rtreconstruction, 0, 2)]);
+                static const char *fullResolutionShaders[2][3] =
+                {
+                    { "rtreflectiontemporalfullq0", "rtreflectiontemporalfullq1", "rtreflectiontemporal" },
+                    { "rtreflectiontemporalmsfullq0", "rtreflectiontemporalmsfullq1", "rtreflectiontemporalms" }
+                };
+                bool fullResolution = tracewidth == resourcewidth && traceheight == resourceheight;
+                int sampleType = msaalight ? 1 : 0, quality = clamp(rtreconstruction, 0, 2);
+                const char *shadername = fullResolution ? fullResolutionShaders[sampleType][quality] : reconstructionShaders[sampleType][quality];
+                Shader *shader = useshaderbyname(shadername);
                 if(!shader || shader->isnull()) return false;
                 timer *temporaltimer = begintimer("RT reflection temporal");
                 shader->set();
