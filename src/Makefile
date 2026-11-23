@@ -122,7 +122,7 @@ CLIENT_OBJS= \
 	engine/world.o \
 	engine/worldio.o \
 	renderer/bloom.o \
-	renderer/bvh/bvh.o \
+	renderer/bvh.o \
 	renderer/cortao.o \
 	renderer/pbr.o \
 	renderer/reflections.o \

@@ -1,6 +1,6 @@
 #include "engine.h"
 #include "reflections.h"
-#include "bvh/bvh.h"
+#include "bvh.h"
 
 extern GLuint gcolortex, gnormaltex, gdepthtex, mscolortex, msnormaltex, msdepthtex, hdrfbo;
 extern bvec skyboxcolour;

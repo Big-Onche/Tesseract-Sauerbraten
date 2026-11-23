@@ -1,5 +1,5 @@
 #include "engine.h"
-#include "../renderer/bvh/bvh.h"
+#include "../renderer/bvh.h"
 #include "../renderer/cortao.h"
 #include "../renderer/reflections.h"
 #include "../renderer/renderer.h"

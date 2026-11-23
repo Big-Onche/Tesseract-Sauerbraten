@@ -199,8 +199,8 @@
 		<Unit filename="../game/waypoint.cpp" />
 		<Unit filename="../game/weapon.cpp" />
 		<Unit filename="../renderer/bloom.cpp" />
-		<Unit filename="../renderer/bvh/bvh.cpp" />
-		<Unit filename="../renderer/bvh/bvh.h" />
+		<Unit filename="../renderer/bvh.cpp" />
+		<Unit filename="../renderer/bvh.h" />
 		<Unit filename="../renderer/cortao.cpp" />
 		<Unit filename="../renderer/cortao.h" />
 		<Unit filename="../renderer/hdr.h" />
