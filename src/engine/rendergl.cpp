@@ -1,6 +1,7 @@
 // rendergl.cpp: core opengl rendering stuff
 
 #include "engine.h"
+#include "../renderer/reflections.h"
 #include "../renderer/volumetrics.h"
 
 void (APIENTRYP glGenSamplers_)(GLsizei, GLuint *) = NULL;
@@ -2960,6 +2961,7 @@ void gl_drawhud()
     skyDebugView();
     atmosphereDebugView();
     lensFlares::debugview();
+    renderer::reflections::drawprofiler();
 
     glDisable(GL_BLEND);
 

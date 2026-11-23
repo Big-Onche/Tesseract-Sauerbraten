@@ -15,6 +15,7 @@ namespace renderer
         int collectlights(tracelight *destination, int maximum);
         bool active();
         void render(GLuint hdrtexture, int width, int height);
+        void drawprofiler();
         void resethistory();
         void cleanup();
     }

@@ -14,6 +14,7 @@ namespace renderer
         extern float rtresolutionscale, rtmaxdistance, rtreflectionstrength, rtreflectionroughnesspower;
         extern float rtadaptivehigh, rtadaptivemedium, rtadaptivelow;
         extern int rtadaptive, rtdenoise, rtspatialfilter, rtspecularhistory, rtspecularspatial, rtreconstruction, rtdebug;
+        extern int profilert, profilertdetail, profilertwindow;
 
         namespace
         {
@@ -25,10 +26,208 @@ namespace renderer
             uint historygeneration = 0;
             matrix4 previousviewprojection, previousworldmatrix;
 
+            enum ProfilePass
+            {
+                PROFILE_TRACE = 0,
+                PROFILE_TEMPORAL,
+                PROFILE_SPATIAL,
+                PROFILE_COMPOSITE,
+                PROFILE_TOTAL,
+                PROFILE_PASS_COUNT
+            };
+            enum
+            {
+                PROFILE_QUERY_COUNT = 4,
+                PROFILE_TIMESTAMPS = 10,
+                PROFILE_COUNTER_COUNT = 16,
+                PROFILE_COUNTER_BINDING = 14,
+                PROFILE_MAX_SAMPLES = 240
+            };
+
+            struct profilestat
+            {
+                float samples[PROFILE_MAX_SAMPLES], latest, average, minimum, maximum;
+                int count, next;
+
+                profilestat() : latest(-1), average(-1), minimum(-1), maximum(-1), count(0), next(0) {}
+
+                void reset()
+                {
+                    latest = average = minimum = maximum = -1;
+                    count = next = 0;
+                }
+
+                void add(float value)
+                {
+                    int window = clamp(profilertwindow, 8, int(PROFILE_MAX_SAMPLES));
+                    samples[next] = value;
+                    next = (next + 1)%window;
+                    count = min(count + 1, window);
+                    latest = value;
+                    average = 0.0f;
+                    minimum = maximum = samples[0];
+                    loopi(count)
+                    {
+                        average += samples[i];
+                        minimum = min(minimum, samples[i]);
+                        maximum = max(maximum, samples[i]);
+                    }
+                    average /= count;
+                }
+            };
+
+            struct profileframe
+            {
+                uint counters[PROFILE_COUNTER_COUNT];
+                int fullwidth, fullheight, tracewidth, traceheight, msaa, passmask;
+                uint bvhgeneration;
+                bool detailed, multisampled;
+
+                profileframe() : fullwidth(0), fullheight(0), tracewidth(0), traceheight(0), msaa(0), passmask(0), bvhgeneration(0), detailed(false),
+                                 multisampled(false)
+                {
+                    memset(counters, 0, sizeof(counters));
+                }
+            };
+
+            GLuint profilequeries[PROFILE_QUERY_COUNT][PROFILE_TIMESTAMPS] = { { 0 } }, profilebuffers[PROFILE_QUERY_COUNT] = { 0 };
+            int profilequerycycle = 0, profilequerywaiting = 0, profilequeryactive = -1, profilepassmask = 0;
+            profilestat profilestats[PROFILE_PASS_COUNT];
+            profileframe profileframes[PROFILE_QUERY_COUNT], latestprofileframe;
+            uint profilesamples = 0;
+            bool profiletimersupported = false;
+
+            void resetprofilestats()
+            {
+                loopi(PROFILE_PASS_COUNT) profilestats[i].reset();
+                latestprofileframe = profileframe();
+                profilesamples = 0;
+            }
+
+            void initprofilerresources(bool counters)
+            {
+                if(!profilequeries[0][0]) glGenQueries_(PROFILE_QUERY_COUNT*PROFILE_TIMESTAMPS, &profilequeries[0][0]);
+                if(counters && !profilebuffers[0])
+                {
+                    glGenBuffers_(PROFILE_QUERY_COUNT, profilebuffers);
+                    loopi(PROFILE_QUERY_COUNT)
+                    {
+                        glBindBuffer_(GL_SHADER_STORAGE_BUFFER, profilebuffers[i]);
+                        glBufferData_(GL_SHADER_STORAGE_BUFFER, PROFILE_COUNTER_COUNT*sizeof(uint), NULL, GL_STREAM_READ);
+                    }
+                    glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
+                }
+            }
+
+            void pollprofiler()
+            {
+                if(!profilequeries[0][0]) return;
+                loopi(PROFILE_QUERY_COUNT) if(profilequerywaiting&(1<<i))
+                {
+                    GLint available = 0;
+                    glGetQueryObjectiv_(profilequeries[i][1], GL_QUERY_RESULT_AVAILABLE, &available);
+                    if(!available) continue;
+
+                    GLuint64EXT timestamp[PROFILE_TIMESTAMPS] = { 0 };
+                    glGetQueryObjectui64v_(profilequeries[i][0], GL_QUERY_RESULT, &timestamp[0]);
+                    glGetQueryObjectui64v_(profilequeries[i][1], GL_QUERY_RESULT, &timestamp[1]);
+                    profileframe &frame = profileframes[i];
+                    loopj(4) if(frame.passmask&(1<<j))
+                    {
+                        glGetQueryObjectui64v_(profilequeries[i][2 + 2*j], GL_QUERY_RESULT, &timestamp[2 + 2*j]);
+                        glGetQueryObjectui64v_(profilequeries[i][3 + 2*j], GL_QUERY_RESULT, &timestamp[3 + 2*j]);
+                        float elapsed = timestamp[3 + 2*j] >= timestamp[2 + 2*j] ?
+                                        float(timestamp[3 + 2*j] - timestamp[2 + 2*j])*1.0e-6f : 0.0f;
+                        profilestats[j].add(elapsed);
+                    }
+                    float total = timestamp[1] >= timestamp[0] ? float(timestamp[1] - timestamp[0])*1.0e-6f : 0.0f;
+                    profilestats[PROFILE_TOTAL].add(total);
+                    if(frame.detailed)
+                    {
+                        glBindBuffer_(GL_SHADER_STORAGE_BUFFER, profilebuffers[i]);
+                        glGetBufferSubData_(GL_SHADER_STORAGE_BUFFER, 0, sizeof(frame.counters), frame.counters);
+                        glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
+                    }
+                    latestprofileframe = frame;
+                    ++profilesamples;
+                    profilequerywaiting &= ~(1<<i);
+                }
+            }
+
+            void beginprofiler(int width, int height)
+            {
+                profilequeryactive = -1;
+                profilepassmask = 0;
+                if(!profilert) return;
+                pollprofiler();
+                profiletimersupported = hasTQ && glQueryCounter_ && (!profilertdetail || (glBindBufferBase_ && glGetBufferSubData_));
+                if(!profiletimersupported || (profilequerywaiting&(1<<profilequerycycle))) return;
+                initprofilerresources(profilertdetail != 0);
+                profilequeryactive = profilequerycycle;
+                profileframe &frame = profileframes[profilequeryactive];
+                frame = profileframe();
+                frame.fullwidth = width;
+                frame.fullheight = height;
+                frame.tracewidth = tracewidth;
+                frame.traceheight = traceheight;
+                frame.msaa = msaasamples;
+                frame.bvhgeneration = worldbvh::generation();
+                frame.detailed = profilertdetail != 0;
+                frame.multisampled = msaalight != 0;
+                if(frame.detailed)
+                {
+                    uint zero[PROFILE_COUNTER_COUNT] = { 0 };
+                    glBindBuffer_(GL_SHADER_STORAGE_BUFFER, profilebuffers[profilequeryactive]);
+                    glBufferData_(GL_SHADER_STORAGE_BUFFER, sizeof(zero), zero, GL_STREAM_READ);
+                    glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, PROFILE_COUNTER_BINDING, profilebuffers[profilequeryactive]);
+                    glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
+                }
+                glQueryCounter_(profilequeries[profilequeryactive][0], GL_TIMESTAMP);
+            }
+
+            void beginprofilerpass(ProfilePass pass)
+            {
+                if(profilequeryactive < 0 || pass >= PROFILE_TOTAL) return;
+                profilepassmask |= 1<<pass;
+                glQueryCounter_(profilequeries[profilequeryactive][2 + 2*pass], GL_TIMESTAMP);
+            }
+
+            void endprofilerpass(ProfilePass pass)
+            {
+                if(profilequeryactive < 0 || pass >= PROFILE_TOTAL) return;
+                glQueryCounter_(profilequeries[profilequeryactive][3 + 2*pass], GL_TIMESTAMP);
+                if(pass == PROFILE_TRACE && glMemoryBarrier_)
+                    glMemoryBarrier_(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+            }
+
+            void endprofiler()
+            {
+                if(profilequeryactive < 0) return;
+                bool detailed = profileframes[profilequeryactive].detailed;
+                profileframes[profilequeryactive].passmask = profilepassmask;
+                glQueryCounter_(profilequeries[profilequeryactive][1], GL_TIMESTAMP);
+                profilequerywaiting |= 1<<profilequeryactive;
+                profilequerycycle = (profilequeryactive + 1)%PROFILE_QUERY_COUNT;
+                profilequeryactive = -1;
+                if(detailed) glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, PROFILE_COUNTER_BINDING, 0);
+            }
+
+            void cleanupprofiler()
+            {
+                if(profilequeries[0][0]) glDeleteQueries_(PROFILE_QUERY_COUNT*PROFILE_TIMESTAMPS, &profilequeries[0][0]);
+                if(profilebuffers[0]) glDeleteBuffers_(PROFILE_QUERY_COUNT, profilebuffers);
+                memset(profilequeries, 0, sizeof(profilequeries));
+                memset(profilebuffers, 0, sizeof(profilebuffers));
+                profilequerycycle = profilequerywaiting = 0;
+                profilequeryactive = -1;
+                resetprofilestats();
+            }
+
             void settingschanged()
             {
                 historyvalid = false;
                 pipelineavailable = true;
+                cleanupprofiler();
             }
 
             float resolutionscale()
@@ -175,7 +374,10 @@ namespace renderer
             bool tracereflections()
             {
                 if(!bindtracetargets(tracewidth, traceheight)) return false;
-                Shader *shader = useshaderbyname(msaalight ? "rtreflectiontracems" : "rtreflectiontrace");
+                const char *shadername = profilertdetail && profilequeryactive >= 0 ?
+                                         (msaalight ? "rtreflectiontracemsprofile" : "rtreflectiontraceprofile") :
+                                         (msaalight ? "rtreflectiontracems" : "rtreflectiontrace");
+                Shader *shader = useshaderbyname(shadername);
                 if(!shader || shader->isnull()) return false;
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();
@@ -310,6 +512,9 @@ namespace renderer
             }
         }
 
+        VARFP(profilert, 0, 0, 1, cleanupprofiler());
+        VARFP(profilertdetail, 0, 0, 1, cleanupprofiler());
+        VARFP(profilertwindow, 8, 120, PROFILE_MAX_SAMPLES, cleanupprofiler());
         VARFP(rtreflections, 0, 0, 1, settingschanged());
         FVARFP(rtresolutionscale, 0.25f, 0.5f, 1.0f, cleanup());
         VARFP(rtadaptive, 0, 1, 1, settingschanged());
@@ -317,8 +522,8 @@ namespace renderer
         FVARFP(rtadaptivemedium, 0.005f, 0.025f, 1.0f, settingschanged());
         FVARFP(rtadaptivelow, 0.0f, 0.008f, 1.0f, settingschanged());
         FVARFP(rtmaxdistance, 1.0f, 2048.0f, 8192.0f, settingschanged());
-        FVARP(rtreflectionstrength, 0.0f, 2.0f, 8.0f);
-        FVARP(rtreflectionroughnesspower, 0.25f, 3.0f, 8.0f);
+        FVARFP(rtreflectionstrength, 0.0f, 2.0f, 8.0f, cleanupprofiler());
+        FVARFP(rtreflectionroughnesspower, 0.25f, 3.0f, 8.0f, cleanupprofiler());
         VARFP(rtdenoise, 0, 1, 1, settingschanged());
         VARFP(rtspatialfilter, 0, 1, 1, settingschanged());
         VARFP(rtspecularhistory, 1, 24, 64, settingschanged());
@@ -345,6 +550,120 @@ namespace renderer
         }
         COMMANDN(rtreflectionstats, printstats, "");
 
+        static void printprofilebaseline()
+        {
+            pollprofiler();
+            const char *gpu = (const char *)glGetString(GL_RENDERER), *vendor = (const char *)glGetString(GL_VENDOR);
+            string msaadescription;
+            if(latestprofileframe.msaa) formatstring(msaadescription, "%dx", latestprofileframe.msaa);
+            else copystring(msaadescription, "off");
+            float effectivescale = latestprofileframe.fullwidth > 0 ? float(latestprofileframe.tracewidth)/latestprofileframe.fullwidth : 0.0f;
+            conoutf("RT PROFILE BASELINE: GPU %s (%s)", gpu ? gpu : "unknown", vendor ? vendor : "unknown");
+            conoutf("RT PROFILE CONFIG: full %dx%d, trace %dx%d, requested/effective scale %.3f/%.3f, MSAA %s (%s RT input), BVH generation %u",
+                    latestprofileframe.fullwidth, latestprofileframe.fullheight, latestprofileframe.tracewidth, latestprofileframe.traceheight,
+                    resolutionscale(), effectivescale, msaadescription, latestprofileframe.multisampled ? "multisample" : "resolved",
+                    latestprofileframe.bvhgeneration);
+            conoutf("RT PROFILE SETTINGS: adaptive %s, denoise %s, spatial %s/%d, reconstruction %d, history %d", rtadaptive ? "on" : "off",
+                    rtdenoise ? "on" : "off", rtspatialfilter ? "on" : "off", rtspecularspatial, rtreconstruction, rtspecularhistory);
+            static const char *names[PROFILE_PASS_COUNT] = { "trace", "temporal", "spatial", "composite", "total" };
+            loopi(PROFILE_PASS_COUNT)
+            {
+                const profilestat &stat = profilestats[i];
+                if(stat.count) conoutf("RT PROFILE GPU %s: latest %.3f ms, average %.3f ms, minimum %.3f ms, maximum %.3f ms, samples %d",
+                                      names[i], stat.latest, stat.average, stat.minimum, stat.maximum, stat.count);
+                else conoutf("RT PROFILE GPU %s: n/a", names[i]);
+            }
+            const uint *counter = latestprofileframe.counters;
+            double traversal = double(counter[12]) + double(counter[15])*4294967296.0;
+            if(latestprofileframe.detailed)
+            {
+                conoutf("RT PROFILE BVH: rays %u, hits %u, misses %u, invalid %u, material-invalid %u, visited nodes %.0f, max nodes %u", counter[8],
+                        counter[9], counter[10], counter[11], counter[14], traversal, counter[13]);
+                conoutf("RT PROFILE SAMPLING: no-surface %u, material-rejected %u, classes 0/1/2/3 %u/%u/%u/%u, "
+                        "class-skipped %u, schedule-skipped %u",
+                        counter[0], counter[1], counter[2], counter[3], counter[4], counter[5], counter[6], counter[7]);
+            }
+            else conoutf("RT PROFILE WORKLOAD: unavailable; use /profilertdetail 1 for instrumented shader counters");
+            conoutf("RT PROFILE SAMPLES: %u completed timing frames; counters use 32-bit atomics with a carry word for total node visits",
+                    profilesamples);
+        }
+        COMMANDN(profilertbaseline, printprofilebaseline, "");
+
+        void drawprofiler()
+        {
+            if(!profilert) return;
+            pollprofiler();
+
+            string lines[24];
+            int linecount = 0, pending = 0;
+            loopi(PROFILE_QUERY_COUNT) if(profilequerywaiting&(1<<i)) ++pending;
+            formatstring(lines[linecount++], "Penteract RT profiler  samples %u  pending %d  window %d", profilesamples, pending, profilertwindow);
+            bool supported = hasTQ && glQueryCounter_ && (!profilertdetail || (glBindBufferBase_ && glGetBufferSubData_));
+            if(!supported)
+                formatstring(lines[linecount++], "GPU timestamps/counter readback unavailable on this backend");
+            else if(!profilesamples) formatstring(lines[linecount++], "Waiting for an active RT reflections frame");
+            else formatstring(lines[linecount++], "GPU ms                 latest     avg     min     max    %%total");
+            static const char *names[PROFILE_PASS_COUNT] = { "Trace", "Temporal", "Spatial", "Composite", "Total" };
+            float total = profilestats[PROFILE_TOTAL].latest;
+            loopi(PROFILE_PASS_COUNT)
+            {
+                const profilestat &stat = profilestats[i];
+                if(stat.count)
+                {
+                    float percent = i == PROFILE_TOTAL ? 100.0f : (total > 0.0f ? 100.0f*stat.latest/total : 0.0f);
+                    formatstring(lines[linecount++], "  %-18s %7.3f %7.3f %7.3f %7.3f %6.1f", names[i], stat.latest, stat.average,
+                                 stat.minimum, stat.maximum, percent);
+                }
+                else formatstring(lines[linecount++], "  %-18s     n/a", names[i]);
+            }
+
+            const uint *counter = latestprofileframe.counters;
+            uint totalpixels = uint(max(latestprofileframe.tracewidth, 0))*uint(max(latestprofileframe.traceheight, 0));
+            uint eligible = counter[2] + counter[3] + counter[4] + counter[5];
+            float effectivescale = latestprofileframe.fullwidth > 0 ? float(latestprofileframe.tracewidth)/latestprofileframe.fullwidth : 0.0f;
+            double traversal = double(counter[12]) + double(counter[15])*4294967296.0;
+            float hitratio = counter[8] ? 100.0f*counter[9]/counter[8] : 0.0f;
+            float missratio = counter[8] ? 100.0f*counter[10]/counter[8] : 0.0f;
+            float averageTraversal = counter[8] ? float(traversal/counter[8]) : 0.0f;
+            float avoided = totalpixels ? 100.0f*(totalpixels - min(counter[8], totalpixels))/totalpixels : 0.0f;
+            string msaadescription;
+            if(latestprofileframe.msaa) formatstring(msaadescription, "%dx", latestprofileframe.msaa);
+            else copystring(msaadescription, "off");
+            if(latestprofileframe.detailed)
+            {
+                formatstring(lines[linecount++], "BVH workload");
+                formatstring(lines[linecount++], "  rays %u  hits %u (%.1f%%)  misses %u (%.1f%%)  invalid %u", counter[8], counter[9], hitratio,
+                             counter[10], missratio, counter[11]);
+                formatstring(lines[linecount++], "  visited nodes avg %.1f  max %u  total %.0f  invalid material %u", averageTraversal, counter[13],
+                             traversal, counter[14]);
+                formatstring(lines[linecount++], "Adaptive sampling");
+                formatstring(lines[linecount++], "  pixels %u  eligible %u  no surface %u  material rejected %u", totalpixels, eligible, counter[0],
+                             counter[1]);
+                formatstring(lines[linecount++], "  classes 0/1/2/3  %u / %u / %u / %u", counter[2], counter[3], counter[4], counter[5]);
+                formatstring(lines[linecount++], "  class skipped %u  schedule skipped %u  traced %u  avoided %.1f%%", counter[6], counter[7],
+                             counter[8], avoided);
+            }
+            else formatstring(lines[linecount++], "Workload counters off  (/profilertdetail 1 enables the instrumented trace shader)");
+            formatstring(lines[linecount++], "Configuration");
+            formatstring(lines[linecount++], "  full %dx%d  trace %dx%d  scale requested/effective %.3f/%.3f", latestprofileframe.fullwidth,
+                         latestprofileframe.fullheight, latestprofileframe.tracewidth, latestprofileframe.traceheight, resolutionscale(),
+                         effectivescale);
+            formatstring(lines[linecount++], "  MSAA %s  RT input %s", msaadescription, latestprofileframe.multisampled ? "multisample" : "resolved");
+            formatstring(lines[linecount++], "  adaptive %s  denoise %s  spatial %s/%d  reconstruction %d  history %d", rtadaptive ? "on" : "off",
+                         rtdenoise ? "on" : "off", rtspatialfilter ? "on" : "off", rtspecularspatial, rtreconstruction, rtspecularhistory);
+            formatstring(lines[linecount++], "  BVH generation %u  OpenGL backend  overhead: %s", latestprofileframe.bvhgeneration,
+                         latestprofileframe.detailed ? "timestamps + shader atomics" : "timestamps only");
+
+            float maximumwidth = 1.0f;
+            loopi(linecount) maximumwidth = max(maximumwidth, text_widthf(lines[i]));
+            float resolutionscale = min(hudw/1920.0f, hudh/1080.0f);
+            float fitscale = min((hudw - 16.0f)/maximumwidth, (hudh - 16.0f)/(linecount*FONTH));
+            float textscale = max(min(min(resolutionscale, fitscale), 2.0f), 0.1f);
+            pushhudtranslate(8.0f, 8.0f, textscale);
+            loopi(linecount) draw_text(lines[i], 0, i*FONTH);
+            pophudmatrix();
+        }
+
         bool active()
         {
             return rtreflections == 1 && pipelineavailable && glversion >= 430 && hasBindlessTexture && worldbvh::ready() && !drawtex && !mainmenu;
@@ -369,16 +688,32 @@ namespace renderer
             {
                 historyvalid = false;
                 historygeneration = generation;
+                cleanupprofiler();
             }
-            if(!tracereflections() || !temporalaccumulation())
+            beginprofiler(width, height);
+            beginprofilerpass(PROFILE_TRACE);
+            bool traced = tracereflections();
+            endprofilerpass(PROFILE_TRACE);
+            beginprofilerpass(PROFILE_TEMPORAL);
+            bool accumulated = traced && temporalaccumulation();
+            endprofilerpass(PROFILE_TEMPORAL);
+            if(!traced || !accumulated)
             {
+                endprofiler();
                 historyvalid = false;
                 pipelineavailable = false;
                 restorehdrtarget(width, height);
                 return;
             }
+            bool hasspatial = rtdenoise && rtspatialfilter && rtspecularspatial > 0;
+            if(hasspatial) beginprofilerpass(PROFILE_SPATIAL);
             GLuint filtered = spatialfilter();
-            if(!filtered || !compose(filtered))
+            if(hasspatial) endprofilerpass(PROFILE_SPATIAL);
+            beginprofilerpass(PROFILE_COMPOSITE);
+            bool composed = filtered && compose(filtered);
+            endprofilerpass(PROFILE_COMPOSITE);
+            endprofiler();
+            if(!filtered || !composed)
             {
                 historyvalid = false;
                 pipelineavailable = false;
@@ -411,6 +746,7 @@ namespace renderer
             historyvalid = false;
             historygeneration = 0;
             pipelineavailable = true;
+            cleanupprofiler();
         }
     }
 }
