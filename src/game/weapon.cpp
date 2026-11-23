@@ -782,7 +782,12 @@ namespace game
             case S_CHAINSAW_ATTACK:
                 if(d->attacksound >= 0) looped = true;
                 d->attacksound = sound;
-                d->attackchan = playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0, -1, 100, d->attackchan);
+                d->attackchan = playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0, -1, 200, d->attackchan);
+                if(d->attackchan >= 0 && !looped)
+                {
+                    setsoundpitch(sound, d->attackchan, 0.25f);
+                    setsoundpitch(sound, d->attackchan, 1.0f, 200);
+                }
                 break;
             default:
                 playsound(sound, d==h ? NULL : &d->o, NULL, d==h ? SND_HUD : 0);
@@ -1070,8 +1075,18 @@ namespace game
             if(d->idlesound >= 0) d->stopidlesound();
             if(sound >= 0)
             {
-                d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, 100, d->idlechan, radius);
-                if(d->idlechan >= 0) d->idlesound = sound;
+                d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, 300, d->idlechan, radius);
+                if(d->idlechan >= 0)
+                {
+                    d->idlesound = sound;
+                    if(d->chainsawidlepitchramp)
+                    {
+                        setsoundpitch(sound, d->idlechan, 1.2f);
+                        setsoundpitch(sound, d->idlechan, 1.0f, 200);
+                    }
+                    else setsoundpitch(sound, d->idlechan, 1.0f);
+                    d->chainsawidlepitchramp = false;
+                }
             }
         }
         else if(sound >= 0)
@@ -1079,6 +1094,7 @@ namespace game
             d->idlechan = playsound(sound, local ? NULL : &d->o, NULL, local ? SND_HUD : 0, -1, -1, d->idlechan, radius);
             if(d->idlechan < 0) d->idlesound = -1;
         }
+        else d->chainsawidlepitchramp = false;
     }
 
     void removeweapons(fpsent *d)

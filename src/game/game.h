@@ -551,6 +551,7 @@ struct fpsent : dynent, fpsstate
     int lastaction, lastattackgun;
     bool attacking;
     int attacksound, attackchan, idlesound, idlechan;
+    bool chainsawidlepitchramp;
     int lasttaunt;
     int lastpickup, lastpickupmillis, lastbase, lastrepammo, flagpickup, tokens;
     vec lastcollect;
@@ -566,7 +567,9 @@ struct fpsent : dynent, fpsstate
 
     vec muzzle;
 
-    fpsent() : weight(100), clientnum(-1), privilege(PRIV_NONE), lastupdate(0), plag(0), ping(0), lifesequence(0), respawned(-1), suicided(-1), lastpain(0), attacksound(-1), attackchan(-1), idlesound(-1), idlechan(-1), frags(0), flags(0), deaths(0), totaldamage(0), totalshots(0), edit(NULL), smoothmillis(-1), playermodel(-1), ai(NULL), ownernum(-1), muzzle(-1, -1, -1)
+    fpsent() : weight(100), clientnum(-1), privilege(PRIV_NONE), lastupdate(0), plag(0), ping(0), lifesequence(0), respawned(-1), suicided(-1),
+        lastpain(0), attacksound(-1), attackchan(-1), idlesound(-1), idlechan(-1), chainsawidlepitchramp(false), frags(0), flags(0), deaths(0),
+        totaldamage(0), totalshots(0), edit(NULL), smoothmillis(-1), playermodel(-1), ai(NULL), ownernum(-1), muzzle(-1, -1, -1)
     {
         name[0] = team[0] = info[0] = 0;
         respawn();
@@ -588,13 +591,23 @@ struct fpsent : dynent, fpsstate
 
     void stopattacksound()
     {
-        if(attackchan >= 0) stopsound(attacksound, attackchan, 250);
+        bool stoppingchainsaw = attackchan >= 0 && attacksound == S_CHAINSAW_ATTACK;
+        if(attackchan >= 0)
+        {
+            if(attacksound == S_CHAINSAW_ATTACK) setsoundpitch(attacksound, attackchan, 0.8f, 300);
+            stopsound(attacksound, attackchan, attacksound == S_CHAINSAW_ATTACK ? 300 : 250);
+        }
+        chainsawidlepitchramp = stoppingchainsaw;
         attacksound = attackchan = -1;
     }
 
     void stopidlesound()
     {
-        if(idlechan >= 0) stopsound(idlesound, idlechan, 100);
+        if(idlechan >= 0)
+        {
+            if(idlesound == S_CHAINSAW_IDLE) setsoundpitch(idlesound, idlechan, 1.2f, 200);
+            stopsound(idlesound, idlechan, idlesound == S_CHAINSAW_IDLE ? 200 : 100);
+        }
         idlesound = idlechan = -1;
     }
 
@@ -614,6 +627,7 @@ struct fpsent : dynent, fpsstate
         tokens = 0;
         lastcollect = vec(-1e10f, -1e10f, -1e10f);
         stopattacksound();
+        chainsawidlepitchramp = false;
         lastnode = -1;
     }
 

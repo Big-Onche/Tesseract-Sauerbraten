@@ -444,6 +444,7 @@ extern int playsoundname(const char *s, const vec *loc = NULL, int vol = 0, int 
 extern void preloadsound(int n);
 extern void preloadmapsound(int n);
 extern bool stopsound(int n, int chanid, int fade = 0);
+extern bool setsoundpitch(int n, int chanid, float pitch, int fade = 0);
 extern void stopsounds();
 extern void clearsoundentities();
 extern void initsound();

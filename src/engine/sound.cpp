@@ -201,9 +201,9 @@ namespace sound
         extentity *ent;
         int radius, volume, targetVolume, pan, acousticPan, targetAcousticPan, flags, expire, soundentity;
         uint eventseed;
-        int fadeStart, fadeEnd, fadeFrom;
-        float pitch, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend, distanceReverbSend, targetDistanceReverbSend,
-              acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF, acousticBlockGain;
+        int fadeStart, fadeEnd, fadeFrom, pitchFadeStart, pitchFadeEnd;
+        float pitch, targetPitch, pitchFadeFrom, gainhf, targetGainHF, gainlf, targetGainLF, reverbSend, targetReverbSend,
+              distanceReverbSend, targetDistanceReverbSend, acousticGain, targetAcousticGain, acousticGainHF, targetAcousticGainHF, acousticBlockGain;
         vec acousticCacheLoc, acousticCacheListener;
         acoustics::AcousticSourceInfo acousticCacheInfo;
         int acousticCacheMillis;
@@ -231,7 +231,8 @@ namespace sound
             soundentity = 0;
             eventseed = 0;
             fadeStart = fadeEnd = fadeFrom = 0;
-            pitch = 1.0f;
+            pitchFadeStart = pitchFadeEnd = 0;
+            pitch = targetPitch = pitchFadeFrom = 1.0f;
             gainhf = -1.0f;
             targetGainHF = 1.0f;
             gainlf = -1.0f;
@@ -423,6 +424,15 @@ namespace sound
         return clamp(int(chan.fadeFrom + (chan.targetVolume - chan.fadeFrom)*t + 0.5f), 0, MaxVolume);
     }
 
+    static float effectivePitch(const SoundChannel &chan)
+    {
+        if(chan.pitchFadeEnd <= chan.pitchFadeStart) return chan.targetPitch;
+        int now = totalmillis;
+        if(now >= chan.pitchFadeEnd) return chan.targetPitch;
+        float t = float(now - chan.pitchFadeStart)/float(chan.pitchFadeEnd - chan.pitchFadeStart);
+        return chan.pitchFadeFrom + (chan.targetPitch - chan.pitchFadeFrom)*t;
+    }
+
     static ALuint syncDirectFilter(SoundChannel &chan)
     {
         if(!efxFilters)
@@ -537,12 +547,16 @@ namespace sound
     {
         if(!chan.source) return;
         int volume = effectiveVolume(chan);
+        float pitch = effectivePitch(chan);
         if(!chan.dirty && volume == chan.volume && fabs(chan.targetGainHF - chan.gainhf) < 1e-3f && fabs(chan.targetGainLF - chan.gainlf) < 1e-3f &&
            fabs(chan.targetReverbSend - chan.reverbSend) < 1e-3f && fabs(chan.targetDistanceReverbSend - chan.distanceReverbSend) < 1e-3f &&
            fabs(chan.targetAcousticGain - chan.acousticGain) < 1e-3f && fabs(chan.targetAcousticGainHF - chan.acousticGainHF) < 1e-3f &&
-           chan.targetAcousticPan == chan.acousticPan) return;
+           chan.targetAcousticPan == chan.acousticPan && fabs(pitch - chan.pitch) < 1e-3f) return;
         chan.volume = volume;
+        chan.pitch = pitch;
         alSourcef(chan.source, AL_GAIN, clamp(chan.volume/float(MaxVolume), 0.0f, 1.0f));
+        alSourcef(chan.source, AL_PITCH, chan.pitch);
+        if(chan.acousticSource) alSourcef(chan.acousticSource, AL_PITCH, chan.pitch);
         float pan = clamp(chan.pan/127.5f - 1.0f, -1.0f, 1.0f);
         alSource3f(chan.source, AL_POSITION, pan, 0.0f, -1.0f);
         if(efxFilters) syncDirectFilter(chan);
@@ -1697,7 +1711,7 @@ namespace sound
         else if(chan.flags&SND_HUD) acoustics::acousticHudSource(reverbSend);
         if(!efxReverb) reverbSend = distanceReverbSend = 0.0f;
         else if(!efxDistanceReverbSlot) reverbSend = max(reverbSend, distanceReverbSend);
-        int vol = clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
+        int vol = chan.stopping ? 0 : clamp(int(volf*soundvol*chan.slot->volume*(MaxVolume/float(255*255)) + 0.5f), 0, MaxVolume);
         int pan = clamp(int(panf*255.9f), 0, 255);
         if(vol == chan.targetVolume && pan == chan.pan && fabs(gainhf - chan.targetGainHF) < 1e-3f && fabs(gainlf - chan.targetGainLF) < 1e-3f &&
            fabs(reverbSend - chan.targetReverbSend) < 1e-3f && fabs(distanceReverbSend - chan.targetDistanceReverbSend) < 1e-3f &&
@@ -1751,7 +1765,8 @@ namespace sound
             SoundChannel &chan = channels[i];
             if(!chan.inuse) continue;
             if(chan.hasLoc() || chan.flags&SND_HUD) updateChannel(chan);
-            if(chan.fadeEnd > chan.fadeStart && totalmillis < chan.fadeEnd) chan.dirty = true;
+            if((chan.fadeEnd > chan.fadeStart && totalmillis < chan.fadeEnd) ||
+               (chan.pitchFadeEnd > chan.pitchFadeStart && totalmillis < chan.pitchFadeEnd)) chan.dirty = true;
             syncChannel(chan);
         }
     }
@@ -1861,12 +1876,13 @@ namespace sound
         chanid = -1;
         loopv(channels) if(!channels[i].inuse) { chanid = i; break; }
         if(chanid < 0 && channels.length() < maxChannels) chanid = channels.length();
-        if(chanid < 0) loopv(channels) if(!channels[i].targetVolume) { haltChannel(i); chanid = i; break; }
+        if(chanid < 0) loopv(channels) if(!effectiveVolume(channels[i])) { haltChannel(i); chanid = i; break; }
         if(chanid < 0) return -1;
 
         SoundChannel &chan = newChannel(chanid, &slot, loc, ent, flags, radius, soundentity);
         chan.eventseed = eventseed;
-        chan.pitch = randomPitchOffset(n, soundPitchSeed(n, loc, ent, soundentity));
+        chan.pitch = chan.targetPitch = chan.pitchFadeFrom = randomPitchOffset(n, soundPitchSeed(n, loc, ent, soundentity));
+        chan.pitchFadeStart = chan.pitchFadeEnd = totalmillis;
         chan.looping = loops != 0;
         if(!chan.ensureSource())
         {
@@ -1931,15 +1947,32 @@ namespace sound
         if(dbgsound) conoutf(CON_DEBUG, "stopsound: %s%s", gameSounds.dir, chan.slot->sample->name);
         if(fade > 0)
         {
+            int fadeFrom = effectiveVolume(chan);
             chan.fadeStart = totalmillis;
             chan.fadeEnd = totalmillis + fade;
-            chan.fadeFrom = effectiveVolume(chan);
+            chan.fadeFrom = fadeFrom;
             chan.targetVolume = 0;
             chan.stopping = true;
             chan.dirty = true;
             syncChannel(chan);
         }
         else haltChannel(chanid);
+        return true;
+    }
+
+    bool setPitch(int n, int chanid, float pitch, int fade)
+    {
+        if(!gameSounds.configs.inrange(n) || !channels.inrange(chanid) ||
+           !gameSounds.playing(channels[chanid], gameSounds.configs[n])) return false;
+        SoundChannel &chan = channels[chanid];
+        pitch = clamp(pitch, 0.01f, 4.0f);
+        chan.pitchFadeFrom = effectivePitch(chan);
+        chan.pitchFadeStart = totalmillis;
+        chan.pitchFadeEnd = fade > 0 ? totalmillis + fade : totalmillis;
+        chan.targetPitch = pitch;
+        if(fade <= 0) chan.pitch = pitch;
+        chan.dirty = true;
+        syncChannel(chan);
         return true;
     }
 
@@ -2078,6 +2111,7 @@ void clearsoundentities() { sound::clearEntities(); }
 int playsound(int n, const vec *loc, extentity *ent, int flags, int loops, int fade, int chanid, int radius, int expire) { return sound::play(n, loc, ent, flags, loops, fade, chanid, radius, expire); }
 void stopsounds() { sound::stopAll(); }
 bool stopsound(int n, int chanid, int fade) { return sound::stop(n, chanid, fade); }
+bool setsoundpitch(int n, int chanid, float pitch, int fade) { return sound::setPitch(n, chanid, pitch, fade); }
 int playsoundname(const char *s, const vec *loc, int vol, int flags, int loops, int fade, int chanid, int radius, int expire) { return sound::playName(s, loc, vol, flags, loops, fade, chanid, radius, expire); }
 
 ICOMMAND(playsound, "i", (int *n), sound::play(*n));
