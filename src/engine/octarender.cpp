@@ -651,28 +651,28 @@ void reduceslope(ivec &n)
     while(!((n.x|n.y|n.z)&1)) n.shr(1);
 }
 
-// [rotation][orient]
-extern const vec orientation_tangent[8][6] =
+// [rotation][dimension]
+extern const vec orientation_tangent[8][3] =
 {
-    { vec( 0,  1,  0), vec( 0, -1,  0), vec(-1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0) },
-    { vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0, -1,  0), vec( 0,  1,  0) },
-    { vec( 0, -1,  0), vec( 0,  1,  0), vec( 1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0) },
-    { vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  1,  0), vec( 0, -1,  0) },
-    { vec( 0, -1,  0), vec( 0,  1,  0), vec( 1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0) },
-    { vec( 0,  1,  0), vec( 0, -1,  0), vec(-1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0) },
-    { vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0, -1,  0), vec( 0,  1,  0) },
-    { vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  1,  0), vec( 0, -1,  0) },
+    { vec(0,  1,  0), vec( 1, 0,  0), vec( 1,  0, 0) },
+    { vec(0,  0, -1), vec( 0, 0, -1), vec( 0,  1, 0) },
+    { vec(0, -1,  0), vec(-1, 0,  0), vec(-1,  0, 0) },
+    { vec(0,  0,  1), vec( 0, 0,  1), vec( 0, -1, 0) },
+    { vec(0, -1,  0), vec(-1, 0,  0), vec(-1,  0, 0) },
+    { vec(0,  1,  0), vec( 1, 0,  0), vec( 1,  0, 0) },
+    { vec(0,  0, -1), vec( 0, 0, -1), vec( 0,  1, 0) },
+    { vec(0,  0,  1), vec( 0, 0,  1), vec( 0, -1, 0) },
 };
-extern const vec orientation_bitangent[8][6] =
+extern const vec orientation_bitangent[8][3] =
 {
-    { vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0, -1,  0), vec( 0,  1,  0) },
-    { vec( 0, -1,  0), vec( 0,  1,  0), vec( 1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0) },
-    { vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  1,  0), vec( 0, -1,  0) },
-    { vec( 0,  1,  0), vec( 0, -1,  0), vec(-1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0) },
-    { vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0,  0, -1), vec( 0, -1,  0), vec( 0,  1,  0) },
-    { vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  0,  1), vec( 0,  1,  0), vec( 0, -1,  0) },
-    { vec( 0,  1,  0), vec( 0, -1,  0), vec(-1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0), vec( 1,  0,  0) },
-    { vec( 0, -1,  0), vec( 0,  1,  0), vec( 1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0), vec(-1,  0,  0) },
+    { vec(0,  0, -1), vec( 0, 0, -1), vec( 0,  1, 0) },
+    { vec(0, -1,  0), vec(-1, 0,  0), vec(-1,  0, 0) },
+    { vec(0,  0,  1), vec( 0, 0,  1), vec( 0, -1, 0) },
+    { vec(0,  1,  0), vec( 1, 0,  0), vec( 1,  0, 0) },
+    { vec(0,  0, -1), vec( 0, 0, -1), vec( 0,  1, 0) },
+    { vec(0,  0,  1), vec( 0, 0,  1), vec( 0, -1, 0) },
+    { vec(0,  1,  0), vec( 1, 0,  0), vec( 1,  0, 0) },
+    { vec(0, -1,  0), vec(-1, 0,  0), vec(-1,  0, 0) },
 };
 
 void addtris(VSlot &vslot, int orient, const sortkey &key, vertex *verts, int *index, int numverts, int convex, int tj)
@@ -743,7 +743,7 @@ void addtris(VSlot &vslot, int orient, const sortkey &key, vertex *verts, int *i
                     vt.norm.lerp(v1.norm, v2.norm, offset);
                     vt.tangent.lerp(v1.tangent, v2.tangent, offset);
                     if(v1.tangent.w != v2.tangent.w)
-                        vt.tangent.w = orientation_bitangent[vslot.rotation][orient].scalartriple(vt.norm.tonormal(), vt.tangent.tonormal()) < 0 ? 0 : 255;
+                        vt.tangent.w = orientation_bitangent[vslot.rotation][dimension(orient)].scalartriple(vt.norm.tonormal(), vt.tangent.tonormal()) < 0 ? 0 : 255;
                     int i2 = vc.addvert(vt);
                     if(i2 < 0) return;
                     if(i1 >= 0)
@@ -791,7 +791,7 @@ void addgrasstri(int face, vertex *verts, int numv, ushort texture, int layer)
     g.blend = layer == LAYER_BLEND ? ((int(g.center.x)>>12)+1) | (((int(g.center.y)>>12)+1)<<8) : 0;
 }
 
-static inline void calctexgen(VSlot &vslot, int orient, vec4 &sgen, vec4 &tgen)
+static inline void calctexgen(VSlot &vslot, int dim, vec4 &sgen, vec4 &tgen)
 {
     Texture *tex = vslot.slot->sts.empty() ? notexture : vslot.slot->sts[0].t;
     const texrotation &r = texrotations[vslot.rotation];
@@ -801,25 +801,19 @@ static inline void calctexgen(VSlot &vslot, int orient, vec4 &sgen, vec4 &tgen)
           sk = k/xs, tk = k/ys,
           soff = -(r.swapxy ? vslot.offset.y : vslot.offset.x)/xs,
           toff = -(r.swapxy ? vslot.offset.x : vslot.offset.y)/ys;
+    static const int si[] = { 1, 0, 0 }, ti[] = { 2, 2, 1 };
+    int sdim = si[dim], tdim = ti[dim];
     sgen = vec4(0, 0, 0, soff);
     tgen = vec4(0, 0, 0, toff);
-    if(r.swapxy) switch(orient)
+    if(r.swapxy)
     {
-        case 0: sgen.z = -sk; tgen.y = tk;  break;
-        case 1: sgen.z = -sk; tgen.y = -tk; break;
-        case 2: sgen.z = -sk; tgen.x = -tk; break;
-        case 3: sgen.z = -sk; tgen.x = tk;  break;
-        case 4: sgen.y = -sk; tgen.x = tk;  break;
-        case 5: sgen.y = sk;  tgen.x = tk;  break;
+        sgen[tdim] = dim <= 1 ? -sk : sk;
+        tgen[sdim] = tk;
     }
-    else switch(orient)
+    else
     {
-        case 0: sgen.y = sk;  tgen.z = -tk; break;
-        case 1: sgen.y = -sk; tgen.z = -tk; break;
-        case 2: sgen.x = -sk; tgen.z = -tk; break;
-        case 3: sgen.x = sk;  tgen.z = -tk; break;
-        case 4: sgen.x = sk;  tgen.y = -tk; break;
-        case 5: sgen.x = sk;  tgen.y = tk;  break;
+        sgen[sdim] = sk;
+        tgen[tdim] = dim <= 1 ? -tk : tk;
     }
 }
 
@@ -871,8 +865,9 @@ void guessnormals(const vec *pos, int numverts, vec *normals)
 
 void addcubeverts(VSlot &vslot, int orient, int size, vec *pos, int convex, ushort texture, vertinfo *vinfo, int numverts, int tj = -1, ushort envmap = EMID_NONE, int grassy = 0, bool alpha = false, int layer = LAYER_TOP)
 {
+    int dim = dimension(orient);
     vec4 sgen, tgen;
-    calctexgen(vslot, orient, sgen, tgen);
+    calctexgen(vslot, dim, sgen, tgen);
     vertex verts[MAXFACEVERTS];
     int index[MAXFACEVERTS];
     vec normals[MAXFACEVERTS];
@@ -883,19 +878,19 @@ void addcubeverts(VSlot &vslot, int orient, int size, vec *pos, int convex, usho
         v.tc = vec(sgen.dot(v.pos), tgen.dot(v.pos), 0);
         if(vinfo && vinfo[k].norm)
         {
-            vec n = decodenormal(vinfo[k].norm), t = orientation_tangent[vslot.rotation][orient];
+            vec n = decodenormal(vinfo[k].norm), t = orientation_tangent[vslot.rotation][dim];
             t.project(n).normalize();
             v.norm = bvec(n);
-            v.tangent = bvec4(bvec(t), orientation_bitangent[vslot.rotation][orient].scalartriple(n, t) < 0 ? 0 : 255);
+            v.tangent = bvec4(bvec(t), orientation_bitangent[vslot.rotation][dim].scalartriple(n, t) < 0 ? 0 : 255);
         }
         else if(texture != DEFAULT_SKY)
         {
             if(!k) guessnormals(pos, numverts, normals);
             const vec &n = normals[k];
-            vec t = orientation_tangent[vslot.rotation][orient];
+            vec t = orientation_tangent[vslot.rotation][dim];
             t.project(n).normalize();
             v.norm = bvec(n);
-            v.tangent = bvec4(bvec(t), orientation_bitangent[vslot.rotation][orient].scalartriple(n, t) < 0 ? 0 : 255);
+            v.tangent = bvec4(bvec(t), orientation_bitangent[vslot.rotation][dim].scalartriple(n, t) < 0 ? 0 : 255);
         }
         else
         {
