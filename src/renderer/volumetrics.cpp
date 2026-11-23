@@ -18,7 +18,7 @@ namespace renderer
         extern int _sunvolcolour;
         extern bvec sunvolcolour;
         extern float volstrength, voldensity, volextinction, voldirectstrength, volindirectstrength, vollocalstrength, volmaxdistance,
-                     volheight, volthickness;
+                     volheight, volthickness, volskydistance;
         extern int volsteps, voluniformdensity, volresolution, voltemporal, volspatial, voldebug;
 
         namespace
@@ -184,12 +184,15 @@ namespace renderer
                 LOCALPARAM(worldmatrix, worldmatrix);
                 LOCALPARAM(camera, camera1->o);
                 binddepth(GL_TEXTURE0);
+                glActiveTexture_(GL_TEXTURE1);
+                glBindTexture(msaalight ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_RECTANGLE, msaalight ? msnormaltex : gnormaltex);
                 bindvolumetriclighting(2, 3, 7, csmcount, rhcount);
                 LOCALPARAMF(cvolFullSize, float(vieww), float(viewh), 1.0f/max(vieww, 1), 1.0f/max(viewh, 1));
                 LOCALPARAMF(cvolLowSize, float(volumetricwidth), float(volumetricheight), float(vieww)/volumetricwidth,
                             float(viewh)/volumetricheight);
                 LOCALPARAMF(cvolMedium, voldensity, volextinction, volstrength, voluniformdensity ? 1.0f : 0.0f);
                 LOCALPARAMF(cvolLayer, volheight, max(volthickness, 1.0f), volmaxdistance, float(volsteps));
+                LOCALPARAMF(cvolSky, volskydistance, 0.0f, 0.0f, 0.0f);
                 LOCALPARAMF(cvolLighting, voldirectstrength, volindirectstrength, float(csmcount), float(rhcount));
                 LOCALPARAMF(cvolLocalParams, vollocalstrength, 0.0f, 0.0f, 0.0f);
                 LOCALPARAMI(cvolLocalLightCount, localLightCount);
@@ -318,6 +321,10 @@ namespace renderer
         FVARFP(volmaxdistance, 1.0f, 1536.0f, 65536.0f, settingschanged());
         FVARFP(volheight, -65536.0f, 256.0f, 65536.0f, settingschanged());
         FVARFP(volthickness, 1.0f, 512.0f, 65536.0f, settingschanged());
+        // Fraction of volmaxdistance marched through background pixels. This is
+        // map-persistent so outdoor maps can retain strong ground-level shafts
+        // without washing out their sky, atmosphere or cloud layers.
+        FVARFR(volskydistance, 0.0f, 0.35f, 1.0f, settingschanged());
         VARFP(voluniformdensity, 0, 0, 1, settingschanged());
         CVARFR(sunvolcolour, 0, settingschanged());
         // 0 = full, 1 = half on each axis, 2 = quarter on each axis.
