@@ -280,14 +280,14 @@ namespace renderer
                 return true;
             }
 
-            bool bindtracetargets(int width, int height)
+            bool bindtracetargets(int width, int height, bool diagnostic)
             {
                 glBindFramebuffer_(GL_FRAMEBUFFER, reflectionfbo);
                 glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rawtexture, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, auxiliarytexture, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, hitnormaltexture, 0);
+                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, diagnostic ? auxiliarytexture : 0, 0);
+                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, diagnostic ? hitnormaltexture : 0, 0);
                 const GLenum drawbuffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-                glDrawBuffers_(3, drawbuffers);
+                glDrawBuffers_(diagnostic ? 3 : 1, drawbuffers);
                 if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 {
                     conoutf(CON_ERROR, "RT reflections: incomplete trace framebuffer");
@@ -354,7 +354,7 @@ namespace renderer
                 }
                 allocaterectangle(filteredtexture, resourcewidth, resourceheight, true);
                 allocaterectangle(upscaledtexture, resourcewidth, resourceheight, true);
-                if(!bindtracetargets(tracewidth, traceheight) ||
+                if(!bindtracetargets(tracewidth, traceheight, false) || !bindtracetargets(tracewidth, traceheight, true) ||
                    !bindhistorytargets(historytexture[0], historysurface[0], historyvalidation[0], resourcewidth, resourceheight, "history") ||
                    !bindtarget(filteredtexture, resourcewidth, resourceheight, "filter") ||
                    !bindtarget(upscaledtexture, resourcewidth, resourceheight, "filter scratch"))
@@ -373,10 +373,15 @@ namespace renderer
 
             bool tracereflections()
             {
-                if(!bindtracetargets(tracewidth, traceheight)) return false;
-                const char *shadername = profilertdetail && profilequeryactive >= 0 ?
-                                         (msaalight ? "rtreflectiontracemsprofile" : "rtreflectiontraceprofile") :
-                                         (msaalight ? "rtreflectiontracems" : "rtreflectiontrace");
+                bool diagnostic = rtdebug != 0;
+                if(!bindtracetargets(tracewidth, traceheight, diagnostic)) return false;
+                const char *shadername;
+                if(diagnostic) shadername = profilertdetail && profilequeryactive >= 0 ?
+                                            (msaalight ? "rtreflectiontracemsdebugprofile" : "rtreflectiontracedebugprofile") :
+                                            (msaalight ? "rtreflectiontracemsdebug" : "rtreflectiontracedebug");
+                else shadername = profilertdetail && profilequeryactive >= 0 ?
+                                  (msaalight ? "rtreflectiontracemsprofile" : "rtreflectiontraceprofile") :
+                                  (msaalight ? "rtreflectiontracems" : "rtreflectiontrace");
                 Shader *shader = useshaderbyname(shadername);
                 if(!shader || shader->isnull()) return false;
                 timer *reflectiontimer = begintimer("RT reflection tracing");
@@ -443,7 +448,6 @@ namespace renderer
                             rtdebug == 14 ? 1.0f : 0.0f);
                 bindgbuffer();
                 bindrectangle(GL_TEXTURE3, rawtexture);
-                bindrectangle(GL_TEXTURE4, auxiliarytexture);
                 bindrectangle(GL_TEXTURE5, historytexture[historyindex]);
                 bindrectangle(GL_TEXTURE6, historysurface[historyindex]);
                 bindrectangle(GL_TEXTURE7, historyvalidation[historyindex]);
@@ -472,7 +476,6 @@ namespace renderer
                     LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, rtdebug == 14 ? 1.0f : 0.0f);
                     bindgbuffer();
                     bindrectangle(GL_TEXTURE3, source);
-                    bindrectangle(GL_TEXTURE4, historyvalidation[historyindex]);
                     glActiveTexture_(GL_TEXTURE0);
                     screenquad(resourcewidth, resourceheight);
                     source = destination;
