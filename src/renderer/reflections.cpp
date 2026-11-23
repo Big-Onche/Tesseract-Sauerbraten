@@ -13,7 +13,7 @@ namespace renderer
     {
         extern float rtresolutionscale, rtmaxdistance, rtreflectionstrength, rtreflectionroughnesspower;
         extern float rtadaptivehigh, rtadaptivemedium, rtadaptivelow;
-        extern int rtadaptive, rtdenoise, rtspatialfilter, rtspecularhistory, rtspecularspatial, rtreconstruction, rtdebug;
+        extern int rtadaptive, rtdenoise, rtspatialfilter, rtspecularhistory, rtspecularspatial, rtreconstruction, debugrt;
         extern int profilert, profilertdetail, profilertwindow;
 
         namespace
@@ -373,7 +373,7 @@ namespace renderer
 
             bool tracereflections()
             {
-                bool diagnostic = rtdebug != 0;
+                bool diagnostic = debugrt != 0;
                 if(!bindtracetargets(tracewidth, traceheight, diagnostic)) return false;
                 const char *shadername;
                 if(diagnostic) shadername = profilertdetail && profilequeryactive >= 0 ?
@@ -387,7 +387,7 @@ namespace renderer
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, float(worldbvh::root()), rtdebug == 14 ? 1.0f : 0.0f);
+                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, float(worldbvh::root()), debugrt == 14 ? 1.0f : 0.0f);
                 LOCALPARAMF(rtTraceOptions, float(rtadaptive), float(worldbvh::materialcount()), hastexturedskybox() ? 1.0f : 0.0f,
                             getskyboxrotation());
                 LOCALPARAMF(rtAdaptiveParams, rtadaptivehigh, min(rtadaptivemedium, rtadaptivehigh),
@@ -457,8 +457,7 @@ namespace renderer
                 timer *temporaltimer = begintimer("RT reflection temporal");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtTemporalParams, historyvalid && rtdenoise ? 1.0f : 0.0f, float(rtspecularhistory), float(rtreconstruction),
-                            rtdebug == 14 ? 1.0f : 0.0f);
+                LOCALPARAMF(rtTemporalParams, historyvalid && rtdenoise ? 1.0f : 0.0f, float(rtspecularhistory), float(rtreconstruction), debugrt == 14 ? 1.0f : 0.0f);
                 bindgbuffer();
                 bindrectangle(GL_TEXTURE3, rawtexture);
                 bindrectangle(GL_TEXTURE5, historytexture[historyindex]);
@@ -486,7 +485,7 @@ namespace renderer
                     if(!bindtarget(destination, resourcewidth, resourceheight, "spatial filter")) return 0;
                     shader->set();
                     setcommonparams();
-                    LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, rtdebug == 14 ? 1.0f : 0.0f);
+                    LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, debugrt == 14 ? 1.0f : 0.0f);
                     bindgbuffer();
                     bindrectangle(GL_TEXTURE3, source);
                     glActiveTexture_(GL_TEXTURE0);
@@ -506,7 +505,7 @@ namespace renderer
                 timer *compositetimer = begintimer("RT reflection composition");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtDebugParams, float(rtdebug), rtmaxdistance, float(rtspecularhistory), 0.0f);
+                LOCALPARAMF(rtDebugParams, float(debugrt), rtmaxdistance, float(rtspecularhistory), 0.0f);
                 bindgbuffer();
                 bindrectangle(GL_TEXTURE3, filtered);
                 bindrectangle(GL_TEXTURE4, rawtexture);
@@ -515,22 +514,19 @@ namespace renderer
                 bindrectangle(GL_TEXTURE7, historysurface[historyindex]);
                 bindrectangle(GL_TEXTURE8, hitnormaltexture);
                 bindrectangle(GL_TEXTURE9, historyvalidation[historyindex]);
-                if(!rtdebug)
+                if(!debugrt)
                 {
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_ONE, GL_ONE);
                 }
                 glActiveTexture_(GL_TEXTURE0);
                 screenquad(resourcewidth, resourceheight);
-                if(!rtdebug) glDisable(GL_BLEND);
+                if(!debugrt) glDisable(GL_BLEND);
                 endtimer(compositetimer);
                 return true;
             }
         }
 
-        VARFP(profilert, 0, 0, 1, cleanupprofiler());
-        VARFP(profilertdetail, 0, 0, 1, cleanupprofiler());
-        VARFP(profilertwindow, 8, 120, PROFILE_MAX_SAMPLES, cleanupprofiler());
         VARFP(rtreflections, 0, 0, 1, settingschanged());
         FVARFP(rtresolutionscale, 0.25f, 0.5f, 1.0f, cleanup());
         VARFP(rtadaptive, 0, 1, 1, settingschanged());
@@ -544,10 +540,14 @@ namespace renderer
         VARFP(rtspatialfilter, 0, 1, 1, settingschanged());
         VARFP(rtspecularhistory, 1, 24, 64, settingschanged());
         VARFP(rtspecularspatial, 0, 2, 3, settingschanged());
-        VARFP(rtreconstruction, 0, 2, 2, settingschanged());
+        VARFP(rtreconstruction, 0, 1, 2, settingschanged());
         // 0 composite; 1 raw; 2 temporal; 3 spatial; 4 validity; 5 hit distance; 6 ray direction; 7 hit normal;
         // 8 traversal cost; 9 roughness; 10 allocation; 11 final contribution; 12 history length; 13 Fresnel weight; 14 perfect mirrors.
-        VARFP(rtdebug, 0, 0, 14, settingschanged());
+
+        VARFP(debugrt, 0, 0, 14, settingschanged());
+        VARFP(profilert, 0, 0, 1, cleanupprofiler());
+        VARFP(profilertdetail, 0, 0, 1, cleanupprofiler());
+        VARFP(profilertwindow, 8, 120, PROFILE_MAX_SAMPLES, cleanupprofiler());
 
         static void printstats()
         {
@@ -558,7 +558,7 @@ namespace renderer
                     rtspatialfilter ? "on" : "off", rtadaptive ? "on" : "off");
             conoutf("RT reflection sampling: deterministic sharp ray, reconstruction %d, history %d, spatial quality %d", rtreconstruction,
                     rtspecularhistory, rtspecularspatial);
-            conoutf("RT debug %d (0 composite, 1 raw, 2 temporal, 3 spatial, 4 validity, 5 distance, 6 direction, 7 hit normal)", rtdebug);
+            conoutf("RT debug %d (0 composite, 1 raw, 2 temporal, 3 spatial, 4 validity, 5 distance, 6 direction, 7 hit normal)", debugrt);
             conoutf("RT debug continued: 8 traversal, 9 roughness, 10 allocation, 11 final, 12 history length, 13 Fresnel, 14 perfect mirrors");
             conoutf("RT reflection geometry: opaque world BVH; alpha/refract use material fallback; mapmodels are absent from the M03 BVH");
             conoutf("RT reflection materials: bindless texture sampling %s, up to 32 visible colored local lights",
