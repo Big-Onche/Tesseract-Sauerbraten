@@ -439,7 +439,12 @@ namespace renderer
                 int destination = 1 - historyindex;
                 if(!bindhistorytargets(historytexture[destination], historysurface[destination], historyvalidation[destination], resourcewidth,
                                        resourceheight, "temporal")) return false;
-                Shader *shader = useshaderbyname(msaalight ? "rtreflectiontemporalms" : "rtreflectiontemporal");
+                static const char *shadernames[2][3] =
+                {
+                    { "rtreflectiontemporalq0", "rtreflectiontemporalq1", "rtreflectiontemporal" },
+                    { "rtreflectiontemporalmsq0", "rtreflectiontemporalmsq1", "rtreflectiontemporalms" }
+                };
+                Shader *shader = useshaderbyname(shadernames[msaalight ? 1 : 0][clamp(rtreconstruction, 0, 2)]);
                 if(!shader || shader->isnull()) return false;
                 timer *temporaltimer = begintimer("RT reflection temporal");
                 shader->set();
