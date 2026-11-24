@@ -18,7 +18,7 @@ namespace renderer
 
         namespace
         {
-            GLuint reflectionfbo = 0, rawtexture = 0, auxiliarytexture = 0, hitnormaltexture = 0, historytexture[2] = { 0, 0 },
+            GLuint reflectionfbo = 0, hitbuffer = 0, rawtexture = 0, auxiliarytexture = 0, hitnormaltexture = 0, historytexture[2] = { 0, 0 },
                    historysurface[2] = { 0, 0 }, historyvalidation[2] = { 0, 0 }, filteredtexture = 0, upscaledtexture = 0;
             int resourcewidth = -1, resourceheight = -1, tracewidth = 0, traceheight = 0, historyindex = 0;
             bool historyvalid = false;
@@ -343,6 +343,10 @@ namespace renderer
                 tracewidth = tw;
                 traceheight = th;
                 glGenFramebuffers_(1, &reflectionfbo);
+                glGenBuffers_(1, &hitbuffer);
+                glBindBuffer_(GL_SHADER_STORAGE_BUFFER, hitbuffer);
+                glBufferData_(GL_SHADER_STORAGE_BUFFER, GLsizeiptr(tracewidth)*traceheight*8*sizeof(uint), NULL, GL_STREAM_DRAW);
+                glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
                 allocaterectangle(rawtexture, tracewidth, traceheight, false);
                 allocaterectangle(auxiliarytexture, tracewidth, traceheight, false);
                 allocaterectangle(hitnormaltexture, tracewidth, traceheight, false);
@@ -375,13 +379,9 @@ namespace renderer
             {
                 bool diagnostic = debugrt != 0;
                 if(!bindtracetargets(tracewidth, traceheight, diagnostic)) return false;
-                const char *shadername;
-                if(diagnostic) shadername = profilertdetail && profilequeryactive >= 0 ?
-                                            (msaalight ? "rtreflectiontracemsdebugprofile" : "rtreflectiontracedebugprofile") :
-                                            (msaalight ? "rtreflectiontracemsdebug" : "rtreflectiontracedebug");
-                else shadername = profilertdetail && profilequeryactive >= 0 ?
-                                  (msaalight ? "rtreflectiontracemsprofile" : "rtreflectiontraceprofile") :
-                                  (msaalight ? "rtreflectiontracems" : "rtreflectiontrace");
+                bool detailed = profilertdetail && profilequeryactive >= 0;
+                const char *shadername = detailed ? (msaalight ? "rtreflectionhitmsprofile" : "rtreflectionhitprofile") :
+                                                    (msaalight ? "rtreflectionhitms" : "rtreflectionhit");
                 Shader *shader = useshaderbyname(shadername);
                 if(!shader || shader->isnull()) return false;
                 timer *reflectiontimer = begintimer("RT reflection tracing");
@@ -392,6 +392,26 @@ namespace renderer
                             getskyboxrotation());
                 LOCALPARAMF(rtAdaptiveParams, rtadaptivehigh, min(rtadaptivemedium, rtadaptivehigh),
                             min(rtadaptivelow, min(rtadaptivemedium, rtadaptivehigh)), 0.0f);
+                bindgbuffer();
+                worldbvh::bind();
+                glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, 6, hitbuffer);
+                glActiveTexture_(GL_TEXTURE0);
+                screenquad(tracewidth, traceheight);
+                glMemoryBarrier_(GL_SHADER_STORAGE_BARRIER_BIT);
+
+                if(diagnostic) shadername = detailed ? "rtreflectionshadedebugprofile" : "rtreflectionshadedebug";
+                else shadername = detailed ? "rtreflectionshadeprofile" : "rtreflectionshade";
+                shader = useshaderbyname(shadername);
+                if(!shader || shader->isnull())
+                {
+                    glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, 6, 0);
+                    endtimer(reflectiontimer);
+                    return false;
+                }
+                shader->set();
+                setcommonparams();
+                LOCALPARAMF(rtTraceOptions, float(rtadaptive), float(worldbvh::materialcount()), hastexturedskybox() ? 1.0f : 0.0f,
+                            getskyboxrotation());
                 vec direction = getdirectionallightdir();
                 const bvec &sun = getdirectionallightcolor();
                 float sunscale = 2.0f*ldrscaleb*getdirectionallightscale()*getdirectionallightvisibility();
@@ -425,11 +445,12 @@ namespace renderer
                 LOCALPARAM(rtSkyUp, skycolors[5]);
                 vec skytint = skyboxcolour.tocolor().mul(ldrscale);
                 LOCALPARAM(rtSkyTint, skytint);
-                bindgbuffer();
                 bindskyboxtextures(4);
                 worldbvh::bind();
+                glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, 6, hitbuffer);
                 glActiveTexture_(GL_TEXTURE0);
                 screenquad(tracewidth, traceheight);
+                glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, 6, 0);
                 endtimer(reflectiontimer);
                 return true;
             }
@@ -756,6 +777,7 @@ namespace renderer
             historyvalidation[0] = historyvalidation[1] = 0;
             filteredtexture = upscaledtexture = 0;
             if(reflectionfbo) { glDeleteFramebuffers_(1, &reflectionfbo); reflectionfbo = 0; }
+            if(hitbuffer) { glDeleteBuffers_(1, &hitbuffer); hitbuffer = 0; }
             resourcewidth = resourceheight = -1;
             tracewidth = traceheight = 0;
             historyindex = 0;
