@@ -13,6 +13,7 @@ namespace renderer
     {
         static const uint LEAF_BIT = 0x80000000u;
         static const int MAX_BUILD_DEPTH = 64;
+        static const float BVH_TRAVERSAL_COST = 1.0f, BVH_INTERSECTION_COST = 1.0f;
 
         struct Bounds
         {
@@ -47,9 +48,9 @@ namespace renderer
             float a[3];
             uint surface;
             float edge1[3];
-            uint flags;
+            uint reserved0;
             float edge2[3];
-            uint reserved;
+            uint blas;
         };
 
         struct GPUTriangleUV
@@ -72,7 +73,7 @@ namespace renderer
                       "GPUMaterial std430 offsets changed");
         static_assert(offsetof(GPUNode, data0) == 12 && offsetof(GPUNode, bmax) == 16 && offsetof(GPUNode, data1) == 28,
                       "GPUNode std430 offsets changed");
-        static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, edge1) == 16 && offsetof(GPUTriangle, flags) == 28 &&
+        static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, edge1) == 16 && offsetof(GPUTriangle, reserved0) == 28 &&
                           offsetof(GPUTriangle, edge2) == 32,
                       "GPUTriangle std430 offsets changed");
 
@@ -85,7 +86,7 @@ namespace renderer
 
         struct SourceTriangle
         {
-            uint vertex[3], surface, flags;
+            uint vertex[3], surface;
             Bounds bounds;
         };
 
@@ -130,7 +131,7 @@ namespace renderer
         VARFP(bvh, 0, 1, 1, settingchanged());
         VARP(bvhdebug, 0, 0, 7);
         VARFP(bvhbins, 4, 16, 64, settingchanged());
-        VARFP(bvhleafsize, 1, 4, 16, settingchanged());
+        VARFP(bvhleafsize, 2, 4, 4, settingchanged());
         FVARP(bvhepsilon, 0.00001f, 0.001f, 1.0f);
 
         template<class T>
@@ -156,7 +157,7 @@ namespace renderer
         }
 
         static void buildnodeat(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
-                                uint nodeIndex, vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
+                                uint nodeIndex, vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth, bool forceLeafSize)
         {
             maximumDepth = max(maximumDepth, depth);
             Bounds bounds, centroidBounds;
@@ -167,13 +168,17 @@ namespace renderer
             }
 
             setnodebounds(nodes[nodeIndex], bounds);
-
-            if(count <= uint(leafSize) || depth >= depthLimit)
+            auto makeleaf = [&]()
             {
                 uint first = uint(ordered.length());
                 for(uint i = start; i < start + count; ++i) ordered.add(primitives[i].reference);
                 nodes[nodeIndex].data0 = LEAF_BIT | first;
                 nodes[nodeIndex].data1 = count;
+            };
+
+            if(count <= uint(leafSize) || depth >= depthLimit)
+            {
+                makeleaf();
                 return;
             }
 
@@ -184,7 +189,7 @@ namespace renderer
                 Bin() : count(0) {}
             };
 
-            float bestCost = FLT_MAX;
+            float bestCost = FLT_MAX, inverseParentArea = 1.0f/max(bounds.area(), 1e-12f);
             int bestAxis = -1, bestSplit = -1;
             loopk(3)
             {
@@ -221,7 +226,8 @@ namespace renderer
                 for(int i = 0; i < bvhbins - 1; ++i)
                 {
                     if(!leftCounts[i] || !rightCounts[i]) continue;
-                    float cost = leftBounds[i].area()*leftCounts[i] + rightBounds[i].area()*rightCounts[i];
+                    float cost = BVH_TRAVERSAL_COST + BVH_INTERSECTION_COST*
+                                 (leftBounds[i].area()*leftCounts[i] + rightBounds[i].area()*rightCounts[i])*inverseParentArea;
                     if(cost < bestCost)
                     {
                         bestCost = cost;
@@ -229,6 +235,12 @@ namespace renderer
                         bestSplit = i;
                     }
                 }
+            }
+
+            if(!forceLeafSize && (bestAxis < 0 || bestCost >= BVH_INTERSECTION_COST*count))
+            {
+                makeleaf();
+                return;
             }
 
             uint middle = start + count/2;
@@ -256,20 +268,21 @@ namespace renderer
             nodes.add();
             nodes[nodeIndex].data0 = childPair;
             nodes[nodeIndex].data1 = 0;
-            buildnodeat(primitives, start, middle - start, leafSize, nodes, childPair, ordered, depth + 1, depthLimit, maximumDepth);
+            buildnodeat(primitives, start, middle - start, leafSize, nodes, childPair, ordered, depth + 1, depthLimit, maximumDepth,
+                        forceLeafSize);
             buildnodeat(primitives, middle, start + count - middle, leafSize, nodes, childPair + 1, ordered, depth + 1, depthLimit,
-                        maximumDepth);
+                        maximumDepth, forceLeafSize);
         }
 
         static void buildnode(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
-                              vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
+                              vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth, bool forceLeafSize = false)
         {
             ASSERT(nodes.empty());
             GPUNode padding = {};
             nodes.add();
             // Keep every allocated child pair 64-byte aligned, including the root's children.
             nodes.add(padding);
-            buildnodeat(primitives, start, count, leafSize, nodes, 0, ordered, depth, depthLimit, maximumDepth);
+            buildnodeat(primitives, start, count, leafSize, nodes, 0, ordered, depth, depthLimit, maximumDepth, forceLeafSize);
         }
 
         static uint flatteneddepth(const vector<GPUNode> &tlasNodes, uint nodeIndex, uint depth, const vector<uint> &orderedBlases,
@@ -285,17 +298,6 @@ namespace renderer
                        flatteneddepth(tlasNodes, node.data0 + 1, depth + 1, orderedBlases, activeRecords));
         }
 
-        static uint surfaceflags(const vtxarray &va, int element)
-        {
-            int blendStart = va.texs, alphaBackStart = blendStart + va.blends, alphaFrontStart = alphaBackStart + va.alphaback,
-                refractStart = alphaFrontStart + va.alphafront;
-            if(element >= refractStart) return MATERIAL_REFRACT | MATERIAL_DOUBLE_SIDED;
-            if(element >= alphaFrontStart) return MATERIAL_ALPHA_FRONT | MATERIAL_DOUBLE_SIDED;
-            if(element >= alphaBackStart) return MATERIAL_ALPHA_BACK | MATERIAL_DOUBLE_SIDED;
-            if(element >= blendStart) return MATERIAL_BLEND;
-            return MATERIAL_OPAQUE;
-        }
-
         static bool buildblas(BLASRecord &record, vtxarray &va)
         {
             record.nodes.shrink(0);
@@ -307,7 +309,7 @@ namespace renderer
 
             vector<SourceTriangle> sourceTriangles;
             uint indexOffset = 0;
-            int elementCount = va.texs + va.blends + va.alphaback + va.alphafront + va.refract;
+            int elementCount = va.texs;
             loopi(elementCount)
             {
                 const elementset &elements = va.texelems[i];
@@ -323,7 +325,6 @@ namespace renderer
                     SourceTriangle triangle;
                     triangle.vertex[0] = local[0]; triangle.vertex[1] = local[1]; triangle.vertex[2] = local[2];
                     triangle.surface = elements.texture;
-                    triangle.flags = surfaceflags(va, i);
                     triangle.bounds.include(a); triangle.bounds.include(b); triangle.bounds.include(c);
                     sourceTriangles.add(triangle);
                     record.bounds.include(triangle.bounds);
@@ -359,8 +360,8 @@ namespace renderer
                     destination.edge2[k] = c.pos[k] - a.pos[k];
                 }
                 destination.surface = source.surface;
-                destination.flags = source.flags;
-                destination.reserved = 0;
+                destination.reserved0 = 0;
+                destination.blas = 0;
                 GPUTriangleUV &triangleUV = record.triangleUVs[i];
                 triangleUV.texcoord[0][0] = a.tc.x; triangleUV.texcoord[0][1] = a.tc.y;
                 triangleUV.texcoord[1][0] = b.tc.x; triangleUV.texcoord[1][1] = b.tc.y;
@@ -559,19 +560,38 @@ namespace renderer
             if(!tlasPrimitives.empty())
             {
                 uint depthLimit = max(uint(MAX_BUILD_DEPTH), uint(activeRecords.length()));
-                buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit, tlasDepth);
+                buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit, tlasDepth, true);
             }
             stats.maximumDepth = tlasNodes.empty() ? 0 : flatteneddepth(tlasNodes, 0, 1, orderedBlases, activeRecords);
             traversalStackSize = max((stats.maximumDepth + 8u)&~7u, 8u);
 
             vector<uint> tlasLeaves;
             resizevector(tlasLeaves, activeRecords.length());
+            loopv(tlasLeaves) tlasLeaves[i] = ~0u;
+            bool validTLAS = true;
             loopv(tlasNodes)
             {
                 const GPUNode &node = tlasNodes[i];
                 if(!(node.data0&LEAF_BIT)) continue;
-                ASSERT(node.data1 == 1);
-                tlasLeaves[orderedBlases[node.data0&~LEAF_BIT]] = i;
+                uint orderedIndex = node.data0&~LEAF_BIT;
+                if(node.data1 != 1 || orderedIndex >= uint(orderedBlases.length()) ||
+                   orderedBlases[orderedIndex] >= uint(tlasLeaves.length()))
+                {
+                    validTLAS = false;
+                    break;
+                }
+                tlasLeaves[orderedBlases[orderedIndex]] = i;
+            }
+            loopv(tlasLeaves) if(tlasLeaves[i] == ~0u)
+            {
+                validTLAS = false;
+                break;
+            }
+            if(!validTLAS)
+            {
+                sceneReady = false;
+                conoutf(CON_ERROR, "failed to flatten BVH: TLAS leaves must contain exactly one BLAS");
+                return;
             }
 
             gpuNodes = tlasNodes;
@@ -596,7 +616,7 @@ namespace renderer
                 loopvj(record.triangles)
                 {
                     GPUTriangle triangle = record.triangles[j];
-                    triangle.reserved = i;
+                    triangle.blas = i;
                     gpuTriangles.add(triangle);
                 }
                 gpuTriangleUVs.put(record.triangleUVs.getbuf(), record.triangleUVs.length());

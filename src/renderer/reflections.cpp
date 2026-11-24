@@ -366,15 +366,21 @@ namespace renderer
                 bool detailed = profilertdetail && profilequeryactive >= 0;
                 static Shader *hitShaders[2][2] = { { NULL, NULL }, { NULL, NULL } };
                 static uint hitShaderStackSizes[2][2] = { { 0, 0 }, { 0, 0 } };
+                static bool hitShaderCounts[2][2] = { { false, false }, { false, false } };
                 int sampleType = msaalight ? 1 : 0, profileType = detailed ? 1 : 0;
                 uint stackSize = worldbvh::stacksize();
+                bool countTraversal = detailed || debugrt == 8;
                 Shader *&hitShader = hitShaders[sampleType][profileType];
-                if(!hitShader || hitShader->invalid() || hitShaderStackSizes[sampleType][profileType] != stackSize)
+                if(!hitShader || hitShader->invalid() || hitShaderStackSizes[sampleType][profileType] != stackSize ||
+                   hitShaderCounts[sampleType][profileType] != countTraversal)
                 {
-                    defformatstring(name, "rtreflectionhit%s%sstack%u", sampleType ? "ms" : "", profileType ? "profile" : "", stackSize);
-                    generateshader(NULL, "rtreflectionhitgen \"%s\" %d %d %u", name, sampleType, profileType, stackSize);
+                    defformatstring(name, "rtreflectionhit%s%s%sstack%u", sampleType ? "ms" : "", profileType ? "profile" : "",
+                                    countTraversal ? "count" : "", stackSize);
+                    generateshader(NULL, "rtreflectionhitgen \"%s\" %d %d %u %d", name, sampleType, profileType, stackSize,
+                                   countTraversal ? 1 : 0);
                     hitShader = useshaderbyname(name);
                     hitShaderStackSizes[sampleType][profileType] = stackSize;
+                    hitShaderCounts[sampleType][profileType] = countTraversal;
                 }
                 Shader *shader = hitShader;
                 if(!shader || shader->isnull()) return false;
