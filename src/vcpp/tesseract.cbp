@@ -108,6 +108,7 @@
 		<Unit filename="../../config/glsl/cortao.cfg" />
 		<Unit filename="../../config/glsl/hdr.cfg" />
 		<Unit filename="../../config/glsl/reflections.cfg" />
+		<Unit filename="../../config/glsl/skylight.cfg" />
 		<Unit filename="../../config/glsl/volumetrics.cfg" />
 		<Unit filename="../engine/aa.cpp" />
 		<Unit filename="../engine/acoustics.cpp" />
@@ -209,6 +210,8 @@
 		<Unit filename="../renderer/reflections.h" />
 		<Unit filename="../renderer/renderer.cpp" />
 		<Unit filename="../renderer/renderer.h" />
+		<Unit filename="../renderer/skylight.cpp" />
+		<Unit filename="../renderer/skylight.h" />
 		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/tonemap.cpp" />
 		<Unit filename="../renderer/volumetrics.cpp" />

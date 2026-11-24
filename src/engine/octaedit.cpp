@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "../renderer/skylight.h"
 
 extern int outline;
 
@@ -618,7 +619,7 @@ void changed(const ivec &bbmin, const ivec &bbmax, bool commit)
 {
     readychanges(bbmin, bbmax, worldroot, ivec(0, 0, 0), worldsize/2);
     haschanged = true;
-    invalidateskyvisibility(bbmin, bbmax);
+    renderer::skylight::invalidate(bbmin, bbmax);
 
     if(commit) commitchanges();
 }
@@ -630,7 +631,7 @@ void changed(const block3 &sel, bool commit)
          bbmax = ivec(sel.s).mul(sel.grid).add(sel.o).add(1);
     readychanges(bbmin, bbmax, worldroot, ivec(0, 0, 0), worldsize/2);
     haschanged = true;
-    invalidateskyvisibility(bbmin, bbmax);
+    renderer::skylight::invalidate(bbmin, bbmax);
 
     if(commit) commitchanges();
 }

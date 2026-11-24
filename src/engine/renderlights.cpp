@@ -3,6 +3,7 @@
 #include "../renderer/cortao.h"
 #include "../renderer/reflections.h"
 #include "../renderer/renderer.h"
+#include "../renderer/skylight.h"
 #include "../renderer/volumetrics.h"
 
 namespace lightdebug
@@ -103,179 +104,9 @@ GLuint msfbo = 0, msdepthtex = 0, mscolortex = 0, msnormaltex = 0, msglowtex = 0
 vector<vec2> msaapositions;
 int aow = -1, aoh = -1;
 GLuint aofbo[4] = { 0, 0, 0, 0 }, aotex[4] = { 0, 0, 0, 0 }, aonoisetex = 0;
-int skyvisw = -1, skyvish = -1, skyvisd = -1;
-GLuint skyvistex = 0;
-vector<uchar> skyvispixels;
-static int skyvisworldsize = -1;
-static bool skyvisdirty = false;
-static ivec skyvisdirtymin(0, 0, 0), skyvisdirtymax(0, 0, 0);
 matrix4 eyematrix, worldmatrix, linearworldmatrix, screenmatrix;
 
 extern int amd_pf_bug;
-
-static void setupskyvisibility();
-static void updateskyvisibility();
-static void cleanupskyvisibility();
-
-FVARR(skycubelight, 0, 1.75f, 4.0f);
-FVARR(skycubelightmin, 0, 0.05f, 1.0f);
-VARFP(skycubeocclusion, 0, 1, 1, cleanupskyvisibility());
-VARFP(skycubeocclreduce, 0, 4, 6, cleanupskyvisibility());
-FVARFP(skycubeoccloffset, 0, 2.0f, 64.0f, cleanupskyvisibility());
-FVARFP(skycubeocclmaxdist, 1, 65536.0f, 1e7f, cleanupskyvisibility());
-FVARFP(skycubeocclsoft, 0, 256.0f, 1e6f, cleanupskyvisibility());
-VARP(skycubeocclrate, 1, 1, 8);
-VARP(skycubeocclbatch, 1, 8, 1024);
-FVARP(skycubeocclblend, 0, 0.35f, 1.0f);
-ICOMMAND(rebuildskylightmap, "", (), { cleanupskyvisibility(); setupskyvisibility(); });
-
-static inline int calcskyvisibilityres()
-{
-    int mapsize = max(worldsize, 1);
-    return clamp(max(mapsize >> skycubeocclreduce, 4), 4, 64);
-}
-
-void invalidateskyvisibility()
-{
-    if(worldsize <= 0) return;
-    skyvisdirty = true;
-    skyvisdirtymin = ivec(0, 0, 0);
-    skyvisdirtymax = ivec(worldsize, worldsize, worldsize);
-}
-
-void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax)
-{
-    if(worldsize <= 0) return;
-    ivec dirtymin = bbmin, dirtymax = bbmax;
-    dirtymin.max(0);
-    dirtymax.min(worldsize);
-    if(dirtymin.x >= dirtymax.x || dirtymin.y >= dirtymax.y || dirtymin.z >= dirtymax.z) return;
-    if(!skyvisdirty)
-    {
-        skyvisdirty = true;
-        skyvisdirtymin = dirtymin;
-        skyvisdirtymax = dirtymax;
-    }
-    else
-    {
-        skyvisdirtymin.min(dirtymin);
-        skyvisdirtymax.max(dirtymax);
-    }
-}
-
-static inline uchar computeskyvisibilitysample(int x, int y, int z, float cell, float startoffset, float maxdist, float soft, const vec &up)
-{
-    vec start((x + 0.5f)*cell, (y + 0.5f)*cell, (z + 0.5f)*cell);
-    if(startoffset > 0.0f)
-    {
-        if(raycube(start, up, startoffset, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST) < startoffset) return 0;
-        start.madd(up, startoffset);
-    }
-    float updist = raycube(start, up, maxdist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
-    float skyvis = soft <= 1e-3f ? (updist >= maxdist ? 1.0f : 0.0f) : clamp((updist - (maxdist - soft)) / soft, 0.0f, 1.0f);
-    return uchar(clamp(int(skyvis*255.0f + 0.5f), 0, 255));
-}
-
-static void setupskyvisibility()
-{
-    int res = calcskyvisibilityres();
-    if(res == skyvisw && res == skyvish && res == skyvisd && skyvistex && skyvisworldsize == worldsize) return;
-
-    skyvisw = skyvish = skyvisd = res;
-    int total = skyvisw*skyvish*skyvisd;
-    skyvispixels.setsize(0);
-    skyvispixels.reserve(total);
-    skyvispixels.advance(total);
-
-    if(!skycubeocclusion)
-    {
-        memset(skyvispixels.getbuf(), 255, total);
-    }
-    else
-    {
-        float maxdist = max(skycubeocclmaxdist, 1.0f);
-        float startoffset = max(skycubeoccloffset, 0.0f);
-        float soft = max(skycubeocclsoft, 0.0f);
-        vec up(0, 0, 1);
-        float mapsize = float(max(worldsize, 1));
-        float cell = mapsize / float(res);
-
-        loop(z, skyvisd)
-        {
-            float wz = (z + 0.5f) * cell;
-            loop(y, skyvish)
-            {
-                float wy = (y + 0.5f) * cell;
-                loop(x, skyvisw)
-                {
-                    skyvispixels[(z*skyvish + y)*skyvisw + x] = computeskyvisibilitysample(x, y, z, cell, startoffset, maxdist, soft, up);
-                }
-            }
-        }
-    }
-
-    if(!skyvistex) glGenTextures(1, &skyvistex);
-    create3dtexture(skyvistex, skyvisw, skyvish, skyvisd, skyvispixels.getbuf(), 7, 1, hasTRG ? GL_R8 : GL_LUMINANCE8);
-    skyvisworldsize = worldsize;
-    skyvisdirty = false;
-}
-
-static void updateskyvisibility()
-{
-    if(!skyvisdirty) return;
-    skyvisdirty = false;
-    if(!skyvistex || skyvisw <= 0 || skyvish <= 0 || skyvisd <= 0 || worldsize <= 0 || skyvispixels.empty()) return;
-    if(!skycubeocclusion) return;
-
-    float mapsize = float(max(worldsize, 1));
-    float xscale = skyvisw / mapsize, yscale = skyvish / mapsize, zscale = skyvisd / mapsize;
-    int x1 = clamp(int(floor(skyvisdirtymin.x*xscale)) - 1, 0, skyvisw - 1),
-        y1 = clamp(int(floor(skyvisdirtymin.y*yscale)) - 1, 0, skyvish - 1),
-        z1 = 0;
-    int x2 = clamp(int(ceil(skyvisdirtymax.x*xscale)) + 1, 1, skyvisw),
-        y2 = clamp(int(ceil(skyvisdirtymax.y*yscale)) + 1, 1, skyvish),
-        z2 = clamp(int(ceil(skyvisdirtymax.z*zscale)) + 1, 1, skyvisd);
-    if(x1 >= x2 || y1 >= y2 || z1 >= z2) return;
-
-    float maxdist = max(skycubeocclmaxdist, 1.0f);
-    float startoffset = max(skycubeoccloffset, 0.0f);
-    float soft = max(skycubeocclsoft, 0.0f);
-    float cell = mapsize / float(skyvisw);
-    vec up(0, 0, 1);
-
-    int w = x2 - x1, h = y2 - y1, d = z2 - z1, total = w*h*d;
-    vector<uchar> subpixels;
-    subpixels.setsize(0);
-    subpixels.reserve(total);
-    subpixels.advance(total);
-    int i = 0;
-    for(int z = z1; z < z2; z++) for(int y = y1; y < y2; y++) for(int x = x1; x < x2; x++)
-    {
-        uchar skyvis = computeskyvisibilitysample(x, y, z, cell, startoffset, maxdist, soft, up);
-        skyvispixels[(z*skyvish + y)*skyvisw + x] = skyvis;
-        subpixels[i++] = skyvis;
-    }
-
-    if(glTexSubImage3D_)
-    {
-        GLint unpack = 4;
-        glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
-        if(unpack != 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glBindTexture(GL_TEXTURE_3D, skyvistex);
-        glTexSubImage3D_(GL_TEXTURE_3D, 0, x1, y1, z1, w, h, d, hasTRG ? GL_RED : GL_LUMINANCE, GL_UNSIGNED_BYTE, subpixels.getbuf());
-        if(unpack != 1) glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
-    }
-    else create3dtexture(skyvistex, skyvisw, skyvish, skyvisd, skyvispixels.getbuf(), 7, 1, hasTRG ? GL_R8 : GL_LUMINANCE8);
-}
-
-static void cleanupskyvisibility()
-{
-    if(skyvistex) { glDeleteTextures(1, &skyvistex); skyvistex = 0; }
-    skyvisw = skyvish = skyvisd = -1;
-    skyvisworldsize = -1;
-    skyvisdirty = false;
-    skyvispixels.setsize(0);
-}
 
 int gethdrformat(int prec, int fallback = GL_RGB)
 {
@@ -287,10 +118,6 @@ int gethdrformat(int prec, int fallback = GL_RGB)
 
 extern int ao, aobackend, aotaps, aoreduce, aoreducedepth, aonoise, aobilateral, aobilateralupscale, aopackdepth, aodepthformat, aoprec,
            aoderivnormal;
-extern float skycubelight;
-extern int skycubeocclusion, skycubeocclreduce, skycubeocclblur, skycubeocclblurpasses;
-extern float skycubeoccloffset, skycubeocclmaxdist, skycubeocclsoft;
-
 static Shader *bilateralshader[2] = { NULL, NULL };
 
 Shader *loadbilateralshader(int pass)
@@ -341,9 +168,6 @@ void setbilateralshader(int radius, int pass, float depth)
 
 static Shader *ambientobscuranceshader = NULL;
 static bool cortaoactive = false;
-
-static void setupskyvisibility();
-static void cleanupskyvisibility();
 
 Shader *loadambientobscuranceshader()
 {
@@ -2560,20 +2384,8 @@ void bindvolumetriclighting(int shadowunit, int rhunit, int skyunit, int &csmcou
     }
     if(rhcount) rh.bindparams();
 
-    glActiveTexture_(GL_TEXTURE0 + skyunit);
-    glBindTexture(GL_TEXTURE_3D, skyvistex);
-    if(skyvistex && skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
-    {
-        float invworld = 1.0f/float(worldsize);
-        GLOBALPARAMF(skyocclscale, invworld*(1.0f - 1.0f/skyvisw), invworld*(1.0f - 1.0f/skyvish),
-                     invworld*(1.0f - 1.0f/skyvisd));
-        GLOBALPARAMF(skyoccloffset, 0.5f/skyvisw, 0.5f/skyvish, 0.5f/skyvisd);
-    }
-    else
-    {
-        GLOBALPARAMF(skyocclscale, 0.0f, 0.0f, 0.0f);
-        GLOBALPARAMF(skyoccloffset, 0.0f, 0.0f, 0.0f);
-    }
+    renderer::skylight::bindtexture(skyunit);
+    renderer::skylight::bindocclusionparams();
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
     float lightscale = 2.0f*ldrscaleb;
     GLOBALPARAMF(cvolambientcolor, giaoscale*skylight.x*lightscale*skylightscale,
@@ -2964,8 +2776,7 @@ static void bindlighttexs(int msaapass = 0, bool transparent = false)
         glActiveTexture_(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_RECTANGLE, smfilter ? shadowfiltertex : shadowcolortex);
     }
-    glActiveTexture_(GL_TEXTURE12);
-    glBindTexture(GL_TEXTURE_3D, skyvistex);
+    renderer::skylight::bindtexture(12);
     if((uselocalpcss() || (usecsmpcss() && csm.rendered)) && drawtex != DRAWTEX_MINIMAP)
     {
         if(!csmpcsssampler)
@@ -2992,43 +2803,7 @@ static inline void setlightglobals(bool transparent = false)
     GLOBALPARAMF(pbrparams, renderer::pbrroughnessscale, renderer::pbrspecularscale);
     GLOBALPARAMF(localpcssadaptive, localpcssadaptive);
     GLOBALPARAMF(shadowatlasscale, 1.0f/shadowatlaspacker.w, 1.0f/shadowatlaspacker.h);
-    if(skyvisw > 0 && skyvish > 0 && skyvisd > 0 && worldsize > 0)
-    {
-        float invworld = 1.0f / float(worldsize);
-        GLOBALPARAMF(
-            skyocclscale,
-            invworld*(1.0f - 1.0f/skyvisw),
-            invworld*(1.0f - 1.0f/skyvish),
-            invworld*(1.0f - 1.0f/skyvisd)
-        );
-        GLOBALPARAMF(
-            skyoccloffset,
-            0.5f/skyvisw,
-            0.5f/skyvish,
-            0.5f/skyvisd
-        );
-    }
-    else
-    {
-        GLOBALPARAMF(skyocclscale, 0.0f, 0.0f, 0.0f);
-        GLOBALPARAMF(skyoccloffset, 0.0f, 0.0f, 0.0f);
-    }
-
-    vec skycube[6];
-    vec2 skyfront;
-    getskycubetints(skycube, skyfront);
-    GLOBALPARAM(skylf, skycube[0]);
-    GLOBALPARAM(skyrt, skycube[1]);
-    GLOBALPARAM(skybk, skycube[2]);
-    GLOBALPARAM(skyft, skycube[3]);
-    GLOBALPARAM(skydn, skycube[4]);
-    GLOBALPARAM(skyup, skycube[5]);
-    GLOBALPARAMF(skyfront, skyfront.x, skyfront.y);
-    GLOBALPARAMF(
-        skyambientparams,
-        (drawtex || (editmode && fullbright)) ? 0.0f : clamp(skycubelight, 0.0f, 4.0f),
-        clamp(skycubelightmin, 0.0f, 1.0f)
-    );
+    renderer::skylight::bindambientparams();
 
     if(ao)
     {
@@ -5409,9 +5184,7 @@ void setuplights()
 {
     GLERROR;
     setupgbuffer();
-    int skyvisres = calcskyvisibilityres();
-    if(!skyvistex || skyvisw != skyvisres || skyvish != skyvisres || skyvisd != skyvisres || skyvisworldsize != worldsize) setupskyvisibility();
-    else updateskyvisibility();
+    renderer::skylight::setup();
     if(ao && (aow < 0 || aoh < 0)) setupao(gw, gh);
     if(!shadowatlasfbo) setupshadowatlas();
     if(useradiancehints() && !rhfbo) setupradiancehints();
@@ -5441,7 +5214,7 @@ void cleanuplights()
 {
     renderer::worldbvh::cleanup();
     cleanupgbuffer();
-    cleanupskyvisibility();
+    renderer::skylight::cleanup();
     cleanupao();
     cleanupvolumetric();
     cleanupshadowatlas();

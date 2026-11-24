@@ -100,6 +100,9 @@
     <ClCompile Include="..\engine\renderlights.cpp">
       <Filter>engine</Filter>
     </ClCompile>
+    <ClCompile Include="..\renderer\skylight.cpp">
+      <Filter>renderer</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\rendersky.cpp">
       <Filter>engine</Filter>
     </ClCompile>
@@ -276,12 +279,20 @@
     <ClInclude Include="..\shared\tools.h">
       <Filter>shared</Filter>
     </ClInclude>
+    <ClInclude Include="..\renderer\skylight.h">
+      <Filter>renderer</Filter>
+    </ClInclude>
     <ClInclude Include="..\engine\vertmodel.h">
       <Filter>engine</Filter>
     </ClInclude>
     <ClInclude Include="..\engine\world.h">
       <Filter>engine</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\config\glsl\skylight.cfg">
+      <Filter>config</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="tesseract.rc" />
@@ -295,6 +306,12 @@
     </Filter>
     <Filter Include="game">
       <UniqueIdentifier>{9b7a70df-c8ed-4662-8380-4ffe119eb216}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="renderer">
+      <UniqueIdentifier>{24d901c6-178f-4d6c-98fc-2f3ae0b25e36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="config">
+      <UniqueIdentifier>{734de7fe-b094-4fb9-81df-c7521daf4749}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

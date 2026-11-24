@@ -2,6 +2,7 @@
 
 #include "engine.h"
 #include "../renderer/bvh.h"
+#include "../renderer/skylight.h"
 
 struct vboinfo
 {
@@ -1747,7 +1748,7 @@ void allchanged(bool load)
     setupmaterials();
     clearshadowcache();
     updatevabbs(true);
-    invalidateskyvisibility();
+    renderer::skylight::invalidate();
     if(load)
     {
         genshadowmeshes();

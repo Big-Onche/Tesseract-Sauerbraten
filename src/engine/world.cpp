@@ -1,6 +1,7 @@
 // world.cpp: core map management stuff
 
 #include "engine.h"
+#include "../renderer/skylight.h"
 
 VARR(mapversion, 1, MAPVERSION, 0);
 VARNR(mapscale, worldscale, 1, 0, 0);
@@ -239,7 +240,7 @@ static bool modifyoctaent(int flags, int id, extentity &e)
             break;
         case ET_SPOTLIGHT: if(!(flags&MODOE_ADD ? spotlights++ : --spotlights)) cleardeferredlightshaders(); break;
         case ET_PARTICLES: clearparticleemitters(); break;
-        case ET_MAPMODEL: if(flags&MODOE_CHANGED) invalidateskyvisibility(o, r); break;
+        case ET_MAPMODEL: if(flags&MODOE_CHANGED) renderer::skylight::invalidate(o, r); break;
         case ET_DECAL: if(flags&MODOE_CHANGED) changed(o, r, false); break;
     }
     return true;

@@ -127,6 +127,7 @@ CLIENT_OBJS= \
 	renderer/pbr.o \
 	renderer/reflections.o \
 	renderer/renderer.o \
+	renderer/skylight.o \
 	renderer/tonemap.o \
 	renderer/volumetrics.o \
 	game/ai.o \

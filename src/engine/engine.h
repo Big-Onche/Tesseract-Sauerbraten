@@ -289,8 +289,6 @@ extern matrix4 shadowmatrix;
 extern void loaddeferredlightshaders();
 extern void cleardeferredlightshaders();
 extern void clearshadowcache();
-extern void invalidateskyvisibility();
-extern void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax);
 extern GLuint shadowatlastex;
 extern GLenum shadowatlastarget;
 extern int csmshadowmap, csmsplits;
