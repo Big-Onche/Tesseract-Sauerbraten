@@ -376,7 +376,9 @@ namespace renderer
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();
                 setcommonparams();
-                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, float(worldbvh::root()), debugrt == 14 ? 1.0f : 0.0f);
+                LOCALPARAMF(rtTraceParams, rtmaxdistance, 1.0f/65536.0f, 0.0f, debugrt == 14 ? 1.0f : 0.0f);
+                static LocalShaderParam rtRoot("rtRoot");
+                rtRoot.setu(worldbvh::root());
                 LOCALPARAMF(rtTraceOptions, float(rtadaptive), float(worldbvh::materialcount()), hastexturedskybox() ? 1.0f : 0.0f,
                             getskyboxrotation());
                 LOCALPARAMF(rtAdaptiveParams, rtadaptivehigh, min(rtadaptivemedium, rtadaptivehigh),
