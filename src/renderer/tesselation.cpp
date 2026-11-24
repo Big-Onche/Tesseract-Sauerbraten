@@ -10,11 +10,22 @@ VARFP(tesselationfixed, 1, 4, 64,
 {
     if(tesselationmaxlevel > 0) tesselationfixed = min(tesselationfixed, tesselationmaxlevel);
 });
+VARP(tesselationadaptive, 0, 1, 1);
+VARP(tesselationmin, 1, 1, 64);
+VARFP(tesselationmax, 1, 64, 64,
+{
+    if(tesselationmaxlevel > 0) tesselationmax = min(tesselationmax, tesselationmaxlevel);
+});
+FVARP(tesselationpixels, 1.0f, 8.0f, 256.0f);
+FVARP(tesselationtexels, 1.0f, 8.0f, 256.0f);
+FVARP(tesselationworld, 1.0f, 32.0f, 4096.0f);
 FVARP(tesselationscale, 0.0f, 1.0f, 16.0f);
 FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
+VARP(tesselationautolod, 0, 1, 1);
+FVARP(tesselationlodbias, -4.0f, -0.5f, 4.0f);
 VARP(tesselationdisplacement, 0, 1, 1);
-// 0 = off, 1 = wireframe, 2 = sampled height, 3 = normalized displacement magnitude
-VARP(tesselationdebug, 0, 0, 3);
+// 0 off, 1 generated grid, 2 height, 3 displacement, 4 base edges, 5 factors, 6 hardware limit, 7 density, 8 mip
+VARP(tesselationdebug, 0, 0, 8);
 
 extern void *getprocaddress(const char *name);
 extern bool hasext(const char *ext);
@@ -51,6 +62,7 @@ namespace renderer
             }
 
             tesselationfixed = clamp(tesselationfixed, 1, tesselationmaxlevel);
+            tesselationmax = clamp(tesselationmax, 1, tesselationmaxlevel);
             conoutf(CON_INIT, "Hardware tessellation: available (max level %d, max patch vertices %d)", tesselationmaxlevel,
                     tesselationmaxpatchvertices);
         }
@@ -116,16 +128,23 @@ namespace renderer
         {
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
 
-            Texture *diffuse = NULL;
-            loopv(slot.sts) if(slot.sts[i].type == TEX_DIFFUSE)
+            Texture *diffuse = NULL, *normal = NULL;
+            loopv(slot.sts)
             {
-                diffuse = slot.sts[i].t;
-                break;
+                if(slot.sts[i].type == TEX_DIFFUSE) diffuse = slot.sts[i].t;
+                else if(slot.sts[i].type == TEX_NORMAL) normal = slot.sts[i].t;
             }
             float worldperuv = diffuse && diffuse != notexture ? vslot.scale*(diffuse->xs + diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
             bool active = displacing() && worldperuv > 0.0f;
             LOCALPARAMF(tessparams, active ? worldperuv*tesselationscale : 0.0f, float(tesselationdebug), tesselationheightlod,
                         active ? 1.0f : 0.0f);
+            LOCALPARAMF(tessadaptiveparams, float(clamp(tesselationmin, 1, tesselationmaxlevel)),
+                        float(clamp(tesselationmax, 1, tesselationmaxlevel)), tesselationpixels, tesselationtexels);
+            LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive ? 1.0f : 0.0f,
+                        tesselationautolod ? 1.0f : 0.0f, tesselationlodbias);
+            LOCALPARAMF(tessviewparams, 0.5f*vieww, 0.5f*viewh, float(tesselationmaxlevel), 0.0f);
+            LOCALPARAMF(tessmapsize, normal && normal != notexture ? float(normal->xs) : 1.0f,
+                        normal && normal != notexture ? float(normal->ys) : 1.0f);
         }
 
         bool beginwireframe()
