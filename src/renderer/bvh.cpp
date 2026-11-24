@@ -57,15 +57,6 @@ namespace renderer
             float texcoord[3][2];
         };
 
-        struct GPUBlas
-        {
-            float bmin[3];
-            uint root;
-            float bmax[3];
-            uint triangleOffset;
-            uint triangleCount, triangleUVOffset, triangleUVCount, reserved;
-        };
-
         struct GPUMaterial
         {
             uint diffuseHandle[2], glowHandle[2];
@@ -76,7 +67,6 @@ namespace renderer
         static_assert(sizeof(GPUNode) == 32, "GPUNode must match the std430 BVHNode layout");
         static_assert(sizeof(GPUTriangle) == 48, "GPUTriangle must match the std430 BVHTriangle layout");
         static_assert(sizeof(GPUTriangleUV) == 24, "GPUTriangleUV must match the std430 BVHTriangleUV layout");
-        static_assert(sizeof(GPUBlas) == 48, "GPUBlas must match the std430 BVHBlas layout");
         static_assert(sizeof(GPUMaterial) == 48, "GPUMaterial must match the std430 BVHMaterial layout");
         static_assert(offsetof(GPUMaterial, albedo) == 16 && offsetof(GPUMaterial, emission) == 32,
                       "GPUMaterial std430 offsets changed");
@@ -85,8 +75,6 @@ namespace renderer
         static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, edge1) == 16 && offsetof(GPUTriangle, flags) == 28 &&
                           offsetof(GPUTriangle, edge2) == 32,
                       "GPUTriangle std430 offsets changed");
-        static_assert(offsetof(GPUBlas, root) == 12 && offsetof(GPUBlas, bmax) == 16 && offsetof(GPUBlas, triangleOffset) == 28,
-                      "GPUBlas std430 offsets changed");
 
         struct BuildPrimitive
         {
@@ -130,11 +118,9 @@ namespace renderer
         static vector<GPUNode> gpuNodes;
         static vector<GPUTriangle> gpuTriangles;
         static vector<GPUTriangleUV> gpuTriangleUVs;
-        static vector<GPUBlas> gpuBlases;
-        static vector<uint> gpuInstances;
         static vector<GPUMaterial> gpuMaterials;
         static vector<GLuint64> residentHandles;
-        static GLuint buffers[6] = { 0, 0, 0, 0, 0, 0 };
+        static GLuint buffers[4] = { 0, 0, 0, 0 };
         static Statistics stats;
         static bool sceneReady = false, forceRebuild = true;
         static uint tlasRoot = 0;
@@ -169,7 +155,7 @@ namespace renderer
         }
 
         static uint buildnode(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
-                              vector<uint> &ordered, uint depth, uint &maximumDepth)
+                              vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
         {
             maximumDepth = max(maximumDepth, depth);
             Bounds bounds, centroidBounds;
@@ -183,7 +169,7 @@ namespace renderer
             nodes.add();
             setnodebounds(nodes[nodeIndex], bounds);
 
-            if(count <= uint(leafSize) || depth >= MAX_BUILD_DEPTH)
+            if(count <= uint(leafSize) || depth >= depthLimit)
             {
                 uint first = uint(ordered.length());
                 for(uint i = start; i < start + count; ++i) ordered.add(primitives[i].reference);
@@ -265,11 +251,20 @@ namespace renderer
                           [axis](const BuildPrimitive &a, const BuildPrimitive &b) { return a.centroid[axis] < b.centroid[axis]; });
             }
 
-            uint left = buildnode(primitives, start, middle - start, leafSize, nodes, ordered, depth + 1, maximumDepth);
-            uint right = buildnode(primitives, middle, start + count - middle, leafSize, nodes, ordered, depth + 1, maximumDepth);
+            uint left = buildnode(primitives, start, middle - start, leafSize, nodes, ordered, depth + 1, depthLimit, maximumDepth);
+            uint right = buildnode(primitives, middle, start + count - middle, leafSize, nodes, ordered, depth + 1, depthLimit, maximumDepth);
             nodes[nodeIndex].data0 = left;
             nodes[nodeIndex].data1 = right;
             return nodeIndex;
+        }
+
+        static uint flattentlaschild(uint child, const vector<GPUNode> &tlasNodes, const vector<uint> &tlasRemap,
+                                     const vector<uint> &orderedBlases, const vector<uint> &blasRoots)
+        {
+            const GPUNode &node = tlasNodes[child];
+            if(!(node.data0&LEAF_BIT)) return tlasRemap[child];
+            ASSERT(node.data1 == 1);
+            return blasRoots[orderedBlases[node.data0&~LEAF_BIT]];
         }
 
         static uint surfaceflags(const vtxarray &va, int element)
@@ -328,7 +323,7 @@ namespace renderer
             }
             vector<uint> ordered;
             uint maximumDepth = 0;
-            buildnode(primitives, 0, uint(primitives.length()), bvhleafsize, record.nodes, ordered, 1, maximumDepth);
+            buildnode(primitives, 0, uint(primitives.length()), bvhleafsize, record.nodes, ordered, 1, MAX_BUILD_DEPTH, maximumDepth);
             stats.maximumDepth = max(stats.maximumDepth, maximumDepth);
             resizevector(record.triangles, ordered.length());
             resizevector(record.triangleUVs, ordered.length());
@@ -369,19 +364,16 @@ namespace renderer
 
         static void upload()
         {
-            if(!buffers[0]) glGenBuffers_(6, buffers);
+            if(!buffers[0]) glGenBuffers_(4, buffers);
             int start = getclockmillis();
             uploadbuffer(0, gpuNodes.empty() ? NULL : gpuNodes.getbuf(), gpuNodes.length()*sizeof(GPUNode));
             uploadbuffer(1, gpuTriangles.empty() ? NULL : gpuTriangles.getbuf(), gpuTriangles.length()*sizeof(GPUTriangle));
             uploadbuffer(2, gpuTriangleUVs.empty() ? NULL : gpuTriangleUVs.getbuf(), gpuTriangleUVs.length()*sizeof(GPUTriangleUV));
-            uploadbuffer(3, gpuBlases.empty() ? NULL : gpuBlases.getbuf(), gpuBlases.length()*sizeof(GPUBlas));
-            uploadbuffer(4, gpuInstances.empty() ? NULL : gpuInstances.getbuf(), gpuInstances.length()*sizeof(uint));
-            uploadbuffer(5, gpuMaterials.empty() ? NULL : gpuMaterials.getbuf(), gpuMaterials.length()*sizeof(GPUMaterial));
+            uploadbuffer(3, gpuMaterials.empty() ? NULL : gpuMaterials.getbuf(), gpuMaterials.length()*sizeof(GPUMaterial));
             glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
             stats.uploadMillis = getclockmillis() - start;
             stats.gpuBytes = gpuNodes.length()*sizeof(GPUNode) + gpuTriangles.length()*sizeof(GPUTriangle) +
-                             gpuTriangleUVs.length()*sizeof(GPUTriangleUV) + gpuBlases.length()*sizeof(GPUBlas) +
-                             gpuInstances.length()*sizeof(uint) + gpuMaterials.length()*sizeof(GPUMaterial);
+                             gpuTriangleUVs.length()*sizeof(GPUTriangleUV) + gpuMaterials.length()*sizeof(GPUMaterial);
         }
 
         static const float *findmaterialparam(const VSlot &vslot, const char *name)
@@ -543,33 +535,50 @@ namespace renderer
                 tlasPrimitives[i].reference = i;
             }
             vector<GPUNode> tlasNodes;
-            vector<uint> orderedInstances;
+            vector<uint> orderedBlases;
             uint tlasDepth = 0;
+            uint tlasBuildRoot = 0;
             if(!tlasPrimitives.empty())
-                tlasRoot = buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedInstances, 1, tlasDepth);
+            {
+                uint depthLimit = max(uint(MAX_BUILD_DEPTH), uint(activeRecords.length()));
+                tlasBuildRoot = buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit,
+                                          tlasDepth);
+            }
             stats.maximumDepth = max(stats.maximumDepth, tlasDepth);
 
-            gpuNodes = tlasNodes;
+            vector<uint> tlasRemap;
+            resizevector(tlasRemap, tlasNodes.length());
+            uint tlasInnerCount = 0;
+            loopv(tlasNodes) if(!(tlasNodes[i].data0&LEAF_BIT)) tlasRemap[i] = tlasInnerCount++;
+
+            vector<uint> blasRoots;
+            resizevector(blasRoots, activeRecords.length());
+            uint nextNode = tlasInnerCount;
+            loopv(activeRecords)
+            {
+                blasRoots[i] = nextNode;
+                nextNode += uint(records[activeRecords[i]].nodes.length());
+            }
+
+            gpuNodes.shrink(0);
+            resizevector(gpuNodes, tlasInnerCount);
+            loopv(tlasNodes)
+            {
+                const GPUNode &source = tlasNodes[i];
+                if(source.data0&LEAF_BIT) continue;
+                GPUNode &destination = gpuNodes[tlasRemap[i]];
+                destination = source;
+                destination.data0 = flattentlaschild(source.data0, tlasNodes, tlasRemap, orderedBlases, blasRoots);
+                destination.data1 = flattentlaschild(source.data1, tlasNodes, tlasRemap, orderedBlases, blasRoots);
+            }
+            tlasRoot = tlasNodes.empty() ? 0 : flattentlaschild(tlasBuildRoot, tlasNodes, tlasRemap, orderedBlases, blasRoots);
+
             gpuTriangles.shrink(0);
             gpuTriangleUVs.shrink(0);
-            gpuBlases.shrink(0);
-            gpuInstances = orderedInstances;
             loopv(activeRecords)
             {
                 BLASRecord &record = records[activeRecords[i]];
-                GPUBlas descriptor;
-                loopk(3)
-                {
-                    descriptor.bmin[k] = record.bounds.minimum[k];
-                    descriptor.bmax[k] = record.bounds.maximum[k];
-                }
-                descriptor.root = uint(gpuNodes.length());
-                descriptor.triangleOffset = uint(gpuTriangles.length());
-                descriptor.triangleCount = uint(record.triangles.length());
-                descriptor.triangleUVOffset = uint(gpuTriangleUVs.length());
-                descriptor.triangleUVCount = uint(record.triangleUVs.length());
-                descriptor.reserved = 0;
-                uint nodeOffset = uint(gpuNodes.length());
+                uint nodeOffset = blasRoots[i], triangleOffset = uint(gpuTriangles.length());
                 loopvj(record.nodes)
                 {
                     GPUNode node = record.nodes[j];
@@ -578,26 +587,30 @@ namespace renderer
                         node.data0 += nodeOffset;
                         node.data1 += nodeOffset;
                     }
-                    else node.data0 = LEAF_BIT | ((node.data0&~LEAF_BIT) + descriptor.triangleOffset);
+                    else node.data0 = LEAF_BIT | ((node.data0&~LEAF_BIT) + triangleOffset);
                     gpuNodes.add(node);
                 }
-                gpuTriangles.put(record.triangles.getbuf(), record.triangles.length());
+                loopvj(record.triangles)
+                {
+                    GPUTriangle triangle = record.triangles[j];
+                    triangle.reserved = i;
+                    gpuTriangles.add(triangle);
+                }
                 gpuTriangleUVs.put(record.triangleUVs.getbuf(), record.triangleUVs.length());
-                gpuBlases.add(descriptor);
             }
 
             buildmaterials();
 
             stats.triangles = uint(gpuTriangles.length());
-            stats.blasCount = uint(gpuBlases.length());
-            stats.tlasNodes = uint(tlasNodes.length());
+            stats.blasCount = uint(activeRecords.length());
+            stats.tlasNodes = tlasInnerCount;
             stats.totalNodes = uint(gpuNodes.length());
             stats.buildMillis = getclockmillis() - start;
             stats.generation++;
             stats.generation = max(stats.generation, 1u);
             upload();
             forceRebuild = false;
-            sceneReady = !gpuBlases.empty();
+            sceneReady = !activeRecords.empty();
         }
 
         void clear()
@@ -608,8 +621,6 @@ namespace renderer
             gpuNodes.shrink(0);
             gpuTriangles.shrink(0);
             gpuTriangleUVs.shrink(0);
-            gpuBlases.shrink(0);
-            gpuInstances.shrink(0);
             gpuMaterials.shrink(0);
             sceneReady = false;
             forceRebuild = true;
@@ -620,7 +631,7 @@ namespace renderer
             clear();
             if(buffers[0])
             {
-                glDeleteBuffers_(6, buffers);
+                glDeleteBuffers_(4, buffers);
                 memset(buffers, 0, sizeof(buffers));
             }
         }
@@ -628,7 +639,7 @@ namespace renderer
         void bind()
         {
             if(!sceneReady) return;
-            loopi(6) glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, NODE_BINDING + i, buffers[i]);
+            loopi(4) glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, NODE_BINDING + i, buffers[i]);
         }
 
         bool ready() { return bvh && sceneReady; }
