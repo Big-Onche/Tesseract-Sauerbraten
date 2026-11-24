@@ -2,6 +2,7 @@
 
 #include "engine.h"
 #include "../renderer/reflections.h"
+#include "../renderer/tesselation.h"
 #include "../renderer/volumetrics.h"
 
 void (APIENTRYP glGenSamplers_)(GLsizei, GLuint *) = NULL;
@@ -556,6 +557,7 @@ void gl_checkextensions()
     if(glslversion < 120) fatal("GLSL 1.20 or greater is required!");
 
     parseglexts();
+    renderer::tesselation::init();
 
     glGetTextureHandleARB_ = (PFNGLGETTEXTUREHANDLEARBPROC)getprocaddress("glGetTextureHandleARB");
     glMakeTextureHandleResidentARB_ = (PFNGLMAKETEXTUREHANDLERESIDENTARBPROC)getprocaddress("glMakeTextureHandleResidentARB");

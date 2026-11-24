@@ -1,10 +1,11 @@
 // renderva.cpp: handles the occlusion and rendering of vertex arrays
 
 #include "engine.h"
+#include "../renderer/tesselation.h"
 
-static inline void drawtris(GLsizei numindices, const GLvoid *indices, ushort minvert, ushort maxvert)
+static inline void drawtris(GLsizei numindices, const GLvoid *indices, ushort minvert, ushort maxvert, GLenum mode = GL_TRIANGLES)
 {
-    glDrawRangeElements_(GL_TRIANGLES, minvert, maxvert, numindices, GL_UNSIGNED_SHORT, indices);
+    glDrawRangeElements_(mode, minvert, maxvert, numindices, GL_UNSIGNED_SHORT, indices);
     glde++;
 }
 
@@ -1149,7 +1150,7 @@ struct renderstate
     int alphaing;
     bool shadowing;
     GLuint vbuf;
-    bool vattribs, vquery;
+    bool vattribs, vquery, tessellating;
     vec colorscale;
     float alphascale;
     float refractscale;
@@ -1163,7 +1164,9 @@ struct renderstate
     vec2 texgenscroll;
     int texgenorient, texgenmillis;
 
-    renderstate() : colormask(true), depthmask(true), alphaing(0), vbuf(0), vattribs(false), vquery(false), colorscale(1, 1, 1), alphascale(0), refractscale(0), refractcolor(1, 1, 1), blend(false), blendx(-1), blendy(-1), globals(-1), tmu(-1), slot(NULL), texgenslot(NULL), vslot(NULL), texgenvslot(NULL), texgenscroll(0, 0), texgenorient(-1), texgenmillis(lastmillis)
+    renderstate() : colormask(true), depthmask(true), alphaing(0), vbuf(0), vattribs(false), vquery(false), tessellating(false), colorscale(1, 1, 1),
+        alphascale(0), refractscale(0), refractcolor(1, 1, 1), blend(false), blendx(-1), blendy(-1), globals(-1), tmu(-1), slot(NULL),
+        texgenslot(NULL), vslot(NULL), texgenvslot(NULL), texgenscroll(0, 0), texgenorient(-1), texgenmillis(lastmillis)
     {
         loopk(7) textures[k] = 0;
     }
@@ -1562,6 +1565,7 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
 {
     VSlot &vslot = b.vslot;
     Slot &slot = *vslot.slot;
+    cur.tessellating = false;
     if(pass == RENDERPASS_SMALPHA)
     {
         extern Shader *smalphaworldshader;
@@ -1576,7 +1580,17 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     }
     else if(cur.alphaing) slot.shader->setvariant(cur.alphaing > 1 && vslot.refractscale > 0 ? 1 : 0, 1, slot, vslot);
     else if(b.es.layer&LAYER_BOTTOM) slot.shader->setvariant(0, 0, slot, vslot);
-    else slot.shader->set(slot, vslot);
+    else
+    {
+        Shader *shader = pass == RENDERPASS_GBUFFER ? renderer::tesselation::worldshader(slot.shader) : NULL;
+        if(shader)
+        {
+            shader->set(slot, vslot);
+            renderer::tesselation::setfactor();
+            cur.tessellating = true;
+        }
+        else slot.shader->set(slot, vslot);
+    }
     cur.globals = GlobalShaderParamState::nextversion;
 }
 
@@ -1593,16 +1607,19 @@ static inline void updateshader(T &cur)
 static void renderbatch(renderstate &cur, int pass, geombatch &b)
 {
     gbatches++;
+    bool wireframe = cur.tessellating && renderer::tesselation::beginwireframe();
     for(geombatch *curbatch = &b;; curbatch = &geombatches[curbatch->batch])
     {
         ushort len = curbatch->es.length;
         if(len)
         {
-            drawtris(len, (ushort *)0 + curbatch->va->eoffset + curbatch->offset, curbatch->es.minvert, curbatch->es.maxvert);
+            drawtris(len, (ushort *)0 + curbatch->va->eoffset + curbatch->offset, curbatch->es.minvert, curbatch->es.maxvert,
+                     cur.tessellating ? GL_PATCHES : GL_TRIANGLES);
             vtris += len/3;
         }
         if(curbatch->batch < 0) break;
     }
+    if(wireframe) renderer::tesselation::endwireframe();
 }
 
 static void resetbatches()
@@ -1774,6 +1791,7 @@ void rendergeom()
 {
     bool doOQ = oqfrags && oqgeom && !drawtex, multipassing = false;
     renderstate cur;
+    renderer::tesselation::beginworld();
 
     int blends = 0;
     if(doOQ)
@@ -1894,6 +1912,7 @@ void rendergeom()
     if(multipassing) glDepthFunc(GL_LESS);
 
     cleanupgeom(cur);
+    renderer::tesselation::endworld();
 
     if(!doOQ)
     {

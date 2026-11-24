@@ -12,12 +12,12 @@
 				<Option object_output=".objs/client64" />
 				<Option type="0" />
 				<Option compiler="gcc" />
-				<Option parameters="-t0 -w640 -h480 -qhome" />
+				<Option parameters="-t0 -w640 -h480 -qhome -fullscreen0" />
 				<Compiler>
-					<Add option="-std=c++17" />
 					<Add option="-fomit-frame-pointer" />
 					<Add option="-O3" />
 					<Add option="-Wall" />
+					<Add option="-std=c++17" />
 					<Add option="-m64" />
 					<Add option="-ffast-math" />
 					<Add option="-fsigned-char" />
@@ -59,7 +59,7 @@
 				<Option object_output=".objs/client32" />
 				<Option type="0" />
 				<Option compiler="gcc" />
-				<Option parameters="-t0 -w640 -h480 -qhome" />
+				<Option parameters="-t0 -w640 -h480 -qhome -fullscreen0" />
 				<Compiler>
 					<Add option="-std=c++17" />
 					<Add option="-fomit-frame-pointer" />
@@ -109,6 +109,7 @@
 		<Unit filename="../../config/glsl/hdr.cfg" />
 		<Unit filename="../../config/glsl/reflections.cfg" />
 		<Unit filename="../../config/glsl/skylight.cfg" />
+		<Unit filename="../../config/glsl/tesselation.cfg" />
 		<Unit filename="../../config/glsl/volumetrics.cfg" />
 		<Unit filename="../engine/aa.cpp" />
 		<Unit filename="../engine/acoustics.cpp" />
@@ -210,9 +211,11 @@
 		<Unit filename="../renderer/reflections.h" />
 		<Unit filename="../renderer/renderer.cpp" />
 		<Unit filename="../renderer/renderer.h" />
+		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
 		<Unit filename="../renderer/skylight.cpp" />
 		<Unit filename="../renderer/skylight.h" />
-		<Unit filename="../renderer/shaders/cook_torrance.cfg" />
+		<Unit filename="../renderer/tesselation.cpp" />
+		<Unit filename="../renderer/tesselation.h" />
 		<Unit filename="../renderer/tonemap.cpp" />
 		<Unit filename="../renderer/volumetrics.cpp" />
 		<Unit filename="../renderer/volumetrics.h" />

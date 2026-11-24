@@ -80,7 +80,9 @@ static void showglslinfo(GLenum type, GLuint obj, const char *name, const char *
     else glGetProgramiv_(obj, GL_INFO_LOG_LENGTH, &length);
     if(length > 1)
     {
-        conoutf(CON_ERROR, "GLSL ERROR (%s:%s)", type == GL_VERTEX_SHADER ? "VS" : (type == GL_FRAGMENT_SHADER ? "FS" : "PROG"), name);
+        const char *stage = type == GL_VERTEX_SHADER ? "VS" : type == GL_TESS_CONTROL_SHADER ? "TCS" :
+            type == GL_TESS_EVALUATION_SHADER ? "TES" : type == GL_FRAGMENT_SHADER ? "FS" : "PROG";
+        conoutf(CON_ERROR, "GLSL ERROR (%s:%s)", stage, name);
         FILE *l = getlogfile();
         if(l)
         {
@@ -187,6 +189,8 @@ static void compileglslshader(Shader &s, GLenum type, GLuint &obj, const char *d
     {
         if(hasTG) parts[numparts++] = "#extension GL_ARB_texture_gather : enable\n";
         if(hasGPU5) parts[numparts++] = "#extension GL_ARB_gpu_shader5 : enable\n";
+        if(type == GL_TESS_CONTROL_SHADER || type == GL_TESS_EVALUATION_SHADER)
+            parts[numparts++] = "#extension GL_ARB_tessellation_shader : require\n";
     }
     if(glslversion >= 130)
     {
@@ -351,11 +355,13 @@ static void bindworldtexlocs(Shader &s)
 
 static void linkglslprogram(Shader &s, bool msg = true)
 {
-    s.program = s.vsobj && s.psobj ? glCreateProgram_() : 0;
+    s.program = s.vsobj && s.psobj && ((!s.tcsobj && !s.tesobj) || (s.tcsobj && s.tesobj)) ? glCreateProgram_() : 0;
     GLint success = 0;
     if(s.program)
     {
         glAttachShader_(s.program, s.vsobj);
+        if(s.tcsobj) glAttachShader_(s.program, s.tcsobj);
+        if(s.tesobj) glAttachShader_(s.program, s.tesobj);
         glAttachShader_(s.program, s.psobj);
         uint attribs = 0;
         loopv(s.attriblocs)
@@ -718,6 +724,10 @@ bool Shader::compile()
 {
     if(!vsstr) vsobj = !reusevs || reusevs->invalid() ? 0 : reusevs->vsobj;
     else compileglslshader(*this, GL_VERTEX_SHADER,   vsobj, vsstr, name, dbgshader || !variantshader);
+    if(!tcsstr) tcsobj = !reusetcs || reusetcs->invalid() ? 0 : reusetcs->tcsobj;
+    else compileglslshader(*this, GL_TESS_CONTROL_SHADER, tcsobj, tcsstr, name, dbgshader || !variantshader);
+    if(!tesstr) tesobj = !reusetes || reusetes->invalid() ? 0 : reusetes->tesobj;
+    else compileglslshader(*this, GL_TESS_EVALUATION_SHADER, tesobj, tesstr, name, dbgshader || !variantshader);
     if(!psstr) psobj = !reuseps || reuseps->invalid() ? 0 : reuseps->psobj;
     else compileglslshader(*this, GL_FRAGMENT_SHADER, psobj, psstr, name, dbgshader || !variantshader);
     linkglslprogram(*this, !variantshader);
@@ -728,6 +738,8 @@ void Shader::cleanup(bool full)
 {
     used = false;
     if(vsobj) { if(!reusevs) glDeleteShader_(vsobj); vsobj = 0; }
+    if(tcsobj) { if(!reusetcs) glDeleteShader_(tcsobj); tcsobj = 0; }
+    if(tesobj) { if(!reusetes) glDeleteShader_(tesobj); tesobj = 0; }
     if(psobj) { if(!reuseps) glDeleteShader_(psobj); psobj = 0; }
     if(program) { glDeleteProgram_(program); program = 0; }
     localparams.setsize(0);
@@ -737,6 +749,8 @@ void Shader::cleanup(bool full)
     {
         type = SHADER_INVALID;
         DELETEA(vsstr);
+        DELETEA(tcsstr);
+        DELETEA(tesstr);
         DELETEA(psstr);
         DELETEA(defer);
         variants.setsize(0);
@@ -745,7 +759,7 @@ void Shader::cleanup(bool full)
         attriblocs.setsize(0);
         fragdatalocs.setsize(0);
         uniformlocs.setsize(0);
-        reusevs = reuseps = NULL;
+        reusevs = reusetcs = reusetes = reuseps = NULL;
     }
     else loopv(defaultparams) defaultparams[i].loc = -1;
     owner = NULL;
@@ -782,7 +796,8 @@ static void genuniformlocs(Shader &s, const char *vs, const char *ps, Shader *re
     }
 }
 
-Shader *newshader(int type, const char *name, const char *vs, const char *ps, Shader *variant = NULL, int row = 0)
+Shader *newshader(int type, const char *name, const char *vs, const char *ps, Shader *variant = NULL, int row = 0, const char *tcs = NULL,
+                  const char *tes = NULL, Shader *reusebase = NULL)
 {
     if(Shader::lastshader)
     {
@@ -795,13 +810,15 @@ Shader *newshader(int type, const char *name, const char *vs, const char *ps, Sh
     Shader &s = shaders[rname];
     s.name = rname;
     s.vsstr = newstring(vs);
+    s.tcsstr = tcs ? newstring(tcs) : NULL;
+    s.tesstr = tes ? newstring(tes) : NULL;
     s.psstr = newstring(ps);
     DELETEA(s.defer);
     s.type = type & ~(SHADER_INVALID | SHADER_DEFERRED);
     s.variantshader = variant;
     s.standard = standardshaders;
     if(forceshaders) s.forced = true;
-    s.reusevs = s.reuseps = NULL;
+    s.reusevs = s.reusetcs = s.reusetes = s.reuseps = NULL;
     if(variant)
     {
         int row = 0, col = 0;
@@ -816,8 +833,25 @@ Shader *newshader(int type, const char *name, const char *vs, const char *ps, Sh
             DELETEA(s.psstr);
             s.reuseps = !ps[0] ? variant : variant->getvariant(col, row);
         }
+        if(!tcs || !tcs[0])
+        {
+            DELETEA(s.tcsstr);
+            s.reusetcs = variant;
+        }
+        if(!tes || !tes[0])
+        {
+            DELETEA(s.tesstr);
+            s.reusetes = variant;
+        }
     }
-    if(variant) loopv(variant->defaultparams) s.defaultparams.add(variant->defaultparams[i]);
+    if(reusebase)
+    {
+        DELETEA(s.vsstr);
+        DELETEA(s.psstr);
+        s.reusevs = s.reuseps = reusebase;
+    }
+    if(reusebase) loopv(reusebase->defaultparams) s.defaultparams.add(reusebase->defaultparams[i]);
+    else if(variant) loopv(variant->defaultparams) s.defaultparams.add(variant->defaultparams[i]);
     else loopv(slotparams) s.defaultparams.add(slotparams[i]);
     s.attriblocs.setsize(0);
     s.uniformlocs.setsize(0);
@@ -1158,6 +1192,39 @@ void shader(int *type, char *name, char *vs, char *ps)
 }
 COMMAND(shader, "isss");
 
+extern int tesselationsupported;
+
+void tesselationshader(int *type, char *name, char *vs, char *tcs, char *tes, char *ps)
+{
+    if(!tesselationsupported)
+    {
+        conoutf(CON_ERROR, "cannot define tessellation shader %s: hardware tessellation is unavailable", name);
+        return;
+    }
+    if(lookupshaderbyname(name)) return;
+
+    defformatstring(info, "shader %s", name);
+    renderprogress(loadprogress, info);
+    vector<char> vsbuf, psbuf, vsbak, psbak;
+    GENSHADER(slotparams.length(), genuniformdefs(vsbuf, psbuf, vs, ps));
+    GENSHADER(strstr(vs, "//:fog") || strstr(ps, "//:fog"), genfogshader(vsbuf, psbuf, vs, ps));
+    Shader *s = newshader(*type, name, vs, ps, NULL, 0, tcs, tes);
+    if(s && (strstr(ps, "//:variant") || strstr(vs, "//:variant"))) gengenericvariant(*s, name, vs, ps);
+    slotparams.shrink(0);
+}
+COMMAND(tesselationshader, "isssss");
+
+void tesselationcopyshader(char *name, char *basename, char *tcs, char *tes)
+{
+    if(!tesselationsupported || lookupshaderbyname(name)) return;
+
+    Shader *base = useshaderbyname(basename);
+    if(!base || !base->loaded()) return;
+
+    newshader(base->type, name, "", "", NULL, 0, tcs, tes, base);
+}
+COMMAND(tesselationcopyshader, "ssss");
+
 void variantshader(int *type, char *name, int *row, char *vs, char *ps, int *maxvariants)
 {
     if(*row < 0)
@@ -1186,6 +1253,33 @@ void variantshader(int *type, char *name, int *row, char *vs, char *ps, int *max
     }
 }
 COMMAND(variantshader, "isissi");
+
+void tesselationvariantshader(int *type, char *name, int *row, char *vs, char *tcs, char *tes, char *ps, int *maxvariants)
+{
+    if(!tesselationsupported) return;
+    if(*row < 0)
+    {
+        tesselationshader(type, name, vs, tcs, tes, ps);
+        return;
+    }
+    if(*row >= MAXVARIANTROWS) return;
+
+    Shader *s = lookupshaderbyname(name);
+    if(!s) return;
+
+    defformatstring(varname, "<variant:%d,%d>%s", s->numvariants(*row), *row, name);
+    if(*maxvariants > 0)
+    {
+        defformatstring(info, "shader %s", name);
+        renderprogress(min(s->variants.length() / float(*maxvariants), 1.0f), info);
+    }
+    vector<char> vsbuf, psbuf, vsbak, psbak;
+    GENSHADER(s->defaultparams.length(), genuniformdefs(vsbuf, psbuf, vs, ps, s));
+    GENSHADER(strstr(vs, "//:fog") || strstr(ps, "//:fog"), genfogshader(vsbuf, psbuf, vs, ps));
+    Shader *v = newshader(*type, varname, vs, ps, s, *row, tcs, tes);
+    if(v && (strstr(ps, "//:variant") || strstr(vs, "//:variant"))) gengenericvariant(*s, varname, vs, ps, *row);
+}
+COMMAND(tesselationvariantshader, "isissssi");
 
 void setshader(char *name)
 {
@@ -1294,6 +1388,8 @@ ICOMMAND(dumpshader, "sbi", (const char *name, int *col, int *row),
         if(!s) return;
     }
     if(s->vsstr) fprintf(l, "%s:%s\n%s\n", s->name, "VS", s->vsstr);
+    if(s->tcsstr) fprintf(l, "%s:%s\n%s\n", s->name, "TCS", s->tcsstr);
+    if(s->tesstr) fprintf(l, "%s:%s\n%s\n", s->name, "TES", s->tesstr);
     if(s->psstr) fprintf(l, "%s:%s\n%s\n", s->name, "FS", s->psstr);
 });
 
@@ -1549,6 +1645,8 @@ void reloadshaders()
             {
                 Shader *v = s.variants[i];
                 if((v->reusevs && v->reusevs->invalid()) ||
+                   (v->reusetcs && v->reusetcs->invalid()) ||
+                   (v->reusetes && v->reusetes->invalid()) ||
                    (v->reuseps && v->reuseps->invalid()) ||
                    !v->compile())
                     v->cleanup(true);

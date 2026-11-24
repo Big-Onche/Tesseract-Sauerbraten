@@ -128,6 +128,7 @@ CLIENT_OBJS= \
 	renderer/reflections.o \
 	renderer/renderer.o \
 	renderer/skylight.o \
+	renderer/tesselation.o \
 	renderer/tonemap.o \
 	renderer/volumetrics.o \
 	game/ai.o \

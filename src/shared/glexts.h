@@ -815,6 +815,19 @@ extern PFNGLBLENDEQUATIONSEPARATEIPROC glBlendEquationSeparatei_;
 extern PFNGLBLENDFUNCIPROC glBlendFunci_;
 extern PFNGLBLENDFUNCSEPARATEIPROC glBlendFuncSeparatei_;
 
+#ifndef GL_ARB_tessellation_shader
+#define GL_ARB_tessellation_shader 1
+#define GL_PATCHES                        0x000E
+#define GL_PATCH_VERTICES                 0x8E72
+#define GL_MAX_PATCH_VERTICES             0x8E7D
+#define GL_MAX_TESS_GEN_LEVEL             0x8E7E
+#define GL_TESS_EVALUATION_SHADER         0x8E87
+#define GL_TESS_CONTROL_SHADER            0x8E88
+typedef void (APIENTRYP PFNGLPATCHPARAMETERIPROC) (GLenum pname, GLint value);
+#endif
+
+extern PFNGLPATCHPARAMETERIPROC glPatchParameteri_;
+
 #ifndef GL_RGB565
 #define GL_RGB565                         0x8D62
 #endif

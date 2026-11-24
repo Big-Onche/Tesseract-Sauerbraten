@@ -1,5 +1,6 @@
 #include "hdr.h"
 #include "reflections.h"
+#include "tesselation.h"
 #include "volumetrics.h"
 
 namespace renderer
@@ -38,6 +39,7 @@ namespace renderer
     void cleanup()
     {
         reflections::cleanup();
+        tesselation::cleanup();
         volumetrics::cleanup();
         cleanupbloom();
         cleanupeyeadaptation();

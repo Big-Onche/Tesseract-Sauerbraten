@@ -143,9 +143,9 @@ struct Shader
 {
     static Shader *lastshader;
 
-    char *name, *vsstr, *psstr, *defer;
+    char *name, *vsstr, *tcsstr, *tesstr, *psstr, *defer;
     int type;
-    GLuint program, vsobj, psobj;
+    GLuint program, vsobj, tcsobj, tesobj, psobj;
     vector<SlotShaderParamState> defaultparams;
     vector<GlobalShaderParamUse> globalparams;
     vector<LocalShaderParamState> localparams;
@@ -154,13 +154,15 @@ struct Shader
     vector<Shader *> variants;
     ushort *variantrows;
     bool standard, forced, used;
-    Shader *reusevs, *reuseps;
+    Shader *reusevs, *reusetcs, *reusetes, *reuseps;
     vector<UniformLoc> uniformlocs;
     vector<AttribLoc> attriblocs;
     vector<FragDataLoc> fragdatalocs;
     const void *owner;
 
-    Shader() : name(NULL), vsstr(NULL), psstr(NULL), defer(NULL), type(SHADER_DEFAULT), program(0), vsobj(0), psobj(0), variantshader(NULL), variantrows(NULL), standard(false), forced(false), used(false), reusevs(NULL), reuseps(NULL), owner(NULL)
+    Shader() : name(NULL), vsstr(NULL), tcsstr(NULL), tesstr(NULL), psstr(NULL), defer(NULL), type(SHADER_DEFAULT), program(0), vsobj(0), tcsobj(0),
+        tesobj(0), psobj(0), variantshader(NULL), variantrows(NULL), standard(false), forced(false), used(false), reusevs(NULL), reusetcs(NULL),
+        reusetes(NULL), reuseps(NULL), owner(NULL)
     {
     }
 
@@ -168,6 +170,8 @@ struct Shader
     {
         DELETEA(name);
         DELETEA(vsstr);
+        DELETEA(tcsstr);
+        DELETEA(tesstr);
         DELETEA(psstr);
         DELETEA(defer);
         DELETEA(variantrows);
