@@ -166,7 +166,11 @@ void invalidateskyvisibility(const ivec &bbmin, const ivec &bbmax)
 static inline uchar computeskyvisibilitysample(int x, int y, int z, float cell, float startoffset, float maxdist, float soft, const vec &up)
 {
     vec start((x + 0.5f)*cell, (y + 0.5f)*cell, (z + 0.5f)*cell);
-    start.madd(up, startoffset);
+    if(startoffset > 0.0f)
+    {
+        if(raycube(start, up, startoffset, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST) < startoffset) return 0;
+        start.madd(up, startoffset);
+    }
     float updist = raycube(start, up, maxdist, RAY_CLIPMAT|RAY_POLY|RAY_SKIPFIRST);
     float skyvis = soft <= 1e-3f ? (updist >= maxdist ? 1.0f : 0.0f) : clamp((updist - (maxdist - soft)) / soft, 0.0f, 1.0f);
     return uchar(clamp(int(skyvis*255.0f + 0.5f), 0, 255));
