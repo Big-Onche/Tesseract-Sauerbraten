@@ -24,8 +24,9 @@ FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
 VARP(tesselationautolod, 0, 1, 1);
 FVARP(tesselationlodbias, -4.0f, -0.5f, 4.0f);
 VARP(tesselationdisplacement, 0, 1, 1);
-// 0 off, 1 generated grid, 2 height, 3 displacement, 4 base edges, 5 factors, 6 hardware limit, 7 density, 8 mip
-VARP(tesselationdebug, 0, 0, 8);
+// 0 off, 1 generated grid, 2 height, 3 displacement, 4 base edges, 5 factors, 6 hardware limit, 7 density, 8 mip,
+// 9 original normal, 10 rasterized geometric normal, 11 reconstructed normal, 12 material normal, 13 depth, 14 tangent frame
+VARP(tesselationdebug, 0, 0, 14);
 
 extern void *getprocaddress(const char *name);
 extern bool hasext(const char *ext);
@@ -128,11 +129,16 @@ namespace renderer
         {
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
 
-            Texture *diffuse = NULL, *normal = NULL;
+            Texture *diffuse = NULL, *normal = NULL, *detailnormal = NULL;
             loopv(slot.sts)
             {
                 if(slot.sts[i].type == TEX_DIFFUSE) diffuse = slot.sts[i].t;
                 else if(slot.sts[i].type == TEX_NORMAL) normal = slot.sts[i].t;
+            }
+            if(vslot.detail)
+            {
+                VSlot &detail = lookupvslot(vslot.detail);
+                loopv(detail.slot->sts) if(detail.slot->sts[i].type == TEX_NORMAL) detailnormal = detail.slot->sts[i].t;
             }
             float worldperuv = diffuse && diffuse != notexture ? vslot.scale*(diffuse->xs + diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
             bool active = displacing() && worldperuv > 0.0f;
@@ -145,6 +151,8 @@ namespace renderer
             LOCALPARAMF(tessviewparams, 0.5f*vieww, 0.5f*viewh, float(tesselationmaxlevel), 0.0f);
             LOCALPARAMF(tessmapsize, normal && normal != notexture ? float(normal->xs) : 1.0f,
                         normal && normal != notexture ? float(normal->ys) : 1.0f);
+            LOCALPARAMF(tessdetailmapsize, detailnormal && detailnormal != notexture ? float(detailnormal->xs) : 1.0f,
+                        detailnormal && detailnormal != notexture ? float(detailnormal->ys) : 1.0f);
         }
 
         bool beginwireframe()
