@@ -302,6 +302,12 @@ namespace renderer
                 LOCALPARAMF(rtMaterialParams, pbrroughnessscale, pbrspecularscale, rtreflectionroughnesspower, rtreflectionstrength);
             }
 
+            Shader *cacheshader(Shader *&cached, const char *name)
+            {
+                if(!cached) cached = useshaderbyname(name);
+                return cached;
+            }
+
             bool prepareresources(int width, int height)
             {
                 float scale = resolutionscale();
@@ -358,9 +364,14 @@ namespace renderer
                 bool diagnostic = debugrt != 0;
                 bindtarget(tracefbo[diagnostic ? 1 : 0], tracewidth, traceheight);
                 bool detailed = profilertdetail && profilequeryactive >= 0;
-                const char *shadername = detailed ? (msaalight ? "rtreflectionhitmsprofile" : "rtreflectionhitprofile") :
-                                                    (msaalight ? "rtreflectionhitms" : "rtreflectionhit");
-                Shader *shader = useshaderbyname(shadername);
+                static const char *hitShaderNames[2][2] =
+                {
+                    { "rtreflectionhit", "rtreflectionhitprofile" },
+                    { "rtreflectionhitms", "rtreflectionhitmsprofile" }
+                };
+                static Shader *hitShaders[2][2] = { { NULL, NULL }, { NULL, NULL } };
+                int sampleType = msaalight ? 1 : 0, profileType = detailed ? 1 : 0;
+                Shader *shader = cacheshader(hitShaders[sampleType][profileType], hitShaderNames[sampleType][profileType]);
                 if(!shader || shader->isnull()) return false;
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();
@@ -377,9 +388,14 @@ namespace renderer
                 screenquad(tracewidth, traceheight);
                 glMemoryBarrier_(GL_SHADER_STORAGE_BARRIER_BIT);
 
-                if(diagnostic) shadername = detailed ? "rtreflectionshadedebugprofile" : "rtreflectionshadedebug";
-                else shadername = detailed ? "rtreflectionshadeprofile" : "rtreflectionshade";
-                shader = useshaderbyname(shadername);
+                static const char *shadeShaderNames[2][2] =
+                {
+                    { "rtreflectionshade", "rtreflectionshadeprofile" },
+                    { "rtreflectionshadedebug", "rtreflectionshadedebugprofile" }
+                };
+                static Shader *shadeShaders[2][2] = { { NULL, NULL }, { NULL, NULL } };
+                int diagnosticType = diagnostic ? 1 : 0;
+                shader = cacheshader(shadeShaders[diagnosticType][profileType], shadeShaderNames[diagnosticType][profileType]);
                 if(!shader || shader->isnull())
                 {
                     glBindBufferBase_(GL_SHADER_STORAGE_BUFFER, 6, 0);
@@ -449,8 +465,11 @@ namespace renderer
                 };
                 bool fullResolution = tracewidth == resourcewidth && traceheight == resourceheight;
                 int sampleType = msaalight ? 1 : 0, quality = clamp(rtreconstruction, 0, 2);
+                static Shader *temporalShaders[2][2][3] = { { { NULL, NULL, NULL }, { NULL, NULL, NULL } },
+                                                            { { NULL, NULL, NULL }, { NULL, NULL, NULL } } };
+                int resolutionType = fullResolution ? 1 : 0;
                 const char *shadername = fullResolution ? fullResolutionShaders[sampleType][quality] : reconstructionShaders[sampleType][quality];
-                Shader *shader = useshaderbyname(shadername);
+                Shader *shader = cacheshader(temporalShaders[resolutionType][sampleType][quality], shadername);
                 if(!shader || shader->isnull()) return false;
                 timer *temporaltimer = begintimer("RT reflection temporal");
                 shader->set();
@@ -474,29 +493,34 @@ namespace renderer
                 static const int passcounts[] = { 0, 1, 3, 5 };
                 int passes = rtdenoise && rtspatialfilter ? passcounts[clamp(rtspecularspatial, 0, 3)] : 0;
                 GLuint source = historytexture[historyindex];
-                Shader *shader = useshaderbyname("rtreflectionspatial");
-                if(!shader || shader->isnull())
+                static Shader *spatialShader = NULL, *finalShader = NULL;
+                Shader *shader = NULL;
+                if(passes > 1)
                 {
-                    endtimer(spatialtimer);
-                    return false;
+                    shader = cacheshader(spatialShader, "rtreflectionspatial");
+                    if(!shader || shader->isnull())
+                    {
+                        endtimer(spatialtimer);
+                        return false;
+                    }
+                    shader->set();
+                    setcommonparams();
+                    bindrectangle(GL_TEXTURE6, historysurface[historyindex]);
+                    bindrectangle(GL_TEXTURE7, historyvalidation[historyindex]);
                 }
                 loopi(max(passes - 1, 0))
                 {
                     GLuint destination = (i&1) ? upscaledtexture : filteredtexture;
                     bindtarget(spatialfbo[i&1], resourcewidth, resourceheight);
-                    shader->set();
-                    setcommonparams();
                     LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, debugrt == 14 ? 1.0f : 0.0f);
                     bindrectangle(GL_TEXTURE3, source);
-                    bindrectangle(GL_TEXTURE6, historysurface[historyindex]);
-                    bindrectangle(GL_TEXTURE7, historyvalidation[historyindex]);
                     glActiveTexture_(GL_TEXTURE0);
                     screenquad(resourcewidth, resourceheight);
                     source = destination;
                 }
                 glBindFramebuffer_(GL_FRAMEBUFFER, hdrfbo);
                 glViewport(0, 0, resourcewidth, resourceheight);
-                shader = useshaderbyname("rtreflectionspatialfinal");
+                shader = cacheshader(finalShader, "rtreflectionspatialfinal");
                 if(!shader || shader->isnull())
                 {
                     endtimer(spatialtimer);
