@@ -18,8 +18,9 @@ namespace renderer
 
         namespace
         {
-            GLuint reflectionfbo = 0, hitbuffer = 0, rawtexture = 0, auxiliarytexture = 0, hitnormaltexture = 0, historytexture[2] = { 0, 0 },
-                   historysurface[2] = { 0, 0 }, historyvalidation[2] = { 0, 0 }, filteredtexture = 0, upscaledtexture = 0;
+            GLuint tracefbo[2] = { 0, 0 }, historyfbo[2] = { 0, 0 }, spatialfbo[2] = { 0, 0 }, hitbuffer = 0, rawtexture = 0,
+                   auxiliarytexture = 0, hitnormaltexture = 0, historytexture[2] = { 0, 0 }, historysurface[2] = { 0, 0 },
+                   historyvalidation[2] = { 0, 0 }, filteredtexture = 0, upscaledtexture = 0;
             int resourcewidth = -1, resourceheight = -1, tracewidth = 0, traceheight = 0, historyindex = 0;
             bool historyvalid = false;
             bool pipelineavailable = true;
@@ -245,55 +246,25 @@ namespace renderer
                 glTexImage2D(GL_TEXTURE_RECTANGLE, 0, format, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
             }
 
-            bool bindtarget(GLuint texture, int width, int height, const char *label)
+            bool createfbo(GLuint &fbo, const GLuint *textures, int count, const char *label)
             {
-                glBindFramebuffer_(GL_FRAMEBUFFER, reflectionfbo);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, texture, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, 0, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, 0, 0);
-                GLenum drawbuffer = GL_COLOR_ATTACHMENT0;
-                glDrawBuffers_(1, &drawbuffer);
+                static const GLenum drawbuffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+                glGenFramebuffers_(1, &fbo);
+                glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
+                loopi(count) glFramebufferTexture2D_(GL_FRAMEBUFFER, drawbuffers[i], GL_TEXTURE_RECTANGLE, textures[i], 0);
+                glDrawBuffers_(count, drawbuffers);
                 if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
                 {
                     conoutf(CON_ERROR, "RT reflections: incomplete %s framebuffer", label);
                     return false;
                 }
-                glViewport(0, 0, width, height);
                 return true;
             }
 
-            bool bindhistorytargets(GLuint color, GLuint feature, GLuint length, int width, int height, const char *label)
+            void bindtarget(GLuint fbo, int width, int height)
             {
-                glBindFramebuffer_(GL_FRAMEBUFFER, reflectionfbo);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, color, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, feature, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, length, 0);
-                const GLenum drawbuffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-                glDrawBuffers_(3, drawbuffers);
-                if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                {
-                    conoutf(CON_ERROR, "RT reflections: incomplete %s framebuffer", label);
-                    return false;
-                }
+                glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
                 glViewport(0, 0, width, height);
-                return true;
-            }
-
-            bool bindtracetargets(int width, int height, bool diagnostic)
-            {
-                glBindFramebuffer_(GL_FRAMEBUFFER, reflectionfbo);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, rawtexture, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, diagnostic ? auxiliarytexture : 0, 0);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, diagnostic ? hitnormaltexture : 0, 0);
-                const GLenum drawbuffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-                glDrawBuffers_(diagnostic ? 3 : 1, drawbuffers);
-                if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-                {
-                    conoutf(CON_ERROR, "RT reflections: incomplete trace framebuffer");
-                    return false;
-                }
-                glViewport(0, 0, width, height);
-                return true;
             }
 
             void bindrectangle(GLenum unit, GLuint texture)
@@ -335,13 +306,12 @@ namespace renderer
             {
                 float scale = resolutionscale();
                 int tw = max(int(ceilf(width*scale)), 1), th = max(int(ceilf(height*scale)), 1);
-                if(reflectionfbo && resourcewidth == width && resourceheight == height && tracewidth == tw && traceheight == th) return true;
+                if(tracefbo[0] && resourcewidth == width && resourceheight == height && tracewidth == tw && traceheight == th) return true;
                 cleanup();
                 resourcewidth = width;
                 resourceheight = height;
                 tracewidth = tw;
                 traceheight = th;
-                glGenFramebuffers_(1, &reflectionfbo);
                 glGenBuffers_(1, &hitbuffer);
                 glBindBuffer_(GL_SHADER_STORAGE_BUFFER, hitbuffer);
                 glBufferData_(GL_SHADER_STORAGE_BUFFER, GLsizeiptr(tracewidth)*traceheight*8*sizeof(uint), NULL, GL_STREAM_DRAW);
@@ -358,10 +328,18 @@ namespace renderer
                 }
                 allocaterectangle(filteredtexture, resourcewidth, resourceheight, true);
                 allocaterectangle(upscaledtexture, resourcewidth, resourceheight, true);
-                if(!bindtracetargets(tracewidth, traceheight, false) || !bindtracetargets(tracewidth, traceheight, true) ||
-                   !bindhistorytargets(historytexture[0], historysurface[0], historyvalidation[0], resourcewidth, resourceheight, "history") ||
-                   !bindtarget(filteredtexture, resourcewidth, resourceheight, "filter") ||
-                   !bindtarget(upscaledtexture, resourcewidth, resourceheight, "filter scratch"))
+                const GLuint traceTargets[] = { rawtexture, auxiliarytexture, hitnormaltexture };
+                const GLuint historyTargets[2][3] =
+                {
+                    { historytexture[0], historysurface[0], historyvalidation[0] },
+                    { historytexture[1], historysurface[1], historyvalidation[1] }
+                };
+                const GLuint spatialTargets[] = { filteredtexture, upscaledtexture };
+                if(!createfbo(tracefbo[0], traceTargets, 1, "trace") || !createfbo(tracefbo[1], traceTargets, 3, "diagnostic trace") ||
+                   !createfbo(historyfbo[0], historyTargets[0], 3, "history 0") ||
+                   !createfbo(historyfbo[1], historyTargets[1], 3, "history 1") ||
+                   !createfbo(spatialfbo[0], &spatialTargets[0], 1, "spatial filter") ||
+                   !createfbo(spatialfbo[1], &spatialTargets[1], 1, "spatial scratch"))
                 {
                     cleanup();
                     return false;
@@ -378,7 +356,7 @@ namespace renderer
             bool tracereflections()
             {
                 bool diagnostic = debugrt != 0;
-                if(!bindtracetargets(tracewidth, traceheight, diagnostic)) return false;
+                bindtarget(tracefbo[diagnostic ? 1 : 0], tracewidth, traceheight);
                 bool detailed = profilertdetail && profilequeryactive >= 0;
                 const char *shadername = detailed ? (msaalight ? "rtreflectionhitmsprofile" : "rtreflectionhitprofile") :
                                                     (msaalight ? "rtreflectionhitms" : "rtreflectionhit");
@@ -458,8 +436,7 @@ namespace renderer
             bool temporalaccumulation()
             {
                 int destination = 1 - historyindex;
-                if(!bindhistorytargets(historytexture[destination], historysurface[destination], historyvalidation[destination], resourcewidth,
-                                       resourceheight, "temporal")) return false;
+                bindtarget(historyfbo[destination], resourcewidth, resourceheight);
                 static const char *reconstructionShaders[2][3] =
                 {
                     { "rtreflectiontemporalq0", "rtreflectiontemporalq1", "rtreflectiontemporalq2" },
@@ -506,11 +483,7 @@ namespace renderer
                 loopi(max(passes - 1, 0))
                 {
                     GLuint destination = (i&1) ? upscaledtexture : filteredtexture;
-                    if(!bindtarget(destination, resourcewidth, resourceheight, "spatial filter"))
-                    {
-                        endtimer(spatialtimer);
-                        return false;
-                    }
+                    bindtarget(spatialfbo[i&1], resourcewidth, resourceheight);
                     shader->set();
                     setcommonparams();
                     LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, debugrt == 14 ? 1.0f : 0.0f);
@@ -777,7 +750,12 @@ namespace renderer
             rawtexture = auxiliarytexture = hitnormaltexture = historytexture[0] = historytexture[1] = historysurface[0] = historysurface[1] = 0;
             historyvalidation[0] = historyvalidation[1] = 0;
             filteredtexture = upscaledtexture = 0;
-            if(reflectionfbo) { glDeleteFramebuffers_(1, &reflectionfbo); reflectionfbo = 0; }
+            if(tracefbo[0] || tracefbo[1]) glDeleteFramebuffers_(2, tracefbo);
+            if(historyfbo[0] || historyfbo[1]) glDeleteFramebuffers_(2, historyfbo);
+            if(spatialfbo[0] || spatialfbo[1]) glDeleteFramebuffers_(2, spatialfbo);
+            memset(tracefbo, 0, sizeof(tracefbo));
+            memset(historyfbo, 0, sizeof(historyfbo));
+            memset(spatialfbo, 0, sizeof(spatialfbo));
             if(hitbuffer) { glDeleteBuffers_(1, &hitbuffer); hitbuffer = 0; }
             resourcewidth = resourceheight = -1;
             tracewidth = traceheight = 0;
