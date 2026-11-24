@@ -154,8 +154,8 @@ namespace renderer
             }
         }
 
-        static uint buildnode(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
-                              vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
+        static void buildnodeat(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
+                                uint nodeIndex, vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
         {
             maximumDepth = max(maximumDepth, depth);
             Bounds bounds, centroidBounds;
@@ -165,8 +165,6 @@ namespace renderer
                 centroidBounds.include(primitives[i].centroid);
             }
 
-            uint nodeIndex = uint(nodes.length());
-            nodes.add();
             setnodebounds(nodes[nodeIndex], bounds);
 
             if(count <= uint(leafSize) || depth >= depthLimit)
@@ -175,7 +173,7 @@ namespace renderer
                 for(uint i = start; i < start + count; ++i) ordered.add(primitives[i].reference);
                 nodes[nodeIndex].data0 = LEAF_BIT | first;
                 nodes[nodeIndex].data1 = count;
-                return nodeIndex;
+                return;
             }
 
             struct Bin
@@ -251,20 +249,26 @@ namespace renderer
                           [axis](const BuildPrimitive &a, const BuildPrimitive &b) { return a.centroid[axis] < b.centroid[axis]; });
             }
 
-            uint left = buildnode(primitives, start, middle - start, leafSize, nodes, ordered, depth + 1, depthLimit, maximumDepth);
-            uint right = buildnode(primitives, middle, start + count - middle, leafSize, nodes, ordered, depth + 1, depthLimit, maximumDepth);
-            nodes[nodeIndex].data0 = left;
-            nodes[nodeIndex].data1 = right;
-            return nodeIndex;
+            uint childPair = uint(nodes.length());
+            ASSERT(!(childPair&1u));
+            nodes.add();
+            nodes.add();
+            nodes[nodeIndex].data0 = childPair;
+            nodes[nodeIndex].data1 = 0;
+            buildnodeat(primitives, start, middle - start, leafSize, nodes, childPair, ordered, depth + 1, depthLimit, maximumDepth);
+            buildnodeat(primitives, middle, start + count - middle, leafSize, nodes, childPair + 1, ordered, depth + 1, depthLimit,
+                        maximumDepth);
         }
 
-        static uint flattentlaschild(uint child, const vector<GPUNode> &tlasNodes, const vector<uint> &tlasRemap,
-                                     const vector<uint> &orderedBlases, const vector<uint> &blasRoots)
+        static void buildnode(vector<BuildPrimitive> &primitives, uint start, uint count, int leafSize, vector<GPUNode> &nodes,
+                              vector<uint> &ordered, uint depth, uint depthLimit, uint &maximumDepth)
         {
-            const GPUNode &node = tlasNodes[child];
-            if(!(node.data0&LEAF_BIT)) return tlasRemap[child];
-            ASSERT(node.data1 == 1);
-            return blasRoots[orderedBlases[node.data0&~LEAF_BIT]];
+            ASSERT(nodes.empty());
+            GPUNode padding = {};
+            nodes.add();
+            // Keep every allocated child pair 64-byte aligned, including the root's children.
+            nodes.add(padding);
+            buildnodeat(primitives, start, count, leafSize, nodes, 0, ordered, depth, depthLimit, maximumDepth);
         }
 
         static uint surfaceflags(const vtxarray &va, int element)
@@ -537,56 +541,39 @@ namespace renderer
             vector<GPUNode> tlasNodes;
             vector<uint> orderedBlases;
             uint tlasDepth = 0;
-            uint tlasBuildRoot = 0;
             if(!tlasPrimitives.empty())
             {
                 uint depthLimit = max(uint(MAX_BUILD_DEPTH), uint(activeRecords.length()));
-                tlasBuildRoot = buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit,
-                                          tlasDepth);
+                buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit, tlasDepth);
             }
             stats.maximumDepth = max(stats.maximumDepth, tlasDepth);
 
-            vector<uint> tlasRemap;
-            resizevector(tlasRemap, tlasNodes.length());
-            uint tlasInnerCount = 0;
-            loopv(tlasNodes) if(!(tlasNodes[i].data0&LEAF_BIT)) tlasRemap[i] = tlasInnerCount++;
-
-            vector<uint> blasRoots;
-            resizevector(blasRoots, activeRecords.length());
-            uint nextNode = tlasInnerCount;
-            loopv(activeRecords)
-            {
-                blasRoots[i] = nextNode;
-                nextNode += uint(records[activeRecords[i]].nodes.length());
-            }
-
-            gpuNodes.shrink(0);
-            resizevector(gpuNodes, tlasInnerCount);
+            vector<uint> tlasLeaves;
+            resizevector(tlasLeaves, activeRecords.length());
             loopv(tlasNodes)
             {
-                const GPUNode &source = tlasNodes[i];
-                if(source.data0&LEAF_BIT) continue;
-                GPUNode &destination = gpuNodes[tlasRemap[i]];
-                destination = source;
-                destination.data0 = flattentlaschild(source.data0, tlasNodes, tlasRemap, orderedBlases, blasRoots);
-                destination.data1 = flattentlaschild(source.data1, tlasNodes, tlasRemap, orderedBlases, blasRoots);
+                const GPUNode &node = tlasNodes[i];
+                if(!(node.data0&LEAF_BIT)) continue;
+                ASSERT(node.data1 == 1);
+                tlasLeaves[orderedBlases[node.data0&~LEAF_BIT]] = i;
             }
-            tlasRoot = tlasNodes.empty() ? 0 : flattentlaschild(tlasBuildRoot, tlasNodes, tlasRemap, orderedBlases, blasRoots);
 
+            gpuNodes = tlasNodes;
+            tlasRoot = 0;
             gpuTriangles.shrink(0);
             gpuTriangleUVs.shrink(0);
             loopv(activeRecords)
             {
                 BLASRecord &record = records[activeRecords[i]];
-                uint nodeOffset = blasRoots[i], triangleOffset = uint(gpuTriangles.length());
-                loopvj(record.nodes)
+                uint triangleOffset = uint(gpuTriangles.length()), descendantOffset = uint(gpuNodes.length()) - 2;
+                GPUNode root = record.nodes[0];
+                if(!(root.data0&LEAF_BIT)) root.data0 += descendantOffset;
+                else root.data0 = LEAF_BIT | ((root.data0&~LEAF_BIT) + triangleOffset);
+                gpuNodes[tlasLeaves[i]] = root;
+                for(int j = 2; j < record.nodes.length(); ++j)
                 {
                     GPUNode node = record.nodes[j];
-                    if(!(node.data0&LEAF_BIT))
-                    {
-                        node.data0 += nodeOffset;
-                        node.data1 += nodeOffset;
-                    }
+                    if(!(node.data0&LEAF_BIT)) node.data0 += descendantOffset;
                     else node.data0 = LEAF_BIT | ((node.data0&~LEAF_BIT) + triangleOffset);
                     gpuNodes.add(node);
                 }
@@ -598,12 +585,17 @@ namespace renderer
                 }
                 gpuTriangleUVs.put(record.triangleUVs.getbuf(), record.triangleUVs.length());
             }
+            loopv(gpuNodes) if(i != 1 && !(gpuNodes[i].data0&LEAF_BIT))
+            {
+                ASSERT(!(gpuNodes[i].data0&1u));
+                ASSERT(gpuNodes[i].data0 + 1 < uint(gpuNodes.length()));
+            }
 
             buildmaterials();
 
             stats.triangles = uint(gpuTriangles.length());
             stats.blasCount = uint(activeRecords.length());
-            stats.tlasNodes = tlasInnerCount;
+            stats.tlasNodes = tlasNodes.empty() ? 0 : uint(tlasNodes.length() - 1);
             stats.totalNodes = uint(gpuNodes.length());
             stats.buildMillis = getclockmillis() - start;
             stats.generation++;
