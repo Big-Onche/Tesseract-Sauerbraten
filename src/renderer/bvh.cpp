@@ -42,16 +42,19 @@ namespace renderer
             uint data1;
         };
 
-        struct GPUVertex
-        {
-            float position[4];
-            float texcoord[4];
-        };
-
         struct GPUTriangle
         {
-            uint vertex[3], surface;
-            uint triangle, flags, blas, reserved;
+            float a[3];
+            uint surface;
+            float edge1[3];
+            uint flags;
+            float edge2[3];
+            uint reserved;
+        };
+
+        struct GPUTriangleUV
+        {
+            float texcoord[3][2];
         };
 
         struct GPUBlas
@@ -60,7 +63,7 @@ namespace renderer
             uint root;
             float bmax[3];
             uint triangleOffset;
-            uint triangleCount, vertexOffset, vertexCount, reserved;
+            uint triangleCount, triangleUVOffset, triangleUVCount, reserved;
         };
 
         struct GPUMaterial
@@ -71,15 +74,16 @@ namespace renderer
         };
 
         static_assert(sizeof(GPUNode) == 32, "GPUNode must match the std430 BVHNode layout");
-        static_assert(sizeof(GPUVertex) == 32, "GPUVertex must match the std430 BVHVertex layout");
-        static_assert(sizeof(GPUTriangle) == 32, "GPUTriangle must match the std430 BVHTriangle layout");
+        static_assert(sizeof(GPUTriangle) == 48, "GPUTriangle must match the std430 BVHTriangle layout");
+        static_assert(sizeof(GPUTriangleUV) == 24, "GPUTriangleUV must match the std430 BVHTriangleUV layout");
         static_assert(sizeof(GPUBlas) == 48, "GPUBlas must match the std430 BVHBlas layout");
         static_assert(sizeof(GPUMaterial) == 48, "GPUMaterial must match the std430 BVHMaterial layout");
         static_assert(offsetof(GPUMaterial, albedo) == 16 && offsetof(GPUMaterial, emission) == 32,
                       "GPUMaterial std430 offsets changed");
         static_assert(offsetof(GPUNode, data0) == 12 && offsetof(GPUNode, bmax) == 16 && offsetof(GPUNode, data1) == 28,
                       "GPUNode std430 offsets changed");
-        static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, triangle) == 16,
+        static_assert(offsetof(GPUTriangle, surface) == 12 && offsetof(GPUTriangle, edge1) == 16 && offsetof(GPUTriangle, flags) == 28 &&
+                          offsetof(GPUTriangle, edge2) == 32,
                       "GPUTriangle std430 offsets changed");
         static_assert(offsetof(GPUBlas, root) == 12 && offsetof(GPUBlas, bmax) == 16 && offsetof(GPUBlas, triangleOffset) == 28,
                       "GPUBlas std430 offsets changed");
@@ -105,8 +109,8 @@ namespace renderer
             bool dirty;
             Bounds bounds;
             vector<GPUNode> nodes;
-            vector<GPUVertex> vertices;
             vector<GPUTriangle> triangles;
+            vector<GPUTriangleUV> triangleUVs;
 
             BLASRecord() : origin(0, 0, 0), size(0), source(NULL), dirty(true) {}
         };
@@ -124,8 +128,8 @@ namespace renderer
 
         static vector<BLASRecord> records;
         static vector<GPUNode> gpuNodes;
-        static vector<GPUVertex> gpuVertices;
         static vector<GPUTriangle> gpuTriangles;
+        static vector<GPUTriangleUV> gpuTriangleUVs;
         static vector<GPUBlas> gpuBlases;
         static vector<uint> gpuInstances;
         static vector<GPUMaterial> gpuMaterials;
@@ -282,25 +286,10 @@ namespace renderer
         static bool buildblas(BLASRecord &record, vtxarray &va)
         {
             record.nodes.shrink(0);
-            record.vertices.shrink(0);
             record.triangles.shrink(0);
+            record.triangleUVs.shrink(0);
             record.bounds = Bounds();
             if(!va.vdata || !va.edata || !va.verts || !va.texelems) return false;
-
-            resizevector(record.vertices, va.verts);
-            loopi(va.verts)
-            {
-                const vertex &source = va.vdata[va.voffset + i];
-                GPUVertex &destination = record.vertices[i];
-                destination.position[0] = source.pos.x;
-                destination.position[1] = source.pos.y;
-                destination.position[2] = source.pos.z;
-                destination.position[3] = 1.0f;
-                destination.texcoord[0] = source.tc.x;
-                destination.texcoord[1] = source.tc.y;
-                destination.texcoord[2] = source.tc.z;
-                destination.texcoord[3] = 0.0f;
-            }
 
             vector<SourceTriangle> sourceTriangles;
             uint indexOffset = 0;
@@ -342,15 +331,26 @@ namespace renderer
             buildnode(primitives, 0, uint(primitives.length()), bvhleafsize, record.nodes, ordered, 1, maximumDepth);
             stats.maximumDepth = max(stats.maximumDepth, maximumDepth);
             resizevector(record.triangles, ordered.length());
+            resizevector(record.triangleUVs, ordered.length());
             loopv(ordered)
             {
                 const SourceTriangle &source = sourceTriangles[ordered[i]];
+                const vertex &a = va.vdata[va.voffset + source.vertex[0]], &b = va.vdata[va.voffset + source.vertex[1]],
+                             &c = va.vdata[va.voffset + source.vertex[2]];
                 GPUTriangle &destination = record.triangles[i];
-                loopk(3) destination.vertex[k] = source.vertex[k];
+                loopk(3)
+                {
+                    destination.a[k] = a.pos[k];
+                    destination.edge1[k] = b.pos[k] - a.pos[k];
+                    destination.edge2[k] = c.pos[k] - a.pos[k];
+                }
                 destination.surface = source.surface;
-                destination.triangle = ordered[i];
                 destination.flags = source.flags;
-                destination.blas = destination.reserved = 0;
+                destination.reserved = 0;
+                GPUTriangleUV &triangleUV = record.triangleUVs[i];
+                triangleUV.texcoord[0][0] = a.tc.x; triangleUV.texcoord[0][1] = a.tc.y;
+                triangleUV.texcoord[1][0] = b.tc.x; triangleUV.texcoord[1][1] = b.tc.y;
+                triangleUV.texcoord[2][0] = c.tc.x; triangleUV.texcoord[2][1] = c.tc.y;
             }
             return true;
         }
@@ -373,14 +373,14 @@ namespace renderer
             int start = getclockmillis();
             uploadbuffer(0, gpuNodes.empty() ? NULL : gpuNodes.getbuf(), gpuNodes.length()*sizeof(GPUNode));
             uploadbuffer(1, gpuTriangles.empty() ? NULL : gpuTriangles.getbuf(), gpuTriangles.length()*sizeof(GPUTriangle));
-            uploadbuffer(2, gpuVertices.empty() ? NULL : gpuVertices.getbuf(), gpuVertices.length()*sizeof(GPUVertex));
+            uploadbuffer(2, gpuTriangleUVs.empty() ? NULL : gpuTriangleUVs.getbuf(), gpuTriangleUVs.length()*sizeof(GPUTriangleUV));
             uploadbuffer(3, gpuBlases.empty() ? NULL : gpuBlases.getbuf(), gpuBlases.length()*sizeof(GPUBlas));
             uploadbuffer(4, gpuInstances.empty() ? NULL : gpuInstances.getbuf(), gpuInstances.length()*sizeof(uint));
             uploadbuffer(5, gpuMaterials.empty() ? NULL : gpuMaterials.getbuf(), gpuMaterials.length()*sizeof(GPUMaterial));
             glBindBuffer_(GL_SHADER_STORAGE_BUFFER, 0);
             stats.uploadMillis = getclockmillis() - start;
             stats.gpuBytes = gpuNodes.length()*sizeof(GPUNode) + gpuTriangles.length()*sizeof(GPUTriangle) +
-                             gpuVertices.length()*sizeof(GPUVertex) + gpuBlases.length()*sizeof(GPUBlas) +
+                             gpuTriangleUVs.length()*sizeof(GPUTriangleUV) + gpuBlases.length()*sizeof(GPUBlas) +
                              gpuInstances.length()*sizeof(uint) + gpuMaterials.length()*sizeof(GPUMaterial);
         }
 
@@ -550,13 +550,12 @@ namespace renderer
             stats.maximumDepth = max(stats.maximumDepth, tlasDepth);
 
             gpuNodes = tlasNodes;
-            gpuVertices.shrink(0);
             gpuTriangles.shrink(0);
+            gpuTriangleUVs.shrink(0);
             gpuBlases.shrink(0);
             gpuInstances = orderedInstances;
             loopv(activeRecords)
             {
-                uint blasIndex = i;
                 BLASRecord &record = records[activeRecords[i]];
                 GPUBlas descriptor;
                 loopk(3)
@@ -567,8 +566,8 @@ namespace renderer
                 descriptor.root = uint(gpuNodes.length());
                 descriptor.triangleOffset = uint(gpuTriangles.length());
                 descriptor.triangleCount = uint(record.triangles.length());
-                descriptor.vertexOffset = uint(gpuVertices.length());
-                descriptor.vertexCount = uint(record.vertices.length());
+                descriptor.triangleUVOffset = uint(gpuTriangleUVs.length());
+                descriptor.triangleUVCount = uint(record.triangleUVs.length());
                 descriptor.reserved = 0;
                 uint nodeOffset = uint(gpuNodes.length());
                 loopvj(record.nodes)
@@ -582,15 +581,8 @@ namespace renderer
                     else node.data0 = LEAF_BIT | ((node.data0&~LEAF_BIT) + descriptor.triangleOffset);
                     gpuNodes.add(node);
                 }
-                loopvj(record.triangles)
-                {
-                    GPUTriangle triangle = record.triangles[j];
-                    loopk(3) triangle.vertex[k] += descriptor.vertexOffset;
-                    triangle.blas = blasIndex;
-                    triangle.triangle = uint(gpuTriangles.length());
-                    gpuTriangles.add(triangle);
-                }
-                gpuVertices.put(record.vertices.getbuf(), record.vertices.length());
+                gpuTriangles.put(record.triangles.getbuf(), record.triangles.length());
+                gpuTriangleUVs.put(record.triangleUVs.getbuf(), record.triangleUVs.length());
                 gpuBlases.add(descriptor);
             }
 
@@ -614,8 +606,8 @@ namespace renderer
             residentHandles.shrink(0);
             records.shrink(0);
             gpuNodes.shrink(0);
-            gpuVertices.shrink(0);
             gpuTriangles.shrink(0);
+            gpuTriangleUVs.shrink(0);
             gpuBlases.shrink(0);
             gpuInstances.shrink(0);
             gpuMaterials.shrink(0);
