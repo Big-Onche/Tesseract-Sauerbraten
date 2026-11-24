@@ -10,7 +10,11 @@ VARFP(tesselationfixed, 1, 4, 64,
 {
     if(tesselationmaxlevel > 0) tesselationfixed = min(tesselationfixed, tesselationmaxlevel);
 });
-VARP(tesselationdebug, 0, 0, 1);
+FVARP(tesselationscale, 0.0f, 1.0f, 16.0f);
+FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
+VARP(tesselationdisplacement, 0, 1, 1);
+// 0 = off, 1 = wireframe, 2 = sampled height, 3 = normalized displacement magnitude
+VARP(tesselationdebug, 0, 0, 3);
 
 extern void *getprocaddress(const char *name);
 extern bool hasext(const char *ext);
@@ -62,9 +66,28 @@ namespace renderer
             return ::tesselation && tesselationsupported && glPatchParameteri_ && !drawtex;
         }
 
-        Shader *worldshader(Shader *base)
+        bool displacing()
         {
-            if(!enabled() || !base) return NULL;
+            return enabled() && tesselationdisplacement && tesselationscale > 0.0f;
+        }
+
+        static bool hasparam(const Shader &shader, const char *name)
+        {
+            loopv(shader.defaultparams) if(shader.defaultparams[i].name && !strcmp(shader.defaultparams[i].name, name)) return true;
+            return false;
+        }
+
+        static bool hasheightmap(const Slot &slot)
+        {
+            if((slot.texmask&((1<<TEX_NORMAL)|(1<<TEX_DEPTH))) != ((1<<TEX_NORMAL)|(1<<TEX_DEPTH))) return false;
+            loopv(slot.sts) if(slot.sts[i].type == TEX_NORMAL && slot.sts[i].t && slot.sts[i].t != notexture) return true;
+            return false;
+        }
+
+        Shader *worldshader(Slot &slot)
+        {
+            Shader *base = slot.shader;
+            if(!enabled() || !base || !hasheightmap(slot) || !hasparam(*base, "parallaxscale")) return NULL;
             if(base == lastworldbase && lastworldshader && lastworldshader->loaded()) return lastworldshader;
 
             defformatstring(name, "tess_%s", base->name);
@@ -89,18 +112,25 @@ namespace renderer
             worldactive = false;
         }
 
-        void setfactor()
+        void setparams(Slot &slot, VSlot &vslot)
         {
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
+
+            Texture *diffuse = NULL;
+            loopv(slot.sts) if(slot.sts[i].type == TEX_DIFFUSE)
+            {
+                diffuse = slot.sts[i].t;
+                break;
+            }
+            float worldperuv = diffuse && diffuse != notexture ? vslot.scale*(diffuse->xs + diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
+            bool active = displacing() && worldperuv > 0.0f;
+            LOCALPARAMF(tessparams, active ? worldperuv*tesselationscale : 0.0f, float(tesselationdebug), tesselationheightlod,
+                        active ? 1.0f : 0.0f);
         }
 
         bool beginwireframe()
         {
-            if(!tesselationdebug || wireframeactive) return false;
-            glGetIntegerv(GL_POLYGON_MODE, previouspolygonmode);
-            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-            wireframeactive = true;
-            return true;
+            return false;
         }
 
         void endwireframe()

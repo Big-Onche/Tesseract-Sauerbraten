@@ -10,10 +10,11 @@ namespace renderer
         void init();
         void cleanup();
         bool enabled();
-        Shader *worldshader(Shader *base);
+        bool displacing();
+        Shader *worldshader(Slot &slot);
         void beginworld();
         void endworld();
-        void setfactor();
+        void setparams(Slot &slot, VSlot &vslot);
         bool beginwireframe();
         void endwireframe();
     }

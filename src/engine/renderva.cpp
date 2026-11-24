@@ -1582,11 +1582,11 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     else if(b.es.layer&LAYER_BOTTOM) slot.shader->setvariant(0, 0, slot, vslot);
     else
     {
-        Shader *shader = pass == RENDERPASS_GBUFFER ? renderer::tesselation::worldshader(slot.shader) : NULL;
+        Shader *shader = pass == RENDERPASS_GBUFFER ? renderer::tesselation::worldshader(slot) : NULL;
         if(shader)
         {
             shader->set(slot, vslot);
-            renderer::tesselation::setfactor();
+            renderer::tesselation::setparams(slot, vslot);
             cur.tessellating = true;
         }
         else slot.shader->set(slot, vslot);
@@ -1789,7 +1789,8 @@ VAR(oqgeom, 0, 1, 1);
 
 void rendergeom()
 {
-    bool doOQ = oqfrags && oqgeom && !drawtex, multipassing = false;
+    // The regular Z prepass contains undisplaced triangles and cannot safely occlude displaced G-buffer geometry.
+    bool doOQ = oqfrags && oqgeom && !drawtex && !renderer::tesselation::displacing(), multipassing = false;
     renderstate cur;
     renderer::tesselation::beginworld();
 
