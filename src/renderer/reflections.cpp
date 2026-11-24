@@ -364,14 +364,19 @@ namespace renderer
                 bool diagnostic = debugrt != 0;
                 bindtarget(tracefbo[diagnostic ? 1 : 0], tracewidth, traceheight);
                 bool detailed = profilertdetail && profilequeryactive >= 0;
-                static const char *hitShaderNames[2][2] =
-                {
-                    { "rtreflectionhit", "rtreflectionhitprofile" },
-                    { "rtreflectionhitms", "rtreflectionhitmsprofile" }
-                };
                 static Shader *hitShaders[2][2] = { { NULL, NULL }, { NULL, NULL } };
+                static uint hitShaderStackSizes[2][2] = { { 0, 0 }, { 0, 0 } };
                 int sampleType = msaalight ? 1 : 0, profileType = detailed ? 1 : 0;
-                Shader *shader = cacheshader(hitShaders[sampleType][profileType], hitShaderNames[sampleType][profileType]);
+                uint stackSize = worldbvh::stacksize();
+                Shader *&hitShader = hitShaders[sampleType][profileType];
+                if(!hitShader || hitShader->invalid() || hitShaderStackSizes[sampleType][profileType] != stackSize)
+                {
+                    defformatstring(name, "rtreflectionhit%s%sstack%u", sampleType ? "ms" : "", profileType ? "profile" : "", stackSize);
+                    generateshader(NULL, "rtreflectionhitgen \"%s\" %d %d %u", name, sampleType, profileType, stackSize);
+                    hitShader = useshaderbyname(name);
+                    hitShaderStackSizes[sampleType][profileType] = stackSize;
+                }
+                Shader *shader = hitShader;
                 if(!shader || shader->isnull()) return false;
                 timer *reflectiontimer = begintimer("RT reflection tracing");
                 shader->set();

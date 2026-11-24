@@ -24,9 +24,7 @@ namespace renderer
         {
             NODE_BINDING = 8,
             TRIANGLE_BINDING,
-            VERTEX_BINDING,
-            BLAS_BINDING,
-            INSTANCE_BINDING,
+            TRIANGLE_UV_BINDING,
             MATERIAL_BINDING
         };
 
@@ -39,6 +37,7 @@ namespace renderer
         bool ready();
         unsigned int generation();
         unsigned int root();
+        unsigned int stacksize();
         unsigned int materialcount();
     }
 }

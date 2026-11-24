@@ -95,12 +95,13 @@ namespace renderer
             int size;
             vtxarray *source;
             bool dirty;
+            uint maximumDepth;
             Bounds bounds;
             vector<GPUNode> nodes;
             vector<GPUTriangle> triangles;
             vector<GPUTriangleUV> triangleUVs;
 
-            BLASRecord() : origin(0, 0, 0), size(0), source(NULL), dirty(true) {}
+            BLASRecord() : origin(0, 0, 0), size(0), source(NULL), dirty(true), maximumDepth(0) {}
         };
 
         struct Statistics
@@ -123,7 +124,7 @@ namespace renderer
         static GLuint buffers[4] = { 0, 0, 0, 0 };
         static Statistics stats;
         static bool sceneReady = false, forceRebuild = true;
-        static uint tlasRoot = 0;
+        static uint tlasRoot = 0, traversalStackSize = 8;
 
         static void settingchanged();
         VARFP(bvh, 0, 1, 1, settingchanged());
@@ -271,6 +272,19 @@ namespace renderer
             buildnodeat(primitives, start, count, leafSize, nodes, 0, ordered, depth, depthLimit, maximumDepth);
         }
 
+        static uint flatteneddepth(const vector<GPUNode> &tlasNodes, uint nodeIndex, uint depth, const vector<uint> &orderedBlases,
+                                   const vector<uint> &activeRecords)
+        {
+            const GPUNode &node = tlasNodes[nodeIndex];
+            if(node.data0&LEAF_BIT)
+            {
+                uint blas = orderedBlases[node.data0&~LEAF_BIT];
+                return depth + records[activeRecords[blas]].maximumDepth - 1;
+            }
+            return max(flatteneddepth(tlasNodes, node.data0, depth + 1, orderedBlases, activeRecords),
+                       flatteneddepth(tlasNodes, node.data0 + 1, depth + 1, orderedBlases, activeRecords));
+        }
+
         static uint surfaceflags(const vtxarray &va, int element)
         {
             int blendStart = va.texs, alphaBackStart = blendStart + va.blends, alphaFrontStart = alphaBackStart + va.alphaback,
@@ -287,6 +301,7 @@ namespace renderer
             record.nodes.shrink(0);
             record.triangles.shrink(0);
             record.triangleUVs.shrink(0);
+            record.maximumDepth = 0;
             record.bounds = Bounds();
             if(!va.vdata || !va.edata || !va.verts || !va.texelems) return false;
 
@@ -328,7 +343,7 @@ namespace renderer
             vector<uint> ordered;
             uint maximumDepth = 0;
             buildnode(primitives, 0, uint(primitives.length()), bvhleafsize, record.nodes, ordered, 1, MAX_BUILD_DEPTH, maximumDepth);
-            stats.maximumDepth = max(stats.maximumDepth, maximumDepth);
+            record.maximumDepth = maximumDepth;
             resizevector(record.triangles, ordered.length());
             resizevector(record.triangleUVs, ordered.length());
             loopv(ordered)
@@ -546,7 +561,8 @@ namespace renderer
                 uint depthLimit = max(uint(MAX_BUILD_DEPTH), uint(activeRecords.length()));
                 buildnode(tlasPrimitives, 0, uint(tlasPrimitives.length()), 1, tlasNodes, orderedBlases, 1, depthLimit, tlasDepth);
             }
-            stats.maximumDepth = max(stats.maximumDepth, tlasDepth);
+            stats.maximumDepth = tlasNodes.empty() ? 0 : flatteneddepth(tlasNodes, 0, 1, orderedBlases, activeRecords);
+            traversalStackSize = max((stats.maximumDepth + 8u)&~7u, 8u);
 
             vector<uint> tlasLeaves;
             resizevector(tlasLeaves, activeRecords.length());
@@ -637,6 +653,7 @@ namespace renderer
         bool ready() { return bvh && sceneReady; }
         unsigned int generation() { return stats.generation; }
         unsigned int root() { return tlasRoot; }
+        unsigned int stacksize() { return traversalStackSize; }
         unsigned int materialcount() { return uint(gpuMaterials.length()); }
 
         static void settingchanged()
@@ -651,8 +668,8 @@ namespace renderer
 
         static void printstats()
         {
-            conoutf("BVH generation %u: %u triangles, %u BLAS, %u TLAS nodes, %u total nodes, maximum depth %u", stats.generation,
-                    stats.triangles, stats.blasCount, stats.tlasNodes, stats.totalNodes, stats.maximumDepth);
+            conoutf("BVH generation %u: %u triangles, %u BLAS, %u TLAS nodes, %u total nodes, maximum depth %u, stack %u", stats.generation,
+                    stats.triangles, stats.blasCount, stats.tlasNodes, stats.totalNodes, stats.maximumDepth, traversalStackSize);
             conoutf("BVH build: %d ms CPU, upload submission: %d ms CPU, GPU buffers: %.2f MiB", stats.buildMillis, stats.uploadMillis,
                     stats.gpuBytes/(1024.0f*1024.0f));
             conoutf("BVH last update: %u rebuilt BLAS, %u preserved BLAS; %u full and %u incremental rebuilds total", stats.rebuiltBlas,
