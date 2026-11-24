@@ -31,14 +31,13 @@ namespace renderer
                 PROFILE_TRACE = 0,
                 PROFILE_TEMPORAL,
                 PROFILE_SPATIAL,
-                PROFILE_COMPOSITE,
                 PROFILE_TOTAL,
                 PROFILE_PASS_COUNT
             };
             enum
             {
                 PROFILE_QUERY_COUNT = 4,
-                PROFILE_TIMESTAMPS = 10,
+                PROFILE_TIMESTAMPS = 8,
                 PROFILE_COUNTER_COUNT = 16,
                 PROFILE_COUNTER_BINDING = 14,
                 PROFILE_MAX_SAMPLES = 240
@@ -132,7 +131,7 @@ namespace renderer
                     glGetQueryObjectui64v_(profilequeries[i][0], GL_QUERY_RESULT, &timestamp[0]);
                     glGetQueryObjectui64v_(profilequeries[i][1], GL_QUERY_RESULT, &timestamp[1]);
                     profileframe &frame = profileframes[i];
-                    loopj(4) if(frame.passmask&(1<<j))
+                    loopj(PROFILE_TOTAL) if(frame.passmask&(1<<j))
                     {
                         glGetQueryObjectui64v_(profilequeries[i][2 + 2*j], GL_QUERY_RESULT, &timestamp[2 + 2*j]);
                         glGetQueryObjectui64v_(profilequeries[i][3 + 2*j], GL_QUERY_RESULT, &timestamp[3 + 2*j]);
@@ -235,7 +234,7 @@ namespace renderer
                 return clamp(rtresolutionscale, 0.25f, 1.0f);
             }
 
-            void allocaterectangle(GLuint &texture, int width, int height, bool linear)
+            void allocaterectangle(GLuint &texture, int width, int height, bool linear, GLenum format = GL_RGBA16F)
             {
                 if(!texture) glGenTextures(1, &texture);
                 glBindTexture(GL_TEXTURE_RECTANGLE, texture);
@@ -243,7 +242,7 @@ namespace renderer
                 glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+                glTexImage2D(GL_TEXTURE_RECTANGLE, 0, format, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
             }
 
             bool bindtarget(GLuint texture, int width, int height, const char *label)
@@ -353,7 +352,8 @@ namespace renderer
                 loopi(2)
                 {
                     allocaterectangle(historytexture[i], resourcewidth, resourceheight, true);
-                    allocaterectangle(historysurface[i], resourcewidth, resourceheight, false);
+                    // World-position rejection reconstructs from alpha; half-float depth is visibly unstable at long range.
+                    allocaterectangle(historysurface[i], resourcewidth, resourceheight, false, GL_RGBA32F);
                     allocaterectangle(historyvalidation[i], resourcewidth, resourceheight, false);
                 }
                 allocaterectangle(filteredtexture, resourcewidth, resourceheight, true);
@@ -491,50 +491,55 @@ namespace renderer
                 return true;
             }
 
-            GLuint spatialfilter()
+            bool spatialfilterandcompose()
             {
-                if(!rtdenoise || !rtspatialfilter || rtspecularspatial <= 0) return historytexture[historyindex];
-                Shader *shader = useshaderbyname(msaalight ? "rtreflectionspatialms" : "rtreflectionspatial");
-                if(!shader || shader->isnull()) return 0;
                 timer *spatialtimer = begintimer("RT reflection spatial");
                 static const int passcounts[] = { 0, 1, 3, 5 };
-                int passes = passcounts[clamp(rtspecularspatial, 0, 3)];
+                int passes = rtdenoise && rtspatialfilter ? passcounts[clamp(rtspecularspatial, 0, 3)] : 0;
                 GLuint source = historytexture[historyindex];
-                loopi(passes)
+                Shader *shader = useshaderbyname("rtreflectionspatial");
+                if(!shader || shader->isnull())
+                {
+                    endtimer(spatialtimer);
+                    return false;
+                }
+                loopi(max(passes - 1, 0))
                 {
                     GLuint destination = (i&1) ? upscaledtexture : filteredtexture;
-                    if(!bindtarget(destination, resourcewidth, resourceheight, "spatial filter")) return 0;
+                    if(!bindtarget(destination, resourcewidth, resourceheight, "spatial filter"))
+                    {
+                        endtimer(spatialtimer);
+                        return false;
+                    }
                     shader->set();
                     setcommonparams();
                     LOCALPARAMF(rtSpatialParams, float(1<<i), 4.5f, 5.0f, debugrt == 14 ? 1.0f : 0.0f);
-                    bindgbuffer();
                     bindrectangle(GL_TEXTURE3, source);
+                    bindrectangle(GL_TEXTURE6, historysurface[historyindex]);
+                    bindrectangle(GL_TEXTURE7, historyvalidation[historyindex]);
                     glActiveTexture_(GL_TEXTURE0);
                     screenquad(resourcewidth, resourceheight);
                     source = destination;
                 }
-                endtimer(spatialtimer);
-                return source;
-            }
-
-            bool compose(GLuint filtered)
-            {
                 glBindFramebuffer_(GL_FRAMEBUFFER, hdrfbo);
                 glViewport(0, 0, resourcewidth, resourceheight);
-                Shader *shader = useshaderbyname(msaalight ? "rtreflectioncompositems" : "rtreflectioncomposite");
-                if(!shader || shader->isnull()) return false;
-                timer *compositetimer = begintimer("RT reflection composition");
+                shader = useshaderbyname("rtreflectionspatialfinal");
+                if(!shader || shader->isnull())
+                {
+                    endtimer(spatialtimer);
+                    return false;
+                }
                 shader->set();
                 setcommonparams();
+                LOCALPARAMF(rtSpatialParams, passes ? float(1<<(passes - 1)) : 0.0f, 4.5f, 5.0f, debugrt == 14 ? 1.0f : 0.0f);
                 LOCALPARAMF(rtDebugParams, float(debugrt), rtmaxdistance, float(rtspecularhistory), 0.0f);
-                bindgbuffer();
-                bindrectangle(GL_TEXTURE3, filtered);
+                bindrectangle(GL_TEXTURE3, source);
                 bindrectangle(GL_TEXTURE4, rawtexture);
                 bindrectangle(GL_TEXTURE5, auxiliarytexture);
-                bindrectangle(GL_TEXTURE6, historytexture[historyindex]);
-                bindrectangle(GL_TEXTURE7, historysurface[historyindex]);
+                bindrectangle(GL_TEXTURE6, historysurface[historyindex]);
+                bindrectangle(GL_TEXTURE7, historyvalidation[historyindex]);
                 bindrectangle(GL_TEXTURE8, hitnormaltexture);
-                bindrectangle(GL_TEXTURE9, historyvalidation[historyindex]);
+                bindrectangle(GL_TEXTURE9, historytexture[historyindex]);
                 if(!debugrt)
                 {
                     glEnable(GL_BLEND);
@@ -543,7 +548,7 @@ namespace renderer
                 glActiveTexture_(GL_TEXTURE0);
                 screenquad(resourcewidth, resourceheight);
                 if(!debugrt) glDisable(GL_BLEND);
-                endtimer(compositetimer);
+                endtimer(spatialtimer);
                 return true;
             }
         }
@@ -602,7 +607,7 @@ namespace renderer
                     latestprofileframe.bvhgeneration);
             conoutf("RT PROFILE SETTINGS: adaptive %s, denoise %s, spatial %s/%d, reconstruction %d, history %d", rtadaptive ? "on" : "off",
                     rtdenoise ? "on" : "off", rtspatialfilter ? "on" : "off", rtspecularspatial, rtreconstruction, rtspecularhistory);
-            static const char *names[PROFILE_PASS_COUNT] = { "trace", "temporal", "spatial", "composite", "total" };
+            static const char *names[PROFILE_PASS_COUNT] = { "trace", "temporal", "spatial+composite", "total" };
             loopi(PROFILE_PASS_COUNT)
             {
                 const profilestat &stat = profilestats[i];
@@ -640,7 +645,7 @@ namespace renderer
                 formatstring(lines[linecount++], "GPU timestamps/counter readback unavailable on this backend");
             else if(!profilesamples) formatstring(lines[linecount++], "Waiting for an active RT reflections frame");
             else formatstring(lines[linecount++], "GPU ms                 latest     avg     min     max    %%total");
-            static const char *names[PROFILE_PASS_COUNT] = { "Trace", "Temporal", "Spatial", "Composite", "Total" };
+            static const char *names[PROFILE_PASS_COUNT] = { "Trace", "Temporal", "Spatial + composite", "Total" };
             float total = profilestats[PROFILE_TOTAL].latest;
             loopi(PROFILE_PASS_COUNT)
             {
@@ -742,15 +747,11 @@ namespace renderer
                 restorehdrtarget(width, height);
                 return;
             }
-            bool hasspatial = rtdenoise && rtspatialfilter && rtspecularspatial > 0;
-            if(hasspatial) beginprofilerpass(PROFILE_SPATIAL);
-            GLuint filtered = spatialfilter();
-            if(hasspatial) endprofilerpass(PROFILE_SPATIAL);
-            beginprofilerpass(PROFILE_COMPOSITE);
-            bool composed = filtered && compose(filtered);
-            endprofilerpass(PROFILE_COMPOSITE);
+            beginprofilerpass(PROFILE_SPATIAL);
+            bool composed = spatialfilterandcompose();
+            endprofilerpass(PROFILE_SPATIAL);
             endprofiler();
-            if(!filtered || !composed)
+            if(!composed)
             {
                 historyvalid = false;
                 pipelineavailable = false;
