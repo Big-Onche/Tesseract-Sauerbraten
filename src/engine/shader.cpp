@@ -349,6 +349,10 @@ static void bindworldtexlocs(Shader &s)
     UNIFORMTEX("detaildiffusemap", TEX_DETAIL+TEX_DIFFUSE);
     UNIFORMTEX("detailnormalmap", TEX_DETAIL+TEX_NORMAL);
     UNIFORMTEX("blendmap", 7);
+    UNIFORMTEX("tessbasenormalmap", 8);
+    UNIFORMTEX("tessbasedetailnormalmap", 9);
+    UNIFORMTEX("tesslayernormalmap", 10);
+    UNIFORMTEX("tesslayerdetailnormalmap", 11);
     UNIFORMTEX("refractmask", 7);
     UNIFORMTEX("refractlight", 8);
 }
@@ -1221,7 +1225,14 @@ void tesselationcopyshader(char *name, char *basename, char *tcs, char *tes)
     Shader *base = useshaderbyname(basename);
     if(!base || !base->loaded()) return;
 
-    newshader(base->type, name, "", "", NULL, 0, tcs, tes, base);
+    Shader *tess = newshader(base->type, name, "", "", NULL, 0, tcs, tes, base);
+    if(!tess) return;
+    Shader *blendvariant = base->getvariant(0, 0);
+    if(blendvariant && blendvariant->loaded())
+    {
+        defformatstring(varname, "<variant:0,0>%s", name);
+        newshader(blendvariant->type, varname, "", "", tess, 0, tcs, tes, blendvariant);
+    }
 }
 COMMAND(tesselationcopyshader, "ssss");
 

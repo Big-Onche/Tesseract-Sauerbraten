@@ -2,7 +2,7 @@
 
 struct elementset
 {
-    ushort texture, envmap;
+    ushort texture, envmap, layertexture;
     union
     {
         struct { uchar orient, layer; };

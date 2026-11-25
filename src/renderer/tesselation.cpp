@@ -48,8 +48,9 @@ VARFP(tesselationshadows, 0, 1, 1,
 VARP(tesselationshadowdebug, 0, 0, 1);
 // 0 off, 1 generated grid, 2 height, 3 displacement, 4 base edges, 5 factors, 6 hardware limit, 7 density, 8 mip,
 // 9 original normal, 10 rasterized geometric normal, 11 reconstructed normal, 12 material normal, 13 depth, 14 tangent frame,
-// 15 seam distance, 16 final seam attenuation
-VARP(tesselationdebug, 0, 0, 16);
+// 15 seam distance, 16 final seam attenuation, 17 base displacement, 18 secondary displacement, 19 blend weight,
+// 20 final blended displacement
+VARP(tesselationdebug, 0, 0, 20);
 
 extern void *getprocaddress(const char *name);
 extern bool hasext(const char *ext);
@@ -93,11 +94,11 @@ namespace renderer
         {
             geometricedge edge;
             ushort a, b;
-            VSlot *vslot;
+            const VSlot *base, *layer;
             bool displaced;
             int next;
 
-            seamedge() : a(0), b(0), vslot(NULL), displaced(false), next(-1) {}
+            seamedge() : a(0), b(0), base(NULL), layer(NULL), displaced(false), next(-1) {}
         };
 
         static vector<seamedge> seamedges;
@@ -205,9 +206,31 @@ namespace renderer
             return slot.shader && hasheightmap(slot) && hasparam(*slot.shader, "parallaxscale");
         }
 
-        bool eligible(const Slot &slot, const ivec &bbmin, const ivec &bbmax)
+        static void resolvelayers(const VSlot &vslot, const VSlot *other, int layermask, const VSlot *&base, const VSlot *&layer)
         {
-            return enabled() && tesselationdistance > 0.0f && camera1 && candisplace(slot) &&
+            if(!other)
+            {
+                base = &vslot;
+                layer = NULL;
+            }
+            else if(layermask&LAYER_TOP)
+            {
+                base = &vslot;
+                layer = other;
+            }
+            else
+            {
+                base = other;
+                layer = &vslot;
+            }
+        }
+
+        bool eligible(const VSlot &vslot, const VSlot *other, int layermask, const ivec &bbmin, const ivec &bbmax)
+        {
+            const VSlot *base, *layer;
+            resolvelayers(vslot, other, layermask, base, layer);
+            bool displaced = (base->slot && candisplace(*base->slot)) || (layer && layer->slot && candisplace(*layer->slot));
+            return enabled() && tesselationdistance > 0.0f && camera1 && displaced &&
                    camera1->o.dist_to_bb(bbmin, bbmax) < tesselationdistance;
         }
 
@@ -371,9 +394,11 @@ namespace renderer
             return changed;
         }
 
-        static void recordseamedges(VSlot &vslot, vector<vertex> &verts, vector<ushort> &indices, bool displaced)
+        static void recordseamedges(VSlot &vslot, VSlot *other, int layermask, vector<vertex> &verts, vector<ushort> &indices, bool displaced)
         {
             if(!remeshsession) return;
+            const VSlot *base, *layer;
+            resolvelayers(vslot, other, layermask, base, layer);
             for(int i = 0; i+2 < indices.length(); i += 3) loopj(3)
             {
                 ushort a = indices[i+j], b = indices[i+(j+1)%3];
@@ -382,7 +407,8 @@ namespace renderer
                 entry.edge = geometricedge(verts[a].pos, verts[b].pos);
                 entry.a = a;
                 entry.b = b;
-                entry.vslot = &vslot;
+                entry.base = base;
+                entry.layer = layer;
                 entry.displaced = displaced;
                 int *head = seamheads.access(entry.edge);
                 entry.next = head ? *head : -1;
@@ -390,26 +416,38 @@ namespace renderer
             }
         }
 
-        static bool repeatingcoordinate(float a, float b)
-        {
-            float difference = a - b;
-            return fabsf(difference - floorf(difference + 0.5f)) <= 1e-4f;
-        }
-
         static bool seamendpointcompatible(const vertex &a, const vertex &b, float normalthreshold)
         {
-            if(!repeatingcoordinate(a.tc.x, b.tc.x) || !repeatingcoordinate(a.tc.y, b.tc.y)) return false;
             vec an = bvec(a.norm).tonormal(), bn = bvec(b.norm).tonormal();
             float lengths = an.magnitude()*bn.magnitude();
             return lengths > 1e-6f && an.dot(bn) >= normalthreshold*lengths;
         }
 
-        static bool seamedgescompatible(const seamedge &a, const seamedge &b, vector<vertex> &verts, float normalthreshold)
+        static bool seamedgegeometrycompatible(const seamedge &a, const seamedge &b, vector<vertex> &verts, float normalthreshold)
         {
-            if(!a.displaced || !b.displaced || a.vslot != b.vslot) return false;
             bool sameorder = verts[a.a].pos == verts[b.a].pos;
             const vertex &aa = verts[a.a], &ab = verts[a.b], &ba = verts[sameorder ? b.a : b.b], &bb = verts[sameorder ? b.b : b.a];
             return seamendpointcompatible(aa, ba, normalthreshold) && seamendpointcompatible(ab, bb, normalthreshold);
+        }
+
+        static bool sameblendpair(const seamedge &a, const seamedge &b)
+        {
+            return a.base == b.base && a.layer == b.layer;
+        }
+
+        static bool blendselectedalongedge(const seamedge &blended, const seamedge &plain, vector<vertex> &verts, BlendMapCache *cache)
+        {
+            int selected = plain.base == blended.base ? 0xFF : (plain.base == blended.layer ? 0 : -1);
+            if(selected < 0 || plain.layer) return false;
+            const vec &start = verts[blended.a].pos, &end = verts[blended.b].pos;
+            int samples = max(int(ceilf(start.dist(end))), 1);
+            loopi(samples + 1)
+            {
+                vec position(start);
+                position.lerp(end, float(i)/samples);
+                if(lookupblendmap(cache, position) != selected) return false;
+            }
+            return true;
         }
 
         void beginremesh(vector<vertex> &verts)
@@ -447,19 +485,50 @@ namespace renderer
             }
 
             float normalthreshold = cosf(tesselationseamangle*RAD);
+            BlendMapCache *blendcache = newblendmapcache();
+            setblendmaporigin(blendcache, ivec(0, 0, 0), worldsize);
             enumeratekt(seamheads, geometricedge, edge, int, head,
             {
                 (void)edge;
-                int count = 0;
-                int first = -1;
-                int second = -1;
-                for(int current = head; current >= 0; current = seamedges[current].next)
+                vector<int> group;
+                for(int current = head; current >= 0; current = seamedges[current].next) group.add(current);
+                int count = group.length();
+                int first = count ? group[0] : -1;
+                bool compatible = false;
+                if(first >= 0)
                 {
-                    if(!count) first = current;
-                    else if(count == 1) second = current;
-                    ++count;
+                    const seamedge &reference = seamedges[first];
+                    bool samesignature = reference.displaced && count == (reference.layer ? 4 : 2);
+                    loopv(group) if(group[i] != first &&
+                                    (!sameblendpair(reference, seamedges[group[i]]) ||
+                                     !seamedgegeometrycompatible(reference, seamedges[group[i]], verts, normalthreshold)))
+                        samesignature = false;
+                    compatible = samesignature;
                 }
-                bool compatible = count == 2 && seamedgescompatible(seamedges[first], seamedges[second], verts, normalthreshold);
+                if(!compatible && count == 3)
+                {
+                    int blended = -1;
+                    int otherblended = -1;
+                    int plain = -1;
+                    int blendcount = 0;
+                    int plaincount = 0;
+                    loopv(group)
+                    {
+                        const seamedge &candidate = seamedges[group[i]];
+                        if(candidate.layer)
+                        {
+                            if(blended < 0) blended = group[i];
+                            else otherblended = group[i];
+                            ++blendcount;
+                        }
+                        else { plain = group[i]; ++plaincount; }
+                    }
+                    compatible = blendcount == 2 && plaincount == 1 && seamedges[blended].displaced &&
+                                 sameblendpair(seamedges[blended], seamedges[otherblended]) &&
+                                 seamedgegeometrycompatible(seamedges[blended], seamedges[otherblended], verts, normalthreshold) &&
+                                 seamedgegeometrycompatible(seamedges[blended], seamedges[plain], verts, normalthreshold) &&
+                                 blendselectedalongedge(seamedges[blended], seamedges[plain], verts, blendcache);
+                }
                 if(compatible) ++remeshinfo.seamcompatible;
                 else
                 {
@@ -472,6 +541,7 @@ namespace renderer
                     }
                 }
             });
+            freeblendmapcache(blendcache);
 
             vector<ushort> queue;
             loopv(verts) if(relevant[i] && distances[i] == 0.0f)
@@ -502,12 +572,14 @@ namespace renderer
             seamheads.clear();
         }
 
-        bool remesh(VSlot &vslot, vector<vertex> &verts, vector<ushort> &indices, int maxindices)
+        bool remesh(VSlot &vslot, VSlot *other, int layermask, vector<vertex> &verts, vector<ushort> &indices, int maxindices)
         {
-            bool displaced = vslot.slot && candisplace(*vslot.slot);
+            const VSlot *base, *layer;
+            resolvelayers(vslot, other, layermask, base, layer);
+            bool displaced = (base->slot && candisplace(*base->slot)) || (layer && layer->slot && candisplace(*layer->slot));
             if(!tesselationremesh || indices.empty() || !displaced)
             {
-                if(!indices.empty()) recordseamedges(vslot, verts, indices, displaced);
+                if(!indices.empty()) recordseamedges(vslot, other, layermask, verts, indices, displaced);
                 return false;
             }
             int start = getclockmillis(), originalverts = verts.length(), originaltris = indices.length()/3;
@@ -524,7 +596,7 @@ namespace renderer
                     verts.setsize(originalverts);
                     indices.setsize(0);
                     indices.move(original);
-                    recordseamedges(vslot, verts, indices, displaced);
+                    recordseamedges(vslot, other, layermask, verts, indices, displaced);
                     return false;
                 }
                 if(indices.length() == oldtris) break;
@@ -534,7 +606,7 @@ namespace renderer
                     verts.setsize(originalverts);
                     indices.setsize(0);
                     indices.move(original);
-                    recordseamedges(vslot, verts, indices, displaced);
+                    recordseamedges(vslot, other, layermask, verts, indices, displaced);
                     return false;
                 }
             }
@@ -575,7 +647,7 @@ namespace renderer
                 (void)edge;
                 if(uses == 1) remeshinfo.boundaryedges++;
             });
-            recordseamedges(vslot, verts, indices, displaced);
+            recordseamedges(vslot, other, layermask, verts, indices, displaced);
             return changed;
         }
 
@@ -603,7 +675,7 @@ namespace renderer
         Shader *worldshader(Slot &slot)
         {
             Shader *base = slot.shader;
-            if(!enabled() || !base || !candisplace(slot)) return NULL;
+            if(!enabled() || !base) return NULL;
             if(base == lastworldbase && lastworldshader && lastworldshader->loaded()) return lastworldshader;
 
             defformatstring(name, "tess_%s", base->name);
@@ -613,10 +685,14 @@ namespace renderer
             return lastworldshader;
         }
 
-        Shader *shadowshader(Slot &slot, bool transparent)
+        Shader *shadowshader(VSlot &vslot, VSlot *other, int layermask, bool transparent)
         {
-            if(!shadowsenabled() || !candisplace(slot)) return NULL;
-            defformatstring(name, "tess_shadow%s_%s", transparent ? "alpha" : "", slot.shader->name);
+            const VSlot *base, *layer;
+            resolvelayers(vslot, other, layermask, base, layer);
+            const Slot *displaced = base->slot && candisplace(*base->slot) ? base->slot :
+                                    (layer && layer->slot && candisplace(*layer->slot) ? layer->slot : NULL);
+            if(!shadowsenabled() || !displaced || !displaced->shader) return NULL;
+            defformatstring(name, "tess_shadow%s_%s", transparent ? "alpha" : "", displaced->shader->name);
             Shader *shader = useshaderbyname(name);
             return shader && shader->loaded() ? shader : NULL;
         }
@@ -630,7 +706,9 @@ namespace renderer
                 loopi(numelems)
                 {
                     VSlot &vslot = lookupvslot(va->texelems[i].texture);
-                    if(eligible(*vslot.slot, va->geommin, va->geommax)) return true;
+                    elementset &es = va->texelems[i];
+                    if(eligible(vslot, es.layertexture != USHRT_MAX ? &lookupvslot(es.layertexture) : NULL, es.layer,
+                                va->geommin, va->geommax)) return true;
                 }
             }
             return false;
@@ -697,47 +775,153 @@ namespace renderer
             shadowactive = false;
         }
 
-        void setparams(Slot &slot, VSlot &vslot)
+        struct tessmaterial
+        {
+            Texture *diffuse, *normal, *detailnormal;
+            const float *parallax, *tripbias;
+            float worldperuv;
+            bool displaced, triplanar;
+
+            tessmaterial() : diffuse(NULL), normal(NULL), detailnormal(NULL), parallax(NULL), tripbias(NULL), worldperuv(0.0f),
+                displaced(false), triplanar(false) {}
+        };
+
+        static tessmaterial gettessmaterial(const VSlot &vslot)
+        {
+            tessmaterial material;
+            if(!vslot.slot) return material;
+            Slot &slot = *vslot.slot;
+            loopv(slot.sts)
+            {
+                if(slot.sts[i].type == TEX_DIFFUSE) material.diffuse = slot.sts[i].t;
+                else if(slot.sts[i].type == TEX_NORMAL) material.normal = slot.sts[i].t;
+            }
+            if(vslot.detail)
+            {
+                VSlot &detail = lookupvslot(vslot.detail);
+                loopv(detail.slot->sts) if(detail.slot->sts[i].type == TEX_NORMAL) material.detailnormal = detail.slot->sts[i].t;
+            }
+            material.parallax = slot.shader ? findparam(slot, vslot, "parallaxscale") : NULL;
+            material.tripbias = slot.shader ? findparam(slot, vslot, "triplanarbias") : NULL;
+            material.worldperuv = material.diffuse && material.diffuse != notexture ?
+                                  vslot.scale*(material.diffuse->xs + material.diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
+            material.displaced = candisplace(slot) && material.worldperuv > 0.0f;
+            material.triplanar = slot.shader && slot.shader->type&SHADER_TRIPLANAR;
+            return material;
+        }
+
+        static void bindtesstexture(int unit, Texture *texture)
+        {
+            glActiveTexture_(GL_TEXTURE0 + unit);
+            glBindTexture(GL_TEXTURE_2D, texture && texture != notexture ? texture->id : notexture->id);
+        }
+
+        static void settessmaterialparams(bool base, const VSlot &vslot, const tessmaterial &material)
+        {
+            const texrotation &rotation = texrotations[vslot.rotation];
+            float xs = material.diffuse && material.diffuse != notexture ? float(material.diffuse->xs) : 1.0f,
+                  ys = material.diffuse && material.diffuse != notexture ? float(material.diffuse->ys) : 1.0f,
+                  scale = TEX_SCALE/vslot.scale,
+                  sk = scale/(rotation.flipx ? -xs : xs), tk = scale/(rotation.flipy ? -ys : ys),
+                  soff = -(rotation.swapxy ? vslot.offset.y : vslot.offset.x)/xs,
+                  toff = -(rotation.swapxy ? vslot.offset.x : vslot.offset.y)/ys;
+            vec2 scroll(vslot.scroll);
+            if(rotation.swapxy) swap(scroll.x, scroll.y);
+            scroll.x *= lastmillis*(rotation.flipx ? -1.0f : 1.0f);
+            scroll.y *= lastmillis*(rotation.flipy ? -1.0f : 1.0f);
+
+            float displacementscale = material.displaced && displacing() ? material.parallax[0]*material.worldperuv*tesselationscale : 0.0f,
+                  displacementbias = material.displaced && displacing() ? material.parallax[1]*material.worldperuv*tesselationscale : 0.0f,
+                  normalwidth = material.normal && material.normal != notexture ? float(material.normal->xs) : 1.0f,
+                  normalheight = material.normal && material.normal != notexture ? float(material.normal->ys) : 1.0f,
+                  detailwidth = material.detailnormal && material.detailnormal != notexture ? float(material.detailnormal->xs) : normalwidth,
+                  detailheight = material.detailnormal && material.detailnormal != notexture ? float(material.detailnormal->ys) : normalheight;
+            float detailscale = scale;
+            if(vslot.detail)
+            {
+                VSlot &detail = lookupvslot(vslot.detail);
+                detailscale = TEX_SCALE/detail.scale;
+            }
+            float triscalez = material.detailnormal && material.detailnormal != notexture ? detailscale/material.detailnormal->xs : scale/xs,
+                  triscalew = material.detailnormal && material.detailnormal != notexture ? detailscale/material.detailnormal->ys : scale/ys,
+                  biasx = material.tripbias ? material.tripbias[0] : 0.3f,
+                  biasy = material.tripbias ? material.tripbias[1] : 0.3f,
+                  biasz = material.tripbias ? material.tripbias[2] : 0.3f;
+            if(base)
+            {
+                LOCALPARAMF(tessbasedisplace, displacementscale, displacementbias, material.displaced && displacing() ? 1.0f : 0.0f,
+                            material.triplanar ? 1.0f : 0.0f);
+                LOCALPARAMF(tessbaseuvparams, sk, tk, soff + scroll.x, toff + scroll.y);
+                LOCALPARAMF(tessbaseuvrotation, rotation.swapxy ? 1.0f : 0.0f);
+                LOCALPARAMF(tessbasemapsize, normalwidth, normalheight, detailwidth, detailheight);
+                LOCALPARAMF(tessbasetriscale, scale/xs, scale/ys, triscalez, triscalew);
+                LOCALPARAMF(tessbasetripbias, biasx, biasy, biasz, material.detailnormal && material.detailnormal != notexture ? 1.0f : 0.0f);
+            }
+            else
+            {
+                LOCALPARAMF(tesslayerdisplace, displacementscale, displacementbias, material.displaced && displacing() ? 1.0f : 0.0f,
+                            material.triplanar ? 1.0f : 0.0f);
+                LOCALPARAMF(tesslayeruvparams, sk, tk, soff + scroll.x, toff + scroll.y);
+                LOCALPARAMF(tesslayeruvrotation, rotation.swapxy ? 1.0f : 0.0f);
+                LOCALPARAMF(tesslayermapsize, normalwidth, normalheight, detailwidth, detailheight);
+                LOCALPARAMF(tesslayertriscale, scale/xs, scale/ys, triscalez, triscalew);
+                LOCALPARAMF(tesslayertripbias, biasx, biasy, biasz, material.detailnormal && material.detailnormal != notexture ? 1.0f : 0.0f);
+            }
+        }
+
+        void setparams(Slot &slot, VSlot &vslot, VSlot *other, int layermask)
         {
             LOCALPARAM(camera, camera1->o);
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
             LOCALPARAMF(tessshadowalpha, slot.texmask&(1<<TEX_ALPHA) ? 1.0f : 0.0f);
 
-            Texture *diffuse = NULL, *normal = NULL, *detailnormal = NULL;
-            loopv(slot.sts)
-            {
-                if(slot.sts[i].type == TEX_DIFFUSE) diffuse = slot.sts[i].t;
-                else if(slot.sts[i].type == TEX_NORMAL) normal = slot.sts[i].t;
-            }
-            if(vslot.detail)
-            {
-                VSlot &detail = lookupvslot(vslot.detail);
-                loopv(detail.slot->sts) if(detail.slot->sts[i].type == TEX_NORMAL) detailnormal = detail.slot->sts[i].t;
-            }
-            float worldperuv = diffuse && diffuse != notexture ? vslot.scale*(diffuse->xs + diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
-            bool active = displacing() && worldperuv > 0.0f;
-            const float *parallax = findparam(slot, vslot, "parallaxscale"), *tripbias = findparam(slot, vslot, "triplanarbias");
+            const VSlot *basevslot, *layervslot;
+            resolvelayers(vslot, other, layermask, basevslot, layervslot);
+            tessmaterial current = gettessmaterial(vslot), base = gettessmaterial(*basevslot), layer;
+            if(layervslot) layer = gettessmaterial(*layervslot);
+            bool active = displacing() && (base.displaced || (layervslot && layer.displaced));
+            bool mixedplain = layervslot && (!base.normal || base.normal == notexture || !layer.normal || layer.normal == notexture);
+            const float *parallax = current.parallax, *tripbias = current.tripbias;
             LOCALPARAMF(parallaxscale, parallax ? parallax[0] : 0.0f, parallax ? parallax[1] : 0.0f,
                         parallax ? parallax[2] : 0.0f, parallax ? parallax[3] : 0.0f);
             LOCALPARAMF(triplanarbias, tripbias ? tripbias[0] : 0.3f, tripbias ? tripbias[1] : 0.3f,
                         tripbias ? tripbias[2] : 0.3f, tripbias ? tripbias[3] : 0.0f);
-            LOCALPARAMF(tessparams, active ? worldperuv*tesselationscale : 0.0f, float(tesselationdebug), tesselationheightlod,
+            float debugworldperuv = max(base.worldperuv, layervslot ? layer.worldperuv : 0.0f);
+            LOCALPARAMF(tessparams, active ? debugworldperuv*tesselationscale : 0.0f, float(tesselationdebug), tesselationheightlod,
                         active ? 1.0f : 0.0f);
+            LOCALPARAMF(tessblendparams, layervslot ? 1.0f : 0.0f, layervslot == &vslot ? 1.0f : 0.0f,
+                        base.displaced ? 1.0f : 0.0f, layervslot && layer.displaced ? 1.0f : 0.0f);
+            settessmaterialparams(true, *basevslot, base);
+            tessmaterial emptylayer;
+            settessmaterialparams(false, layervslot ? *layervslot : *basevslot, layervslot ? layer : emptylayer);
+            bindtesstexture(8, base.normal);
+            bindtesstexture(9, base.detailnormal ? base.detailnormal : base.normal);
+            if(layervslot)
+            {
+                bindtesstexture(10, layer.normal);
+                bindtesstexture(11, layer.detailnormal ? layer.detailnormal : layer.normal);
+            }
+            glActiveTexture_(GL_TEXTURE0);
             LOCALPARAMF(tessadaptiveparams, float(clamp(tesselationmin, 1, tesselationmaxlevel)),
                         float(clamp(tesselationmax, 1, tesselationmaxlevel)), tesselationpixels, tesselationtexels);
-            LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive ? 1.0f : 0.0f,
-                        tesselationautolod ? 1.0f : 0.0f, tesselationlodbias);
+            LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive && !mixedplain ? 1.0f : 0.0f,
+                        tesselationautolod && !mixedplain ? 1.0f : 0.0f, tesselationlodbias);
             LOCALPARAMF(tessviewparams, 0.5f*vieww, 0.5f*viewh, float(tesselationmaxlevel), 0.0f);
             float fadedistance = clamp(tesselationfade, 0.0f, tesselationdistance);
             LOCALPARAMF(tessdistanceparams, tesselationdistance, tesselationdistance - fadedistance, fadedistance, 0.0f);
-            float displacementmagnitude = active && parallax ?
-                                          max(fabsf(parallax[1]), fabsf(parallax[0] + parallax[1]))*worldperuv*tesselationscale : 0.0f;
+            float basemagnitude = active && base.parallax ? max(fabsf(base.parallax[1]), fabsf(base.parallax[0] + base.parallax[1]))*
+                                  base.worldperuv*tesselationscale : 0.0f;
+            float layermagnitude = active && layervslot && layer.parallax ?
+                                   max(fabsf(layer.parallax[1]), fabsf(layer.parallax[0] + layer.parallax[1]))*
+                                   layer.worldperuv*tesselationscale : 0.0f;
+            float displacementmagnitude = max(basemagnitude, layermagnitude);
+            LOCALPARAMF(tessblenddebugscale, basemagnitude, layermagnitude, displacementmagnitude, 0.0f);
             float seamwidth = max(tesselationseamwidth, 2.0f*displacementmagnitude);
             LOCALPARAMF(tessseamparams, tesselationseams ? 1.0f : 0.0f, seamwidth, tesselationseamangle, 0.0f);
-            LOCALPARAMF(tessmapsize, normal && normal != notexture ? float(normal->xs) : 1.0f,
-                        normal && normal != notexture ? float(normal->ys) : 1.0f);
-            LOCALPARAMF(tessdetailmapsize, detailnormal && detailnormal != notexture ? float(detailnormal->xs) : 1.0f,
-                        detailnormal && detailnormal != notexture ? float(detailnormal->ys) : 1.0f);
+            LOCALPARAMF(tessmapsize, current.normal && current.normal != notexture ? float(current.normal->xs) : 1.0f,
+                        current.normal && current.normal != notexture ? float(current.normal->ys) : 1.0f);
+            LOCALPARAMF(tessdetailmapsize, current.detailnormal && current.detailnormal != notexture ? float(current.detailnormal->xs) : 1.0f,
+                        current.detailnormal && current.detailnormal != notexture ? float(current.detailnormal->ys) : 1.0f);
         }
 
         bool beginwireframe()

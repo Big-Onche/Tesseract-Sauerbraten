@@ -1182,7 +1182,7 @@ struct renderstate
     vec refractcolor;
     bool blend;
     int blendx, blendy;
-    int globals, tmu;
+    int globals, tmu, layertexture, layermask;
     GLuint textures[7];
     Slot *slot, *texgenslot;
     VSlot *vslot, *texgenvslot;
@@ -1191,8 +1191,8 @@ struct renderstate
 
     renderstate() : colormask(true), depthmask(true), alphaing(0), vbuf(0), vattribs(false), vquery(false), tessellating(false),
         tesseligible(false), colorscale(1, 1, 1), alphascale(0), refractscale(0), refractcolor(1, 1, 1), blend(false), blendx(-1),
-        blendy(-1), globals(-1), tmu(-1), slot(NULL), texgenslot(NULL), vslot(NULL), texgenvslot(NULL), texgenscroll(0, 0),
-        texgenorient(-1), texgenmillis(lastmillis)
+        blendy(-1), globals(-1), tmu(-1), layertexture(-1), layermask(-1), slot(NULL), texgenslot(NULL), vslot(NULL), texgenvslot(NULL),
+        texgenscroll(0, 0), texgenorient(-1), texgenmillis(lastmillis)
     {
         loopk(7) textures[k] = 0;
     }
@@ -1253,8 +1253,9 @@ struct geombatch
     bool tesseligible;
 
     geombatch(const elementset &es, int offset, vtxarray *va)
-      : es(es), vslot(lookupvslot(es.texture)), offset(offset), va(va),
-        next(-1), batch(-1), tesseligible(renderer::tesselation::eligible(*vslot.slot, va->geommin, va->geommax))
+      : es(es), vslot(lookupvslot(es.texture)), offset(offset), va(va), next(-1), batch(-1),
+        tesseligible(renderer::tesselation::eligible(vslot, es.layertexture != USHRT_MAX ? &lookupvslot(es.layertexture) : NULL, es.layer,
+                                                     va->geommin, va->geommax))
     {}
 
     int compare(const geombatch &b) const
@@ -1278,6 +1279,8 @@ struct geombatch
         if(es.texture > b.es.texture) return 1;
         if(es.envmap < b.es.envmap) return -1;
         if(es.envmap > b.es.envmap) return 1;
+        if(es.layertexture < b.es.layertexture) return -1;
+        if(es.layertexture > b.es.layertexture) return 1;
         if(vslot.slot->params.length() < b.vslot.slot->params.length()) return -1;
         if(vslot.slot->params.length() > b.vslot.slot->params.length()) return 1;
         if(es.orient < b.es.orient) return -1;
@@ -1601,22 +1604,26 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     cur.tesseligible = b.tesseligible;
     if(pass == RENDERPASS_SHADOW)
     {
-        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(slot) : NULL;
+        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(vslot,
+            b.es.layertexture != USHRT_MAX ? &lookupvslot(b.es.layertexture) : NULL, b.es.layer) : NULL;
         if(shader)
         {
             shader->set();
-            renderer::tesselation::setparams(slot, vslot);
+            renderer::tesselation::setparams(slot, vslot,
+                                             b.es.layertexture != USHRT_MAX ? &lookupvslot(b.es.layertexture) : NULL, b.es.layer);
             cur.tessellating = true;
         }
         else useshaderbyname("smworld")->set();
     }
     else if(pass == RENDERPASS_SMALPHA)
     {
-        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(slot, true) : NULL;
+        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(vslot,
+            b.es.layertexture != USHRT_MAX ? &lookupvslot(b.es.layertexture) : NULL, b.es.layer, true) : NULL;
         if(shader)
         {
             shader->set();
-            renderer::tesselation::setparams(slot, vslot);
+            renderer::tesselation::setparams(slot, vslot,
+                                             b.es.layertexture != USHRT_MAX ? &lookupvslot(b.es.layertexture) : NULL, b.es.layer);
             cur.tessellating = true;
         }
         else
@@ -1633,16 +1640,18 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
         else rsmworldshader->set(slot, vslot);
     }
     else if(cur.alphaing) slot.shader->setvariant(cur.alphaing > 1 && vslot.refractscale > 0 ? 1 : 0, 1, slot, vslot);
-    else if(b.es.layer&LAYER_BOTTOM) slot.shader->setvariant(0, 0, slot, vslot);
     else
     {
         Shader *shader = pass == RENDERPASS_GBUFFER && b.tesseligible ? renderer::tesselation::worldshader(slot) : NULL;
         if(shader)
         {
-            shader->set(slot, vslot);
-            renderer::tesselation::setparams(slot, vslot);
+            if(b.es.layer&LAYER_BOTTOM) shader->setvariant(0, 0, slot, vslot);
+            else shader->set(slot, vslot);
+            renderer::tesselation::setparams(slot, vslot,
+                                             b.es.layertexture != USHRT_MAX ? &lookupvslot(b.es.layertexture) : NULL, b.es.layer);
             cur.tessellating = true;
         }
+        else if(b.es.layer&LAYER_BOTTOM) slot.shader->setvariant(0, 0, slot, vslot);
         else slot.shader->set(slot, vslot);
     }
     cur.globals = GlobalShaderParamState::nextversion;
@@ -1706,11 +1715,14 @@ static void renderbatches(renderstate &cur, int pass)
         if(cur.vbuf != b.va->vbuf) changevbuf(cur, pass, b.va);
         if(pass == RENDERPASS_GBUFFER || pass == RENDERPASS_RSM || pass == RENDERPASS_SMALPHA || pass == RENDERPASS_SHADOW)
             changebatchtmus(cur, pass, b);
-        if(cur.vslot != &b.vslot || cur.tesseligible != b.tesseligible)
+        if(cur.vslot != &b.vslot || cur.tesseligible != b.tesseligible || cur.layertexture != b.es.layertexture ||
+           cur.layermask != b.es.layer)
         {
             changeslottmus(cur, pass, *b.vslot.slot, b.vslot);
             if(cur.texgenorient != b.es.orient || (cur.texgenorient < O_ANY && cur.texgenvslot != &b.vslot)) changetexgen(cur, b.es.orient, *b.vslot.slot, b.vslot);
             changeshader(cur, pass, b);
+            cur.layertexture = b.es.layertexture;
+            cur.layermask = b.es.layer;
         }
         else
         {
