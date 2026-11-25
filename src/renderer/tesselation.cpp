@@ -24,6 +24,8 @@ FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
 VARP(tesselationautolod, 0, 1, 1);
 FVARP(tesselationlodbias, -4.0f, -0.5f, 4.0f);
 VARP(tesselationdisplacement, 0, 1, 1);
+FVARFP(tesselationdistance, 0.0f, 256.0f, 1048576.0f, clearshadowcache());
+FVARFP(tesselationfade, 0.0f, 128.0f, 1048576.0f, clearshadowcache());
 VARFP(tesselationremesh, 0, 0, 1, allchanged());
 FVARFP(tesselationpatchsize, 4.0f, 32.0f, 512.0f, allchanged());
 VARFP(tesselationremeshquality, 0, 1, 2, allchanged());
@@ -121,7 +123,7 @@ namespace renderer
 
         bool displacing()
         {
-            return enabled() && tesselationdisplacement && tesselationscale > 0.0f;
+            return enabled() && tesselationdisplacement && tesselationscale > 0.0f && tesselationdistance > 0.0f;
         }
 
         bool shadowsenabled()
@@ -154,6 +156,12 @@ namespace renderer
         static bool candisplace(const Slot &slot)
         {
             return slot.shader && hasheightmap(slot) && hasparam(*slot.shader, "parallaxscale");
+        }
+
+        bool eligible(const Slot &slot, const ivec &bbmin, const ivec &bbmax)
+        {
+            return enabled() && tesselationdistance > 0.0f && camera1 && candisplace(slot) &&
+                   camera1->o.dist_to_bb(bbmin, bbmax) < tesselationdistance;
         }
 
         static float trianglequality(const vec &a, const vec &b, const vec &c)
@@ -420,7 +428,7 @@ namespace renderer
                 loopi(numelems)
                 {
                     VSlot &vslot = lookupvslot(va->texelems[i].texture);
-                    if(candisplace(*vslot.slot)) return true;
+                    if(eligible(*vslot.slot, va->geommin, va->geommax)) return true;
                 }
             }
             return false;
@@ -489,6 +497,7 @@ namespace renderer
 
         void setparams(Slot &slot, VSlot &vslot)
         {
+            LOCALPARAM(camera, camera1->o);
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
             LOCALPARAMF(tessshadowalpha, slot.texmask&(1<<TEX_ALPHA) ? 1.0f : 0.0f);
 
@@ -517,6 +526,8 @@ namespace renderer
             LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive ? 1.0f : 0.0f,
                         tesselationautolod ? 1.0f : 0.0f, tesselationlodbias);
             LOCALPARAMF(tessviewparams, 0.5f*vieww, 0.5f*viewh, float(tesselationmaxlevel), 0.0f);
+            float fadedistance = clamp(tesselationfade, 0.0f, tesselationdistance);
+            LOCALPARAMF(tessdistanceparams, tesselationdistance, tesselationdistance - fadedistance, fadedistance, 0.0f);
             LOCALPARAMF(tessmapsize, normal && normal != notexture ? float(normal->xs) : 1.0f,
                         normal && normal != notexture ? float(normal->ys) : 1.0f);
             LOCALPARAMF(tessdetailmapsize, detailnormal && detailnormal != notexture ? float(detailnormal->xs) : 1.0f,

@@ -1175,7 +1175,7 @@ struct renderstate
     int alphaing;
     bool shadowing;
     GLuint vbuf;
-    bool vattribs, vquery, tessellating;
+    bool vattribs, vquery, tessellating, tesseligible;
     vec colorscale;
     float alphascale;
     float refractscale;
@@ -1189,9 +1189,10 @@ struct renderstate
     vec2 texgenscroll;
     int texgenorient, texgenmillis;
 
-    renderstate() : colormask(true), depthmask(true), alphaing(0), vbuf(0), vattribs(false), vquery(false), tessellating(false), colorscale(1, 1, 1),
-        alphascale(0), refractscale(0), refractcolor(1, 1, 1), blend(false), blendx(-1), blendy(-1), globals(-1), tmu(-1), slot(NULL),
-        texgenslot(NULL), vslot(NULL), texgenvslot(NULL), texgenscroll(0, 0), texgenorient(-1), texgenmillis(lastmillis)
+    renderstate() : colormask(true), depthmask(true), alphaing(0), vbuf(0), vattribs(false), vquery(false), tessellating(false),
+        tesseligible(false), colorscale(1, 1, 1), alphascale(0), refractscale(0), refractcolor(1, 1, 1), blend(false), blendx(-1),
+        blendy(-1), globals(-1), tmu(-1), slot(NULL), texgenslot(NULL), vslot(NULL), texgenvslot(NULL), texgenscroll(0, 0),
+        texgenorient(-1), texgenmillis(lastmillis)
     {
         loopk(7) textures[k] = 0;
     }
@@ -1249,10 +1250,11 @@ struct geombatch
     int offset;
     vtxarray *va;
     int next, batch;
+    bool tesseligible;
 
     geombatch(const elementset &es, int offset, vtxarray *va)
       : es(es), vslot(lookupvslot(es.texture)), offset(offset), va(va),
-        next(-1), batch(-1)
+        next(-1), batch(-1), tesseligible(renderer::tesselation::eligible(*vslot.slot, va->geommin, va->geommax))
     {}
 
     int compare(const geombatch &b) const
@@ -1280,6 +1282,8 @@ struct geombatch
         if(vslot.slot->params.length() > b.vslot.slot->params.length()) return 1;
         if(es.orient < b.es.orient) return -1;
         if(es.orient > b.es.orient) return 1;
+        if(tesseligible < b.tesseligible) return -1;
+        if(tesseligible > b.tesseligible) return 1;
         return 0;
     }
 };
@@ -1594,9 +1598,10 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     VSlot &vslot = b.vslot;
     Slot &slot = *vslot.slot;
     cur.tessellating = false;
+    cur.tesseligible = b.tesseligible;
     if(pass == RENDERPASS_SHADOW)
     {
-        Shader *shader = renderer::tesselation::shadowshader(slot);
+        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(slot) : NULL;
         if(shader)
         {
             shader->set();
@@ -1607,7 +1612,7 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     }
     else if(pass == RENDERPASS_SMALPHA)
     {
-        Shader *shader = renderer::tesselation::shadowshader(slot, true);
+        Shader *shader = b.tesseligible ? renderer::tesselation::shadowshader(slot, true) : NULL;
         if(shader)
         {
             shader->set();
@@ -1631,7 +1636,7 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     else if(b.es.layer&LAYER_BOTTOM) slot.shader->setvariant(0, 0, slot, vslot);
     else
     {
-        Shader *shader = pass == RENDERPASS_GBUFFER ? renderer::tesselation::worldshader(slot) : NULL;
+        Shader *shader = pass == RENDERPASS_GBUFFER && b.tesseligible ? renderer::tesselation::worldshader(slot) : NULL;
         if(shader)
         {
             shader->set(slot, vslot);
@@ -1701,7 +1706,7 @@ static void renderbatches(renderstate &cur, int pass)
         if(cur.vbuf != b.va->vbuf) changevbuf(cur, pass, b.va);
         if(pass == RENDERPASS_GBUFFER || pass == RENDERPASS_RSM || pass == RENDERPASS_SMALPHA || pass == RENDERPASS_SHADOW)
             changebatchtmus(cur, pass, b);
-        if(cur.vslot != &b.vslot)
+        if(cur.vslot != &b.vslot || cur.tesseligible != b.tesseligible)
         {
             changeslottmus(cur, pass, *b.vslot.slot, b.vslot);
             if(cur.texgenorient != b.es.orient || (cur.texgenorient < O_ANY && cur.texgenvslot != &b.vslot)) changetexgen(cur, b.es.orient, *b.vslot.slot, b.vslot);

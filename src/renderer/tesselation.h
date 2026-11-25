@@ -12,6 +12,7 @@ namespace renderer
         bool enabled();
         bool displacing();
         bool shadowsenabled();
+        bool eligible(const Slot &slot, const ivec &bbmin, const ivec &bbmax);
         Shader *worldshader(Slot &slot);
         Shader *shadowshader(Slot &slot, bool transparent = false);
         bool hasshadowcasters();
