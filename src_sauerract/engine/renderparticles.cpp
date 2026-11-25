@@ -917,34 +917,34 @@ struct hazeRenderer : quadrenderer
 
 static partrenderer *parts[] =
 {
-    new quadrenderer("<grey>packages/stain/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),      // blood spats (note: rgb is inverted)
-    new quadrenderer("packages/particle/grass.png", PT_PART|PT_FLIP|PT_RND4|PT_LERP|PT_COLLIDE),          // grass debris
-    new trailrenderer("packages/particle/base.png", PT_TRAIL|PT_LERP),                                    // water, entity
-    new quadrenderer("<grey>packages/particle/smoke.png", PT_PART|PT_FLIP|PT_LERP),                       // smoke
-    new quadrenderer("<grey>packages/particle/steam.png", PT_PART|PT_FLIP),                               // steam
-    new quadrenderer("<grey>packages/particle/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),           // flame on - no flipping please, they have orientation
-    new quadrenderer("packages/particle/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball1
-    new quadrenderer("packages/particle/ball2.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball2
-    new quadrenderer("packages/particle/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                            // fireball3
-    new taperenderer("packages/particle/flare.jpg", PT_TAPE|PT_BRIGHT),                                   // streak
-    &lightnings,                                                                                        // lightning
-    &fireballs,                                                                                         // explosion fireball
-    &bluefireballs,                                                                                     // bluish explosion fireball
-    new quadrenderer("packages/particle/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                           // sparks
-    new quadrenderer("packages/particle/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                           // edit mode entities
-    new quadrenderer("<grey>packages/particle/snow.png", PT_PART|PT_FLIP|PT_RND4, -1),                    // colliding snow
-    new quadrenderer("packages/particle/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("packages/particle/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("packages/particle/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),    // muzzle flash
-    new quadrenderer("packages/interface/items.png", PT_PART|PT_FEW|PT_ICON),                                    // hud icon
-    new quadrenderer("<colorify:1/1/1>packages/interface/items.png", PT_PART|PT_FEW|PT_ICON),                    // grey hud icon
-    &texts,                                                                                             // text
-    &texticons,                                                                                         // text icons
-    &meters,                                                                                            // meter
-    &metervs,                                                                                           // meter vs.
-    new hazeRenderer("packages/particle/haze.png", PT_HAZE|PT_PART|PT_FEW|PT_SOFT|PT_LERP|PT_SCROLL|PT_FADE),  // heat haze (noise)
-    new hazeRenderer("packages/particle/muzzlehaze.jpg", PT_HAZE|PT_PART|PT_FEW|PT_FLIP|PT_TRACK|PT_LERP),      // heat haze (muzzle flash)
-    &flares                                                                                             // lens flares - must be done last
+    new quadrenderer("<grey>packages/stain/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),            // blood spats (note: rgb is inverted)
+    new quadrenderer("packages/particles/grass.png", PT_PART|PT_FLIP|PT_RND4|PT_LERP|PT_COLLIDE),               // grass debris
+    new trailrenderer("packages/particles/base.png", PT_TRAIL|PT_LERP),                                         // water, entity
+    new quadrenderer("<grey>packages/particles/smoke.png", PT_PART|PT_FLIP|PT_LERP),                            // smoke
+    new quadrenderer("<grey>packages/particles/steam.png", PT_PART|PT_FLIP),                                    // steam
+    new quadrenderer("<grey>packages/particles/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),                // flame on - no flipping please, they have orientation
+    new quadrenderer("packages/particles/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                                 // fireball1
+    new quadrenderer("packages/particlesball2.png", PT_PART|PT_FEW|PT_BRIGHT),                                  // fireball2
+    new quadrenderer("packages/particles/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                                 // fireball3
+    new taperenderer("packages/particles/flare.jpg", PT_TAPE|PT_BRIGHT),                                        // streak
+    &lightnings,                                                                                                // lightning
+    &fireballs,                                                                                                 // explosion fireball
+    &bluefireballs,                                                                                             // bluish explosion fireball
+    new quadrenderer("packages/particles/spark.png", PT_PART|PT_FLIP|PT_BRIGHT),                                // sparks
+    new quadrenderer("packages/particles/base.png",  PT_PART|PT_FLIP|PT_BRIGHT),                                // edit mode entities
+    new quadrenderer("<grey>packages/particles/snow.png", PT_PART|PT_FLIP|PT_RND4, -1),                         // colliding snow
+    new quadrenderer("packages/particles/muzzleflash1.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),         // muzzle flash
+    new quadrenderer("packages/particles/muzzleflash2.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),         // muzzle flash
+    new quadrenderer("packages/particles/muzzleflash3.jpg", PT_PART|PT_FEW|PT_FLIP|PT_BRIGHT|PT_TRACK),         // muzzle flash
+    new quadrenderer("packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                                         // hud icon
+    new quadrenderer("<colorify:1/1/1>packages/hud/items.png", PT_PART|PT_FEW|PT_ICON),                         // grey hud icon
+    &texts,                                                                                                     // text
+    &texticons,                                                                                                 // text icons
+    &meters,                                                                                                    // meter
+    &metervs,                                                                                                   // meter vs.
+    new hazeRenderer("sauerract/particle/haze.png", PT_HAZE|PT_PART|PT_FEW|PT_SOFT|PT_LERP|PT_SCROLL|PT_FADE),  // heat haze (noise)
+    new hazeRenderer("sauerract/particle/muzzlehaze.jpg", PT_HAZE|PT_PART|PT_FEW|PT_FLIP|PT_TRACK|PT_LERP),     // heat haze (muzzle flash)
+    &flares                                                                                                     // lens flares - must be done last
 };
 
 VARFP(maxparticles, 10, 4000, 10000, initparticles());
