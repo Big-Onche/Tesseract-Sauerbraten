@@ -11,9 +11,15 @@ namespace renderer
         void cleanup();
         bool enabled();
         bool displacing();
+        bool shadowsenabled();
         Shader *worldshader(Slot &slot);
+        Shader *shadowshader(Slot &slot, bool transparent = false);
+        bool hasshadowcasters();
+        float shadowmargin();
         void beginworld();
         void endworld();
+        void beginshadow();
+        void endshadow();
         void setparams(Slot &slot, VSlot &vslot);
         bool beginwireframe();
         void endwireframe();

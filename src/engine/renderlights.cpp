@@ -4,6 +4,7 @@
 #include "../renderer/reflections.h"
 #include "../renderer/renderer.h"
 #include "../renderer/skylight.h"
+#include "../renderer/tesselation.h"
 #include "../renderer/volumetrics.h"
 
 namespace lightdebug
@@ -1531,7 +1532,7 @@ struct shadowcacheval;
 struct shadowmapinfo
 {
     ushort x, y, size;
-    uchar sidemask, transparent;
+    uchar sidemask, transparent, cacheable;
     int light;
     shadowcacheval *cached;
 };
@@ -1905,6 +1906,7 @@ static shadowmapinfo *addshadowmap(ushort x, ushort y, int size, int &idx, int l
     sm->light = light;
     sm->sidemask = 0;
     sm->transparent = 0;
+    sm->cacheable = 1;
     sm->cached = cached;
     return sm;
 }
@@ -2015,7 +2017,9 @@ void cascadedshadowmap::getprojmatrix()
     updatesplitdist();
 
     // find z extent
-    float minz = lightview.project_bb(worldmin, worldmax), maxz = lightview.project_bb(worldmax, worldmin),
+    float displacementmargin = renderer::tesselation::shadowmargin();
+    float minz = lightview.project_bb(worldmin, worldmax) - displacementmargin,
+          maxz = lightview.project_bb(worldmax, worldmin) + displacementmargin,
           zmargin = max((maxz - minz)*csmdepthmargin, 0.5f*(csmdepthrange - (maxz - minz)));
     minz -= zmargin;
     maxz += zmargin;
@@ -2034,7 +2038,8 @@ void cascadedshadowmap::getprojmatrix()
         vec tc;
         model.transform(c, tc);
         int border = smfilter > 2 ? smborder2 : smborder;
-        const float pradius = ceil(radius * csmpradiustweak) + smalign, step = (2*pradius) / (sm.size - 2*border);
+        const float pradius = ceil(radius * csmpradiustweak + displacementmargin) + smalign,
+                    step = (2*pradius) / (sm.size - 2*border);
         vec2 offset = vec2(tc).sub(pradius).div(step*(1+smalign));
         offset.x = floor(offset.x)*(1+smalign);
         offset.y = floor(offset.y)*(1+smalign);
@@ -2566,7 +2571,7 @@ void resetlights()
         loopv(shadowmaps)
         {
             shadowmapinfo &sm = shadowmaps[i];
-            if(sm.light < 0) continue;
+            if(sm.light < 0 || !sm.cacheable) continue;
             lightinfo &l = lights[sm.light];
             if(sm.cached && shadowcachefull)
             {
@@ -4399,9 +4404,11 @@ void rendershadowmaps(int offset = 0)
         shadowdir = l.dir;
         shadowspot = l.spot;
 
-        shadowmesh *mesh = e ? findshadowmesh(l.ent, *e) : NULL;
-
         findshadowvas(smalpha > 1 && alphashadow > (l.colorshadow() ? 0 : 1));
+        bool tessellatedcasters = renderer::tesselation::hasshadowcasters();
+        // Camera-adaptive patches can change without the light moving, so only these lights bypass static mesh and atlas reuse.
+        if(tessellatedcasters) sm.cacheable = 0;
+        shadowmesh *mesh = !tessellatedcasters && e ? findshadowmesh(l.ent, *e) : NULL;
         if(shadowtransparent)
         {
             sm.transparent = shadowtransparent;
@@ -4417,7 +4424,7 @@ void rendershadowmaps(int offset = 0)
 
         shadowcacheval *cached = NULL;
         int cachemask = 0;
-        if(smcache)
+        if(smcache && !tessellatedcasters)
         {
             int dynmask = smcache <= 1 ? (batcheddynamicmodels() | dynamicshadowvas()) : 0;
             cached = sm.cached;

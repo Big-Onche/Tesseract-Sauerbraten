@@ -925,6 +925,16 @@ static inline void getshadowvabb(vtxarray &v, ivec &bbmin, ivec &bbmax, bool tra
     if(v.children.length() || v.mapmodels.length()) { bbmin = v.bbmin; bbmax = v.bbmax; }
     else { bbmin = v.geommin; bbmax = v.geommax; }
     if(transparent && v.alphatris) { bbmin.min(v.alphamin); bbmax.max(v.alphamax); }
+    int margin = int(ceilf(renderer::tesselation::shadowmargin()));
+    if(margin > 0) { bbmin.sub(margin); bbmax.add(margin); }
+}
+
+static inline void getshadowalphabb(vtxarray &v, ivec &bbmin, ivec &bbmax)
+{
+    bbmin = v.alphamin;
+    bbmax = v.alphamax;
+    int margin = int(ceilf(renderer::tesselation::shadowmargin()));
+    if(margin > 0) { bbmin.sub(margin); bbmax.add(margin); }
 }
 
 void findshadowvas(vector<vtxarray *> &vas, bool transparent)
@@ -933,7 +943,7 @@ void findshadowvas(vector<vtxarray *> &vas, bool transparent)
     {
         vtxarray &v = *vas[i];
         float dist = vadist(&v, shadoworigin);
-        if(dist < shadowradius || !smdistcull)
+        if(dist < shadowradius + renderer::tesselation::shadowmargin() || !smdistcull)
         {
             ivec bbmin, bbmax;
             getshadowvabb(v, bbmin, bbmax, transparent);
@@ -942,7 +952,9 @@ void findshadowvas(vector<vtxarray *> &vas, bool transparent)
             {
                 if(v.alphatris)
                 {
-                    v.shadowtransparent = v.shadowmask & calcbbsidemask(v.alphamin, v.alphamax, shadoworigin, shadowradius, shadowbias);
+                    ivec alphamin, alphamax;
+                    getshadowalphabb(v, alphamin, alphamax);
+                    v.shadowtransparent = v.shadowmask & calcbbsidemask(alphamin, alphamax, shadoworigin, shadowradius, shadowbias);
                     shadowtransparent |= v.shadowtransparent;
                 }
                 else v.shadowtransparent = 0;
@@ -967,7 +979,9 @@ void findcsmshadowvas(vector<vtxarray *> &vas, bool transparent)
             {
                 if(v.alphatris)
                 {
-                    v.shadowtransparent = v.shadowmask & calcbbcsmsplits(v.alphamin, v.alphamax);
+                    ivec alphamin, alphamax;
+                    getshadowalphabb(v, alphamin, alphamax);
+                    v.shadowtransparent = v.shadowmask & calcbbcsmsplits(alphamin, alphamax);
                     shadowtransparent |= v.shadowtransparent;
                 }
                 else v.shadowtransparent = 0;
@@ -1002,7 +1016,7 @@ void findspotshadowvas(vector<vtxarray *> &vas, bool transparent)
     {
         vtxarray &v = *vas[i];
         float dist = vadist(&v, shadoworigin);
-        if(dist < shadowradius || !smdistcull)
+        if(dist < shadowradius + renderer::tesselation::shadowmargin() || !smdistcull)
         {
             ivec bbmin, bbmax;
             getshadowvabb(v, bbmin, bbmax, transparent);
@@ -1012,7 +1026,9 @@ void findspotshadowvas(vector<vtxarray *> &vas, bool transparent)
             {
                 if(v.alphatris)
                 {
-                    v.shadowtransparent = v.shadowmask && bbinsidespot(shadoworigin, shadowdir, shadowspot, v.alphamin, v.alphamax) ? 1 : 0;
+                    ivec alphamin, alphamax;
+                    getshadowalphabb(v, alphamin, alphamax);
+                    v.shadowtransparent = v.shadowmask && bbinsidespot(shadoworigin, shadowdir, shadowspot, alphamin, alphamax) ? 1 : 0;
                     shadowtransparent |= v.shadowtransparent;
                 }
                 else v.shadowtransparent = 0;
@@ -1037,34 +1053,43 @@ void findshadowvas(bool transparent)
     sortshadowvas();
 }
 
+static void rendertessellatedshadowworld();
+
 void rendershadowmapworld()
 {
-    SETSHADER(smworld);
-
-    gle::enablevertex();
-
-    vtxarray *prev = NULL;
-    for(vtxarray *va = shadowva; va; va = va->rnext) if(va->tris && va->shadowmask&(1<<shadowside))
+    if(renderer::tesselation::shadowsenabled() && renderer::tesselation::hasshadowcasters())
     {
-        if(!prev || va->vbuf != prev->vbuf)
+        rendertessellatedshadowworld();
+    }
+    else
+    {
+        SETSHADER(smworld);
+        gle::enablevertex();
+        vtxarray *prev = NULL;
+        for(vtxarray *va = shadowva; va; va = va->rnext) if(va->tris && va->shadowmask&(1<<shadowside))
         {
-            gle::bindvbo(va->vbuf);
-            gle::bindebo(va->ebuf);
-            const vertex *ptr = 0;
-            gle::vertexpointer(sizeof(vertex), ptr->pos.v);
+            if(!prev || va->vbuf != prev->vbuf)
+            {
+                gle::bindvbo(va->vbuf);
+                gle::bindebo(va->ebuf);
+                const vertex *ptr = 0;
+                gle::vertexpointer(sizeof(vertex), ptr->pos.v);
+            }
+
+            if(!smnodraw) drawvatris(va, 3*va->tris, 0);
+            xtravertsva += va->verts;
+            prev = va;
         }
-
-        if(!smnodraw) drawvatris(va, 3*va->tris, 0);
-        xtravertsva += va->verts;
-
-        prev = va;
+        gle::disablevertex();
     }
 
     // Sky faces are sunlight portals in Sauerbraten. They may close local
     // point-light shadow maps, but must never become CSM sun occluders.
     if(skyshadow && shadowmapping != SM_CASCADE)
     {
-        prev = NULL;
+        SETSHADER(smworld);
+        gle::enablevertex();
+        vtxarray *prev = NULL;
         for(vtxarray *va = shadowva; va; va = va->rnext) if(va->sky && va->shadowmask&(1<<shadowside))
         {
             if(!prev || va->vbuf != prev->vbuf)
@@ -1084,7 +1109,7 @@ void rendershadowmapworld()
 
     gle::clearvbo();
     gle::clearebo();
-    gle::disablevertex();
+    if(skyshadow && shadowmapping != SM_CASCADE) gle::disablevertex();
 }
 
 static octaentities *shadowmms = NULL;
@@ -1213,7 +1238,8 @@ enum
     RENDERPASS_GBUFFER_BLEND,
     RENDERPASS_SMALPHA,
     RENDERPASS_RSM,
-    RENDERPASS_RSM_BLEND
+    RENDERPASS_RSM_BLEND,
+    RENDERPASS_SHADOW
 };
 
 struct geombatch
@@ -1370,7 +1396,7 @@ static void changevbuf(renderstate &cur, int pass, vtxarray *va)
     vertex *vdata = (vertex *)0;
     gle::vertexpointer(sizeof(vertex), vdata->pos.v);
 
-    if(pass==RENDERPASS_GBUFFER || pass==RENDERPASS_RSM || pass==RENDERPASS_SMALPHA)
+    if(pass==RENDERPASS_GBUFFER || pass==RENDERPASS_RSM || pass==RENDERPASS_SMALPHA || pass==RENDERPASS_SHADOW)
     {
         gle::normalpointer(sizeof(vertex), vdata->norm.v, GL_BYTE);
         gle::texcoord0pointer(sizeof(vertex), vdata->tc.v);
@@ -1435,12 +1461,13 @@ static inline void bindslottex(renderstate &cur, int type, Texture *tex, GLenum 
 
 static void changeslottmus(renderstate &cur, int pass, Slot &slot, VSlot &vslot)
 {
-    if(pass==RENDERPASS_GBUFFER || pass==RENDERPASS_RSM || pass==RENDERPASS_SMALPHA)
+    if(pass==RENDERPASS_GBUFFER || pass==RENDERPASS_RSM || pass==RENDERPASS_SMALPHA || pass==RENDERPASS_SHADOW)
     {
         Texture *diffuse = slot.sts.empty() ? notexture : slot.sts[0].t;
         bindslottex(cur, TEX_DIFFUSE, diffuse);
 
-        if(pass == RENDERPASS_GBUFFER)
+        if(pass == RENDERPASS_GBUFFER || pass == RENDERPASS_SHADOW ||
+           (pass == RENDERPASS_SMALPHA && renderer::tesselation::shadowsenabled()))
         {
             if(msaasamples) GLOBALPARAMF(hashid, vslot.index);
 
@@ -1495,7 +1522,8 @@ static void changeslottmus(renderstate &cur, int pass, Slot &slot, VSlot &vslot)
         }
     }
 
-    if(pass == RENDERPASS_GBUFFER && vslot.detail)
+    if((pass == RENDERPASS_GBUFFER || pass == RENDERPASS_SHADOW ||
+        (pass == RENDERPASS_SMALPHA && renderer::tesselation::shadowsenabled())) && vslot.detail)
     {
         VSlot &detail = lookupvslot(vslot.detail);
         loopvj(detail.slot->sts)
@@ -1566,11 +1594,32 @@ static inline void changeshader(renderstate &cur, int pass, geombatch &b)
     VSlot &vslot = b.vslot;
     Slot &slot = *vslot.slot;
     cur.tessellating = false;
-    if(pass == RENDERPASS_SMALPHA)
+    if(pass == RENDERPASS_SHADOW)
     {
-        extern Shader *smalphaworldshader;
-        if(slot.texmask&(1<<TEX_ALPHA)) smalphaworldshader->setvariant(0, slot.texmask&(1<<TEX_NORMAL) ? 1 : 0, slot, vslot);
-        else smalphaworldshader->set(slot, vslot);
+        Shader *shader = renderer::tesselation::shadowshader(slot);
+        if(shader)
+        {
+            shader->set();
+            renderer::tesselation::setparams(slot, vslot);
+            cur.tessellating = true;
+        }
+        else useshaderbyname("smworld")->set();
+    }
+    else if(pass == RENDERPASS_SMALPHA)
+    {
+        Shader *shader = renderer::tesselation::shadowshader(slot, true);
+        if(shader)
+        {
+            shader->set();
+            renderer::tesselation::setparams(slot, vslot);
+            cur.tessellating = true;
+        }
+        else
+        {
+            extern Shader *smalphaworldshader;
+            if(slot.texmask&(1<<TEX_ALPHA)) smalphaworldshader->setvariant(0, slot.texmask&(1<<TEX_NORMAL) ? 1 : 0, slot, vslot);
+            else smalphaworldshader->set(slot, vslot);
+        }
     }
     else if(pass == RENDERPASS_RSM)
     {
@@ -1650,7 +1699,7 @@ static void renderbatches(renderstate &cur, int pass)
         curbatch = b.next;
 
         if(cur.vbuf != b.va->vbuf) changevbuf(cur, pass, b.va);
-        if(pass == RENDERPASS_GBUFFER || pass == RENDERPASS_RSM || pass == RENDERPASS_SMALPHA)
+        if(pass == RENDERPASS_GBUFFER || pass == RENDERPASS_RSM || pass == RENDERPASS_SMALPHA || pass == RENDERPASS_SHADOW)
             changebatchtmus(cur, pass, b);
         if(cur.vslot != &b.vslot)
         {
@@ -1761,6 +1810,11 @@ void renderva(renderstate &cur, vtxarray *va, int pass = RENDERPASS_GBUFFER, boo
             mergetexs(cur, va, &va->texelems[va->texs], va->blends, 3*va->tris);
             if(!batchgeom && geombatches.length()) renderbatches(cur, RENDERPASS_RSM);
             break;
+
+        case RENDERPASS_SHADOW:
+            mergetexs(cur, va);
+            if(!batchgeom && geombatches.length()) renderbatches(cur, pass);
+            break;
     }
 }
 
@@ -1783,6 +1837,19 @@ void cleanupgeom(renderstate &cur)
 {
     if(cur.vattribs) disablevattribs(cur);
     if(cur.vbuf) disablevbuf(cur);
+}
+
+static void rendertessellatedshadowworld()
+{
+    renderer::tesselation::beginshadow();
+    renderstate cur;
+    setupgeom(cur);
+    resetbatches();
+    for(vtxarray *va = shadowva; !smnodraw && va; va = va->rnext) if(va->tris && va->shadowmask&(1<<shadowside))
+        renderva(cur, va, RENDERPASS_SHADOW);
+    if(geombatches.length()) renderbatches(cur, RENDERPASS_SHADOW);
+    cleanupgeom(cur);
+    renderer::tesselation::endshadow();
 }
 
 VAR(oqgeom, 0, 1, 1);
@@ -2119,6 +2186,7 @@ void renderalphageom(int side)
 
 void renderalphashadow(bool cullside)
 {
+    renderer::tesselation::beginshadow();
     resetbatches();
 
     renderstate cur;
@@ -2145,6 +2213,7 @@ void renderalphashadow(bool cullside)
     glCullFace(GL_BACK);
 
     cleanupgeom(cur);
+    renderer::tesselation::endshadow();
 }
 
 CVARP(explicitskycolour, 0x800080);
