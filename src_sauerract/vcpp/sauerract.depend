@@ -1,0 +1,982 @@
+# depslib dependency file v1.0
+1795480328 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\engine.h
+	"cube.h"
+	"world.h"
+	"octa.h"
+	"light.h"
+	"texture.h"
+	"bih.h"
+	"model.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\cube.h
+	<math.h>
+	<string.h>
+	<stdio.h>
+	<stdlib.h>
+	<ctype.h>
+	<stdarg.h>
+	<limits.h>
+	<float.h>
+	<assert.h>
+	<time.h>
+	"windows.h"
+	<eh.h>
+	<dbghelp.h>
+	<intrin.h>
+	"SDL.h"
+	<OpenGL/gl.h>
+	<SDL.h>
+	<SDL_opengl.h>
+	<enet/enet.h>
+	<zlib.h>
+	"tools.h"
+	"geom.h"
+	"ents.h"
+	"command.h"
+	"glexts.h"
+	"glemu.h"
+	"iengine.h"
+	"igame.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl.h
+	"SDL_main.h"
+	"SDL_stdinc.h"
+	"SDL_assert.h"
+	"SDL_atomic.h"
+	"SDL_audio.h"
+	"SDL_clipboard.h"
+	"SDL_cpuinfo.h"
+	"SDL_endian.h"
+	"SDL_error.h"
+	"SDL_events.h"
+	"SDL_filesystem.h"
+	"SDL_gamecontroller.h"
+	"SDL_haptic.h"
+	"SDL_hints.h"
+	"SDL_joystick.h"
+	"SDL_loadso.h"
+	"SDL_log.h"
+	"SDL_messagebox.h"
+	"SDL_metal.h"
+	"SDL_mutex.h"
+	"SDL_power.h"
+	"SDL_render.h"
+	"SDL_rwops.h"
+	"SDL_sensor.h"
+	"SDL_shape.h"
+	"SDL_system.h"
+	"SDL_thread.h"
+	"SDL_timer.h"
+	"SDL_version.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_main.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_stdinc.h
+	"SDL_config.h"
+	<sys/types.h>
+	<stdio.h>
+	<stdlib.h>
+	<stddef.h>
+	<stdarg.h>
+	<stdlib.h>
+	<malloc.h>
+	<stddef.h>
+	<stdarg.h>
+	<memory.h>
+	<string.h>
+	<strings.h>
+	<wchar.h>
+	<inttypes.h>
+	<stdint.h>
+	<ctype.h>
+	<math.h>
+	<float.h>
+	<alloca.h>
+	<malloc.h>
+	<malloc.h>
+	<malloc.h>
+	<stdlib.h>
+	<sal.h>
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config.h
+	"SDL_platform.h"
+	"SDL_config_windows.h"
+	"SDL_config_winrt.h"
+	"SDL_config_macosx.h"
+	"SDL_config_iphoneos.h"
+	"SDL_config_android.h"
+	"SDL_config_psp.h"
+	"SDL_config_os2.h"
+	"SDL_config_minimal.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_platform.h
+	"AvailabilityMacros.h"
+	"TargetConditionals.h"
+	<winapifamily.h>
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\begin_code.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\close_code.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_windows.h
+	"SDL_platform.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_winrt.h
+	"SDL_platform.h"
+	<sdkddkver.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_macosx.h
+	"SDL_platform.h"
+	<AvailabilityMacros.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_iphoneos.h
+	"SDL_platform.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_android.h
+	"SDL_platform.h"
+	<stdarg.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_psp.h
+	"SDL_platform.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_os2.h
+	"SDL_platform.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_config_minimal.h
+	"SDL_platform.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_assert.h
+	"SDL_config.h"
+	"begin_code.h"
+	<signal.h>
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_atomic.h
+	"SDL_stdinc.h"
+	"SDL_platform.h"
+	"begin_code.h"
+	<sys/cpuinline.h>
+	<mbarrier.h>
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_audio.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_endian.h"
+	"SDL_mutex.h"
+	"SDL_thread.h"
+	"SDL_rwops.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_error.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_endian.h
+	"SDL_stdinc.h"
+	<endian.h>
+	<endian.h>
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_mutex.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_thread.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_atomic.h"
+	"SDL_mutex.h"
+	"begin_code.h"
+	<process.h>
+	<process.h>
+	<stdlib.h>
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_rwops.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_clipboard.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_cpuinfo.h
+	"SDL_stdinc.h"
+	<intrin.h>
+	<intrin.h>
+	<altivec.h>
+	<arm_neon.h>
+	<armintr.h>
+	<arm_neon.h>
+	<arm64intr.h>
+	<arm64_neon.h>
+	<mm3dnow.h>
+	<immintrin.h>
+	<mmintrin.h>
+	<xmmintrin.h>
+	<emmintrin.h>
+	<pmmintrin.h>
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_events.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_video.h"
+	"SDL_keyboard.h"
+	"SDL_mouse.h"
+	"SDL_joystick.h"
+	"SDL_gamecontroller.h"
+	"SDL_quit.h"
+	"SDL_gesture.h"
+	"SDL_touch.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_video.h
+	"SDL_stdinc.h"
+	"SDL_pixels.h"
+	"SDL_rect.h"
+	"SDL_surface.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_pixels.h
+	"SDL_stdinc.h"
+	"SDL_endian.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_rect.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_pixels.h"
+	"SDL_rwops.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_surface.h
+	"SDL_stdinc.h"
+	"SDL_pixels.h"
+	"SDL_rect.h"
+	"SDL_blendmode.h"
+	"SDL_rwops.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_blendmode.h
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_keyboard.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_keycode.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_keycode.h
+	"SDL_stdinc.h"
+	"SDL_scancode.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_scancode.h
+	"SDL_stdinc.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_mouse.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_joystick.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_gamecontroller.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_rwops.h"
+	"SDL_joystick.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_quit.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_gesture.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_video.h"
+	"SDL_touch.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_touch.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_filesystem.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_haptic.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_joystick.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_hints.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_loadso.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_log.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_messagebox.h
+	"SDL_stdinc.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_metal.h
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_power.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_render.h
+	"SDL_stdinc.h"
+	"SDL_rect.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_sensor.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_shape.h
+	"SDL_stdinc.h"
+	"SDL_pixels.h"
+	"SDL_rect.h"
+	"SDL_surface.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_system.h
+	"SDL_stdinc.h"
+	"SDL_keyboard.h"
+	"SDL_render.h"
+	"SDL_video.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_timer.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_version.h
+	"SDL_stdinc.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_opengl.h
+	"SDL_config.h"
+	"gl_mangle.h"
+	<windows.h>
+	"SDL_opengl_glext.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_opengl_glext.h
+	<windows.h>
+	<stddef.h>
+	<inttypes.h>
+	<inttypes.h>
+	<inttypes.h>
+	<stdint.h>
+	<stdint.h>
+	<inttypes.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\enet.h
+	<stdlib.h>
+	"enet/win32.h"
+	"enet/unix.h"
+	"enet/types.h"
+	"enet/protocol.h"
+	"enet/list.h"
+	"enet/callbacks.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\win32.h
+	<stdlib.h>
+	<winsock2.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\unix.h
+	<stdlib.h>
+	<sys/time.h>
+	<sys/types.h>
+	<sys/socket.h>
+	<arpa/inet.h>
+	<netinet/in.h>
+	<unistd.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\types.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\protocol.h
+	"enet/types.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\list.h
+	<stdlib.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\enet\include\enet\callbacks.h
+	<stdlib.h>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\zlib.h
+	"zconf.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\zconf.h
+	<windows.h>
+	<sys/types.h>
+	<unistd.h>
+	<unixio.h>
+
+1795476597 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\tools.h
+	<new>
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\geom.h
+
+1788682620 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\ents.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\command.h
+
+1795539092 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\glexts.h
+
+1795561603 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\glemu.h
+
+1795477076 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\iengine.h
+
+1781714435 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\igame.h
+
+1795561608 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\world.h
+
+1795602389 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\octa.h
+
+1788685990 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\light.h
+
+1795539094 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\texture.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\bih.h
+
+1788204030 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\model.h
+
+1795478170 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\game.h
+	"cube.h"
+	"ai.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\ai.h
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\cube.h
+	<math.h>
+	<string.h>
+	<stdio.h>
+	<stdlib.h>
+	<ctype.h>
+	<stdarg.h>
+	<limits.h>
+	<float.h>
+	<assert.h>
+	<time.h>
+	"windows.h"
+	<eh.h>
+	<dbghelp.h>
+	<intrin.h>
+	"SDL.h"
+	<OpenGL/gl.h>
+	<SDL.h>
+	<SDL_opengl.h>
+	<enet/enet.h>
+	<zlib.h>
+	"tools.h"
+	"geom.h"
+	"ents.h"
+	"command.h"
+	"glexts.h"
+	"glemu.h"
+	"iengine.h"
+	"igame.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\aa.cpp
+	"engine.h"
+
+1795480328 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\engine.h
+	"cube.h"
+	"world.h"
+	"octa.h"
+	"light.h"
+	"texture.h"
+	"bih.h"
+	"model.h"
+
+1781734184 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\acoustics.cpp
+	"engine.h"
+	"AL/efx-presets.h"
+	"acoustics.h"
+
+1781526439 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\al\efx-presets.h
+
+1781626601 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\acoustics.h
+	"AL/efx-presets.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\bih.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\blend.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\client.cpp
+	"engine.h"
+
+1788643161 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\clouds.cpp
+	"FastNoiseLite.h"
+	"engine.h"
+
+1772032459 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\fastnoiselite.h
+	<cmath>
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\command.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\console.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\dynlight.cpp
+	"engine.h"
+
+1795273672 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\godrays.cpp
+	"engine.h"
+
+1788168171 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\grass.cpp
+	"engine.h"
+
+1772731327 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\heathaze.cpp
+	"engine.h"
+
+1788643087 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\lensflare.cpp
+	"engine.h"
+
+1788643086 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\light.cpp
+	"engine.h"
+
+1795622401 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\main.cpp
+	"engine.h"
+	"SDL_syswm.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_syswm.h
+	"SDL_stdinc.h"
+	"SDL_error.h"
+	"SDL_video.h"
+	"SDL_version.h"
+	<windows.h>
+	<Inspectable.h>
+	<X11/Xlib.h>
+	<X11/Xatom.h>
+	<directfb.h>
+	<UIKit/UIKit.h>
+	"SDL_egl.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_egl.h
+	<EGL/egl.h>
+	<EGL/eglext.h>
+	<stdint.h>
+	<inttypes.h>
+	<stdint.h>
+	<windows.h>
+	<Unknwn.h>
+	<mir_toolkit/mir_client_library.h>
+	<X11/Xlib.h>
+	<X11/Xutil.h>
+
+1772028060 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\material.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\menus.cpp
+	"engine.h"
+
+1781527500 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\movie.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\normal.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\octa.cpp
+	"engine.h"
+
+1795480330 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\octaedit.cpp
+	"engine.h"
+	"../renderer/skylight.h"
+
+1795480234 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\skylight.h
+
+1795603496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\octarender.cpp
+	"engine.h"
+	"../renderer/bvh.h"
+	"../renderer/skylight.h"
+	"../renderer/tesselation.h"
+
+1795536734 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\bvh.h
+
+1795603414 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\tesselation.h
+	"engine.h"
+
+1781607982 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\physics.cpp
+	"engine.h"
+	"mpr.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\mpr.h
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\pvs.cpp
+	"engine.h"
+
+1795540277 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\rendergl.cpp
+	"engine.h"
+	"../renderer/reflections.h"
+	"../renderer/tesselation.h"
+	"../renderer/volumetrics.h"
+
+1795457477 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\reflections.h
+
+1795274039 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\volumetrics.h
+
+1795564416 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\renderlights.cpp
+	"engine.h"
+	"../renderer/bvh.h"
+	"../renderer/cortao.h"
+	"../renderer/reflections.h"
+	"../renderer/renderer.h"
+	"../renderer/skylight.h"
+	"../renderer/tesselation.h"
+	"../renderer/volumetrics.h"
+
+1795289061 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\cortao.h
+	"engine.h"
+
+1795198781 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\renderer.h
+	"engine.h"
+
+1788691946 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\rendermodel.cpp
+	"engine.h"
+	"ragdoll.h"
+	"animmodel.h"
+	"vertmodel.h"
+	"skelmodel.h"
+	"hitzone.h"
+	"md2.h"
+	"md3.h"
+	"md5.h"
+	"obj.h"
+	"smd.h"
+	"iqm.h"
+	"game.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\ragdoll.h
+
+1788204032 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\animmodel.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\vertmodel.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\skelmodel.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\hitzone.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\md2.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\md3.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\md5.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\obj.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\smd.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\iqm.h
+
+1795478170 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\game.h
+	"cube.h"
+	"ai.h"
+
+1787834731 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\renderparticles.cpp
+	"engine.h"
+	"explosion.h"
+	"lensflare.h"
+	"lightning.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\explosion.h
+
+1781788050 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\lensflare.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\lightning.h
+
+1795622121 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\rendersky.cpp
+	"engine.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\rendertext.cpp
+	"engine.h"
+
+1795605266 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\renderva.cpp
+	"engine.h"
+	"../renderer/tesselation.h"
+
+1795622121 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\server.cpp
+	"engine.h"
+	"shellapi.h"
+
+1781447408 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\serverbrowser.cpp
+	"engine.h"
+	"game.h"
+
+1795622121 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\shader.cpp
+	"engine.h"
+
+1795477695 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\sound.cpp
+	"engine.h"
+	"AL/al.h"
+	"AL/alc.h"
+	"AL/efx.h"
+	"AL/efx-presets.h"
+	"sndfile.h"
+	"acoustics.h"
+	<wchar.h>
+	<unistd.h>
+	<sys/types.h>
+	<sys/stat.h>
+	<sys/mman.h>
+	<fcntl.h>
+	<wchar.h>
+
+1781526439 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\al\al.h
+
+1781526439 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\al\alc.h
+
+1781526439 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\al\efx.h
+	<float.h>
+	"alc.h"
+	"al.h"
+
+1781526519 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sndfile.h
+	<stdio.h>
+	<stdint.h>
+	<sys/types.h>
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\stain.cpp
+	"engine.h"
+
+1788266296 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\texture.cpp
+	"engine.h"
+	"SDL_image.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\include\sdl_image.h
+	"SDL.h"
+	"SDL_version.h"
+	"begin_code.h"
+	"close_code.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\ui.cpp
+	"engine.h"
+	"textedit.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\textedit.h
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\water.cpp
+	"engine.h"
+
+1795622121 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\world.cpp
+	"engine.h"
+	"../renderer/skylight.h"
+	"lightfile.h"
+
+1788681856 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\lightfile.h
+	<cstdlib>
+	<cstdio>
+	<cstring>
+	<cctype>
+	<cmath>
+
+1795622121 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\engine\worldio.cpp
+	"engine.h"
+	"acoustics.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\ai.cpp
+	"game.h"
+
+1781565436 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\client.cpp
+	"game.h"
+	"capture.h"
+	"ctf.h"
+	"collect.h"
+	"capture.h"
+	"ctf.h"
+	"collect.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\capture.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\ctf.h
+
+1781546855 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\collect.h
+
+1781546817 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\entities.cpp
+	"game.h"
+
+1795622399 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\game.cpp
+	"game.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\monster.cpp
+	"game.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\movable.cpp
+	"game.h"
+
+1787948194 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\render.cpp
+	"game.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\scoreboard.cpp
+	"game.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\server.cpp
+	"game.h"
+	"capture.h"
+	"ctf.h"
+	"collect.h"
+	"capture.h"
+	"ctf.h"
+	"collect.h"
+	"extinfo.h"
+	"aiman.h"
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\extinfo.h
+
+1772027496 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\aiman.h
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\waypoint.cpp
+	"game.h"
+
+1795478172 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\game\weapon.cpp
+	"game.h"
+
+1795197485 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\bloom.cpp
+	"hdr.h"
+
+1795203056 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\hdr.h
+	"renderer.h"
+
+1795622122 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\bvh.cpp
+	"engine.h"
+	"bvh.h"
+	<stddef.h>
+
+1795622122 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\cortao.cpp
+	"cortao.h"
+
+1795202915 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\pbr.cpp
+	"renderer.h"
+
+1795538593 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\reflections.cpp
+	"engine.h"
+	"reflections.h"
+	"bvh.h"
+
+1795539232 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\renderer.cpp
+	"hdr.h"
+	"reflections.h"
+	"tesselation.h"
+	"volumetrics.h"
+
+1795480235 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\skylight.cpp
+	"engine.h"
+	"skylight.h"
+
+1795605012 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\tesselation.cpp
+	"tesselation.h"
+
+1795203234 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\tonemap.cpp
+	"hdr.h"
+
+1795561604 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\renderer\volumetrics.cpp
+	"engine.h"
+	"volumetrics.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\crypto.cpp
+	"cube.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\geom.cpp
+	"cube.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\glemu.cpp
+	"cube.h"
+
+1795623169 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\stream.cpp
+	"cube.h"
+	<shlobj.h>
+	<unistd.h>
+	<sys/stat.h>
+	<sys/types.h>
+	<dirent.h>
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\tools.cpp
+	"cube.h"
+
+1772027496 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\shared\zip.cpp
+	"cube.h"
+
+1795622173 source:c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\vcpp\mingw.rc
+	"sauerract.rc"
+
+1795622173 c:\users\frtst\documents\github\sauerract\tesseract---sauerbraten\src_sauerract\vcpp\sauerract.rc
+	"winresrc.h"
+
