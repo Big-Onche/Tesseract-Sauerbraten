@@ -303,7 +303,8 @@ namespace renderer
 
         static bool flipqualityedges(vector<vertex> &verts, vector<ushort> &indices, float target)
         {
-            // Diagonal flips are deliberately limited to coplanar, attribute-compatible quads and may not create an oversized edge.
+            // A flip preserves the source surface only for a strictly convex, coplanar, attribute-compatible quad. Concave pairs are
+            // common around octree boundaries; flipping those moves both triangles outside their original union and exposes a hole.
             hashtable<remeshedge, edgeowner> owners;
             vector<uchar> used;
             used.growbuf(indices.length()/3);
@@ -342,16 +343,29 @@ namespace renderer
                     if(n1len <= 1e-6f || n2len <= 1e-6f || n1.dot(n2) < n1len*n2len*0.9995f) continue;
                     vec facenormal = n1;
                     if(!owner->forward) facenormal.neg();
+                    vec newdiagonal = vec(pd).sub(pc), toca = vec(pa).sub(pc), tocb = vec(pb).sub(pc), aside, bside;
+                    aside.cross(newdiagonal, toca);
+                    bside.cross(newdiagonal, tocb);
+                    float asideplane = aside.dot(facenormal), bsideplane = bside.dot(facenormal);
+                    float sidetolerance = facenormal.magnitude()*newdiagonal.magnitude()*max(toca.magnitude(), tocb.magnitude())*1e-5f;
+                    if(fabsf(asideplane) <= sidetolerance || fabsf(bsideplane) <= sidetolerance ||
+                       (asideplane < 0.0f) == (bsideplane < 0.0f))
+                        continue;
                     float oldquality = min(trianglequality(pa, pb, pc), trianglequality(pb, pa, pd));
                     float newquality = min(trianglequality(pc, pa, pd), trianglequality(pc, pd, pb));
                     if(newquality <= oldquality + 0.01f) continue;
                     ushort firsttri[3] = { c, edge.a, d }, secondtri[3] = { c, d, edge.b };
-                    vec test;
-                    test.cross(vec(verts[firsttri[1]].pos).sub(verts[firsttri[0]].pos), vec(verts[firsttri[2]].pos).sub(verts[firsttri[0]].pos));
-                    if(test.dot(facenormal) < 0) { swap(firsttri[1], firsttri[2]); swap(secondtri[1], secondtri[2]); }
+                    vec firstnormal, secondnormal;
+                    firstnormal.cross(vec(verts[firsttri[1]].pos).sub(verts[firsttri[0]].pos),
+                                      vec(verts[firsttri[2]].pos).sub(verts[firsttri[0]].pos));
+                    secondnormal.cross(vec(verts[secondtri[1]].pos).sub(verts[secondtri[0]].pos),
+                                       vec(verts[secondtri[2]].pos).sub(verts[secondtri[0]].pos));
+                    if(firstnormal.dot(facenormal) < 0.0f) swap(firsttri[1], firsttri[2]);
+                    if(secondnormal.dot(facenormal) < 0.0f) swap(secondtri[1], secondtri[2]);
                     loopk(3) { indices[3*first+k] = firsttri[k]; indices[3*second+k] = secondtri[k]; }
                     used[first] = used[second] = 1;
                     changed = true;
+                    break;
                 }
             }
             return changed;
