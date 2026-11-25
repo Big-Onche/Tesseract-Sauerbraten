@@ -454,6 +454,7 @@ struct vacollect : verthash
         optimize();
         gendecals();
 
+        renderer::tesselation::beginremesh(verts);
         enumeratekt(indices, sortkey, k, sortval, t,
         {
             VSlot &vslot = lookupvslot(k.tex, false);
@@ -461,6 +462,7 @@ struct vacollect : verthash
             int maxindices = USHRT_MAX - (worldtris - oldlength);
             if(renderer::tesselation::remesh(vslot, verts, t.tris, maxindices)) worldtris += t.tris.length() - oldlength;
         });
+        renderer::tesselation::endremesh(verts);
 
         va->verts = verts.length();
         va->tris = worldtris/3;

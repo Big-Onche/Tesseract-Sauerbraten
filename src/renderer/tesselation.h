@@ -24,7 +24,9 @@ namespace renderer
         void setparams(Slot &slot, VSlot &vslot);
         bool beginwireframe();
         void endwireframe();
+        void beginremesh(vector<vertex> &verts);
         bool remesh(VSlot &vslot, vector<vertex> &verts, vector<ushort> &indices, int maxindices);
+        void endremesh(vector<vertex> &verts);
         void resetremeshstats();
         void printremeshstats();
     }

@@ -1403,7 +1403,7 @@ static void changevbuf(renderstate &cur, int pass, vtxarray *va)
     if(pass==RENDERPASS_GBUFFER || pass==RENDERPASS_RSM || pass==RENDERPASS_SMALPHA || pass==RENDERPASS_SHADOW)
     {
         gle::normalpointer(sizeof(vertex), vdata->norm.v, GL_BYTE);
-        gle::texcoord0pointer(sizeof(vertex), vdata->tc.v);
+        gle::texcoord0pointer(sizeof(vertex), vdata->tc.v, GL_FLOAT, 3);
         gle::tangentpointer(sizeof(vertex), vdata->tangent.v, GL_BYTE);
     }
 }
