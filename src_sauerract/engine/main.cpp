@@ -1240,7 +1240,7 @@ int main(int argc, char **argv)
     execfile("sauerract/config/sound.cfg");
     execfile("sauerract/config/ui.cfg");
     execfile("sauerract/config/heightmap.cfg");
-    execfile("sauerract/config/blendbrush.cfg");
+    execfile("data/blendbrush.cfg");
     if(game::savedservers()) execfile(game::savedservers(), false);
 
     identflags |= IDF_PERSIST;
