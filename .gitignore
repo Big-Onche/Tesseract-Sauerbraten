@@ -1,12 +1,57 @@
+# Restructuring and local scratch data
+/.temp/
+/.tmp/
+
+# Vanilla Sauerbraten installation content (the overlay never owns these)
+/bin/
+/bin64/
+/bin_unix/
+/config/
+/data/
+/packages/
+/src/
+/sauerbraten.app/
+/sauerbraten.bat
+/sauerbraten.sh
+/sauerbraten_unix
+/server.bat
+/server-init.cfg
+/README.html
+/rpg.bat
+/Sauerbraten.lnk
+/.txt
+/uninstall.exe
+
+# Generated build products
 *.o
 *.obj
 *.gch
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.res
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.dSYM/
+*.app/
+/src_sauerract/.objs/
+/src_sauerract/Debug*/
+/src_sauerract/Release*/
+/src_sauerract/Profile*/
+/src_sauerract/enet/*.a
+/src_sauerract/sauerract*
 
-/bin/
-/bin64/
-/src/vcpp/
-
-/**/*.a
-src/tess_client
-src/tess_server
+# Runtime-generated data
+*.log
+*.dmp
+*.core
+*.tmp
+*.BAK
+__pycache__/
+*.py[cod]
+/.sauerract/
 
