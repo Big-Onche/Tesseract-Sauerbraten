@@ -184,15 +184,15 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
     gle::defvertex(2);
     gle::deftexcoord0();
 
-    settexture("packages/interface/background.png", 0);
+    settexture("data/background.png", 0);
     float bu = w*0.67f/256.0f + backgroundu, bv = h*0.67f/256.0f + backgroundv;
     bgquad(0, 0, w, h, 0, 0, bu, bv);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_BLEND);
-    settexture("packages/interface/background_detail.png", 0);
+    settexture("data/background_detail.png", 0);
     float du = w*0.8f/512.0f + detailu, dv = h*0.8f/512.0f + detailv;
     bgquad(0, 0, w, h, 0, 0, du, dv);
-    settexture("packages/interface/background_decal.png", 3);
+    settexture("data/background_decal.png", 3);
     gle::begin(GL_QUADS);
     loopj(numdecals)
     {
@@ -204,16 +204,11 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
     }
     gle::end();
 
-    gle::colorf(0.6f, 0.6f, 0.6f, 0.6f);
-    settexture("packages/interface/shadow.png", 3);
-    bgquad(0, 0, w, h);
-    gle::colorf(1, 1, 1, 1);
-
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     float lh = 0.5f*min(w, h), lw = lh*2,
           lx = 0.5f*(w - lw), ly = 0.5f*(h*0.5f - lh);
-    settexture((maxtexsize ? min(maxtexsize, hwtexsize) : hwtexsize) >= 1024 && (hudw > 1280 || hudh > 800) ? "<premul>packages/interface/logo_1024.png" : "<premul>packages/interface/logo.png", 3);
+    settexture((maxtexsize ? min(maxtexsize, hwtexsize) : hwtexsize) >= 1024 && (hudw > 1280 || hudh > 800) ? "<premul>data/logo_1024.png" : "<premul>data/logo.png", 3);
     bgquad(lx, ly, lw, lh);
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -246,7 +241,7 @@ void renderbackgroundview(int w, int h, const char *caption, Texture *mapshot, c
             resethudshader();
             glBindTexture(GL_TEXTURE_2D, mapshot->id);
             bgquad(x, y, sz, sz);
-            settexture("packages/interface/guioverlay.png", 3);
+            settexture("data/guioverlay.png", 3);
             bgquad(x, y, sz, sz);
         }
         if(mapname)
@@ -335,7 +330,7 @@ void renderprogressview(int w, int h, float bar, const char *text)   // also use
           fy = renderedframe ? fh/4 : h - fh*1.5f,
           fu1 = 0/512.0f, fu2 = 511/512.0f,
           fv1 = 0/64.0f, fv2 = 52/64.0f;
-    settexture("packages/interface/loading_frame.png", 3);
+    settexture("data/loading_frame.png", 3);
     bgquad(fx, fy, fw, fh, fu1, fv1, fu2-fu1, fv2-fv1);
 
     glEnable(GL_BLEND);
@@ -351,7 +346,7 @@ void renderprogressview(int w, int h, float bar, const char *text)   // also use
 
     if(bar > 0)
     {
-        settexture("packages/interface/loading_bar.png", 3);
+        settexture("data/loading_bar.png", 3);
         bgquad(bx, by, sw, bh, su1, bv1, su2-su1, bv2-bv1);
         bgquad(bx+sw, by, ex-(bx+sw), bh, su2, bv1, eu1-su2, bv2-bv1);
         bgquad(ex, by, ew, bh, eu1, bv1, eu2-eu1, bv2-bv1);
@@ -686,15 +681,14 @@ void resetgl()
 
     inbetweenframes = false;
     if(!reloadtexture(*notexture) ||
-       !reloadtexture("<premul>packages/interface/logo.png") ||
-       !reloadtexture("<premul>packages/interface/logo_1024.png") ||
-       !reloadtexture("packages/interface/background.png") ||
-       !reloadtexture("packages/interface/background_detail.png") ||
-       !reloadtexture("packages/interface/background_decal.png") ||
-       !reloadtexture("packages/interface/shadow.png") ||
-       !reloadtexture("packages/interface/guioverlay.png") ||
-       !reloadtexture("packages/interface/loading_frame.png") ||
-       !reloadtexture("packages/interface/loading_bar.png"))
+       !reloadtexture("<premul>data/logo.png") ||
+       !reloadtexture("<premul>data/logo_1024.png") ||
+       !reloadtexture("data/background.png") ||
+       !reloadtexture("data/background_detail.png") ||
+       !reloadtexture("data/background_decal.png") ||
+       !reloadtexture("data/guioverlay.png") ||
+       !reloadtexture("data/loading_frame.png") ||
+       !reloadtexture("data/loading_bar.png"))
         fatal("failed to reload core texture");
     reloadfonts();
     inbetweenframes = true;

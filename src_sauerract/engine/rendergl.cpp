@@ -2795,7 +2795,7 @@ ICOMMAND(getcrosshair, "i", (int *i),
     if(*i >= 0 && *i < MAXCROSSHAIRS)
     {
         name = crosshairs[*i] ? crosshairs[*i]->name : game::defaultcrosshair(*i);
-        if(!name) name = "packages/interface/crosshair/default.png";
+        if(!name) name = "data/crosshair.png";
     }
     result(name);
 });
@@ -2818,7 +2818,7 @@ void drawcrosshair(int w, int h)
     if(windowhit)
     {
         static Texture *cursor = NULL;
-        if(!cursor) cursor = textureload("packages/interface/cursor.png", 3, true);
+        if(!cursor) cursor = textureload("data/guicursor.png", 3, true);
         crosshair = cursor;
         chsize = cursorsize*w/900.0f;
         UI::getcursorpos(cx, cy);
