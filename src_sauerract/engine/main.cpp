@@ -1218,7 +1218,7 @@ int main(int argc, char **argv)
     gl_checkextensions();
     gl_init();
     volumetricClouds::initnoise();
-    notexture = textureload("packages/texture/game/notexture.png");
+    notexture = textureload("packages/textures/notexture.png");
     if(!notexture) fatal("could not find core textures");
 
     logoutf("init: console");
