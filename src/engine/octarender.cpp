@@ -3,6 +3,7 @@
 #include "engine.h"
 #include "../renderer/bvh.h"
 #include "../renderer/skylight.h"
+#include "../renderer/tesselation.h"
 
 struct vboinfo
 {
@@ -452,6 +453,14 @@ struct vacollect : verthash
     {
         optimize();
         gendecals();
+
+        enumeratekt(indices, sortkey, k, sortval, t,
+        {
+            VSlot &vslot = lookupvslot(k.tex, false);
+            int oldlength = t.tris.length();
+            int maxindices = USHRT_MAX - (worldtris - oldlength);
+            if(renderer::tesselation::remesh(vslot, verts, t.tris, maxindices)) worldtris += t.tris.length() - oldlength;
+        });
 
         va->verts = verts.length();
         va->tris = worldtris/3;
@@ -1735,6 +1744,7 @@ void allchanged(bool load)
 {
     if(mainmenu && !isconnected()) load = false;
     if(load) initlights();
+    renderer::tesselation::resetremeshstats();
     renderprogress(0, "clearing vertex arrays...");
     clearvas(worldroot);
     resetqueries();

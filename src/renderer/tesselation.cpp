@@ -24,6 +24,9 @@ FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
 VARP(tesselationautolod, 0, 1, 1);
 FVARP(tesselationlodbias, -4.0f, -0.5f, 4.0f);
 VARP(tesselationdisplacement, 0, 1, 1);
+VARFP(tesselationremesh, 0, 0, 1, allchanged());
+FVARFP(tesselationpatchsize, 4.0f, 32.0f, 512.0f, allchanged());
+VARFP(tesselationremeshquality, 0, 1, 2, allchanged());
 VARFP(tesselationshadows, 0, 1, 1,
 {
     clearshadowcache();
@@ -41,6 +44,37 @@ namespace renderer
 {
     namespace tesselation
     {
+        struct remeshedge
+        {
+            ushort a, b;
+
+            remeshedge() {}
+            remeshedge(ushort x, ushort y) : a(min(x, y)), b(max(x, y)) {}
+
+            bool operator==(const remeshedge &o) const { return a == o.a && b == o.b; }
+        };
+
+        static inline uint hthash(const remeshedge &e) { return uint(e.a) | (uint(e.b)<<16); }
+        static inline bool htcmp(const remeshedge &a, const remeshedge &b) { return a == b; }
+
+        struct remeshstats
+        {
+            int originaltris, patches, vertices, boundaryedges, degenerates, elongated, millis, qualitybins[5], sizebins[3];
+            double edgesum, qualitysum;
+            float maxedge, minquality;
+
+            void reset()
+            {
+                originaltris = patches = vertices = boundaryedges = degenerates = elongated = millis = 0;
+                loopi(5) qualitybins[i] = 0;
+                loopi(3) sizebins[i] = 0;
+                edgesum = qualitysum = 0.0;
+                maxedge = 0.0f;
+                minquality = 1.0f;
+            }
+        };
+
+        static remeshstats remeshinfo;
         static Shader *lastworldbase = NULL, *lastworldshader = NULL;
         static GLint previouspatchvertices = 3, previouspolygonmode[2] = { GL_FILL, GL_FILL };
         static bool worldactive = false, shadowactive = false, wireframeactive = false;
@@ -120,6 +154,240 @@ namespace renderer
         static bool candisplace(const Slot &slot)
         {
             return slot.shader && hasheightmap(slot) && hasparam(*slot.shader, "parallaxscale");
+        }
+
+        static float trianglequality(const vec &a, const vec &b, const vec &c)
+        {
+            vec ab = vec(b).sub(a), ac = vec(c).sub(a), cross;
+            cross.cross(ab, ac);
+            float edgesq = ab.squaredlen() + vec(c).sub(b).squaredlen() + ac.squaredlen();
+            return edgesq > 1e-12f ? 2.0f*sqrtf(3.0f)*cross.magnitude()/edgesq : 0.0f;
+        }
+
+        static vertex midpoint(const vertex &a, const vertex &b)
+        {
+            vertex v;
+            v.pos = vec(a.pos).add(b.pos).mul(0.5f);
+            v.tc = vec(a.tc).add(b.tc).mul(0.5f);
+            v.norm.lerp(a.norm, b.norm, 0.5f);
+            v.tangent.lerp(a.tangent, b.tangent, 0.5f);
+            v.tangent.w = a.tangent.w == b.tangent.w ? a.tangent.w : (a.tangent.w >= 128 ? 255 : 0);
+            return v;
+        }
+
+        static void addtriangle(vector<ushort> &out, ushort a, ushort b, ushort c)
+        {
+            if(a == b || b == c || c == a) return;
+            out.add(a); out.add(b); out.add(c);
+        }
+
+        static ushort splitedge(vector<vertex> &verts, hashtable<remeshedge, ushort> &midpoints, ushort a, ushort b)
+        {
+            remeshedge edge(a, b);
+            ushort *found = midpoints.access(edge);
+            if(found) return *found;
+            if(verts.length() >= USHRT_MAX) return USHRT_MAX;
+            ushort index = ushort(verts.length());
+            verts.add(midpoint(verts[a], verts[b]));
+            midpoints[edge] = index;
+            return index;
+        }
+
+        static bool refine(vector<vertex> &verts, vector<ushort> &indices, float target)
+        {
+            // Split a geometric edge once for every incident triangle. Repeating this pass produces a conforming dyadic mesh and
+            // makes boundary subdivision deterministic across material and vertex-array boundaries without moving the source surface.
+            const float targetsq = target*target;
+            vector<ushort> output;
+            hashtable<remeshedge, ushort> midpoints;
+            bool changed = false;
+            output.reserve(indices.length()*2);
+            for(int i = 0; i+2 < indices.length(); i += 3)
+            {
+                ushort a = indices[i], b = indices[i+1], c = indices[i+2], ab = USHRT_MAX, bc = USHRT_MAX, ca = USHRT_MAX;
+                bool sab = vec(verts[b].pos).sub(verts[a].pos).squaredlen() > targetsq,
+                     sbc = vec(verts[c].pos).sub(verts[b].pos).squaredlen() > targetsq,
+                     sca = vec(verts[a].pos).sub(verts[c].pos).squaredlen() > targetsq;
+                int mask = (sab ? 1 : 0) | (sbc ? 2 : 0) | (sca ? 4 : 0);
+                if(!mask) { addtriangle(output, a, b, c); continue; }
+                changed = true;
+                if(sab) ab = splitedge(verts, midpoints, a, b);
+                if(sbc) bc = splitedge(verts, midpoints, b, c);
+                if(sca) ca = splitedge(verts, midpoints, c, a);
+                if((sab && ab == USHRT_MAX) || (sbc && bc == USHRT_MAX) || (sca && ca == USHRT_MAX)) return false;
+                switch(mask)
+                {
+                    case 1: addtriangle(output, a, ab, c); addtriangle(output, ab, b, c); break;
+                    case 2: addtriangle(output, b, bc, a); addtriangle(output, bc, c, a); break;
+                    case 4: addtriangle(output, c, ca, b); addtriangle(output, ca, a, b); break;
+                    case 3: addtriangle(output, b, bc, ab); addtriangle(output, a, ab, c); addtriangle(output, ab, bc, c); break;
+                    case 5: addtriangle(output, a, ab, ca); addtriangle(output, ab, b, c); addtriangle(output, ab, c, ca); break;
+                    case 6: addtriangle(output, c, ca, bc); addtriangle(output, a, b, ca); addtriangle(output, b, bc, ca); break;
+                    case 7:
+                        addtriangle(output, a, ab, ca); addtriangle(output, ab, b, bc);
+                        addtriangle(output, ca, bc, c); addtriangle(output, ab, bc, ca);
+                        break;
+                }
+            }
+            if(changed)
+            {
+                indices.setsize(0);
+                indices.move(output);
+            }
+            return true;
+        }
+
+        struct edgeowner
+        {
+            int triangle;
+            ushort third;
+            bool forward;
+
+            edgeowner() : triangle(-1), third(0), forward(false) {}
+        };
+
+        static bool flipqualityedges(vector<vertex> &verts, vector<ushort> &indices, float target)
+        {
+            // Diagonal flips are deliberately limited to coplanar, attribute-compatible quads and may not create an oversized edge.
+            hashtable<remeshedge, edgeowner> owners;
+            vector<uchar> used;
+            used.growbuf(indices.length()/3);
+            loopi(indices.length()/3) used.add(0);
+            bool changed = false;
+            for(int i = 0; i+2 < indices.length(); i += 3)
+            {
+                ushort tri[3] = { indices[i], indices[i+1], indices[i+2] };
+                loopj(3)
+                {
+                    ushort x = tri[j], y = tri[(j+1)%3], opposite = tri[(j+2)%3];
+                    remeshedge edge(x, y);
+                    edgeowner *owner = owners.access(edge);
+                    if(!owner)
+                    {
+                        edgeowner &added = owners[edge];
+                        added.triangle = i/3;
+                        added.third = opposite;
+                        added.forward = x == edge.a;
+                        continue;
+                    }
+                    int first = owner->triangle, second = i/3;
+                    if(used[first] || used[second] || owner->forward == (x == edge.a)) continue;
+                    ushort c = owner->third, d = opposite;
+                    if(c == d) continue;
+                    const vertex &va = verts[edge.a], &vb = verts[edge.b], &vc = verts[c], &vd = verts[d];
+                    if(va.norm != vb.norm || va.norm != vc.norm || va.norm != vd.norm ||
+                       va.tangent != vb.tangent || va.tangent != vc.tangent || va.tangent != vd.tangent)
+                        continue;
+                    const vec &pa = verts[edge.a].pos, &pb = verts[edge.b].pos, &pc = verts[c].pos, &pd = verts[d].pos;
+                    if(pc.squaredist(pd) > target*target*1.0001f) continue;
+                    vec n1, n2;
+                    n1.cross(vec(pb).sub(pa), vec(pc).sub(pa));
+                    n2.cross(vec(pa).sub(pb), vec(pd).sub(pb));
+                    float n1len = n1.magnitude(), n2len = n2.magnitude();
+                    if(n1len <= 1e-6f || n2len <= 1e-6f || n1.dot(n2) < n1len*n2len*0.9995f) continue;
+                    vec facenormal = n1;
+                    if(!owner->forward) facenormal.neg();
+                    float oldquality = min(trianglequality(pa, pb, pc), trianglequality(pb, pa, pd));
+                    float newquality = min(trianglequality(pc, pa, pd), trianglequality(pc, pd, pb));
+                    if(newquality <= oldquality + 0.01f) continue;
+                    ushort firsttri[3] = { c, edge.a, d }, secondtri[3] = { c, d, edge.b };
+                    vec test;
+                    test.cross(vec(verts[firsttri[1]].pos).sub(verts[firsttri[0]].pos), vec(verts[firsttri[2]].pos).sub(verts[firsttri[0]].pos));
+                    if(test.dot(facenormal) < 0) { swap(firsttri[1], firsttri[2]); swap(secondtri[1], secondtri[2]); }
+                    loopk(3) { indices[3*first+k] = firsttri[k]; indices[3*second+k] = secondtri[k]; }
+                    used[first] = used[second] = 1;
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        bool remesh(VSlot &vslot, vector<vertex> &verts, vector<ushort> &indices, int maxindices)
+        {
+            if(!tesselationremesh || indices.empty() || !vslot.slot || !candisplace(*vslot.slot)) return false;
+            int start = getclockmillis(), originalverts = verts.length(), originaltris = indices.length()/3;
+            vector<ushort> original;
+            original.put(indices.getbuf(), indices.length());
+
+            float target = tesselationpatchsize;
+            bool changed = false;
+            loopi(16)
+            {
+                int oldtris = indices.length();
+                if(!refine(verts, indices, target))
+                {
+                    verts.setsize(originalverts);
+                    indices.setsize(0);
+                    indices.move(original);
+                    return false;
+                }
+                if(indices.length() == oldtris) break;
+                changed = true;
+                if(indices.length() > maxindices)
+                {
+                    verts.setsize(originalverts);
+                    indices.setsize(0);
+                    indices.move(original);
+                    return false;
+                }
+            }
+            int flippasses = tesselationremeshquality == 2 ? 8 : (tesselationremeshquality == 1 ? 2 : 0);
+            loopi(flippasses)
+            {
+                if(!flipqualityedges(verts, indices, target)) break;
+                changed = true;
+            }
+
+            remeshinfo.originaltris += originaltris;
+            remeshinfo.patches += indices.length()/3;
+            remeshinfo.vertices += verts.length() - originalverts;
+            remeshinfo.millis += max(getclockmillis() - start, 0);
+            hashtable<remeshedge, int> edgeuses;
+            for(int i = 0; i+2 < indices.length(); i += 3)
+            {
+                const vec &a = verts[indices[i]].pos, &b = verts[indices[i+1]].pos, &c = verts[indices[i+2]].pos;
+                float e0 = a.dist(b), e1 = b.dist(c), e2 = c.dist(a), longest = max(e0, max(e1, e2)), quality = trianglequality(a, b, c);
+                loopj(3)
+                {
+                    remeshedge edge(indices[i+j], indices[i+(j+1)%3]);
+                    int *uses = edgeuses.access(edge);
+                    if(uses) ++*uses;
+                    else edgeuses[edge] = 1;
+                }
+                remeshinfo.edgesum += e0 + e1 + e2;
+                remeshinfo.qualitysum += quality;
+                remeshinfo.maxedge = max(remeshinfo.maxedge, longest);
+                remeshinfo.minquality = min(remeshinfo.minquality, quality);
+                remeshinfo.qualitybins[clamp(int(quality*5.0f), 0, 4)]++;
+                remeshinfo.sizebins[longest <= target*0.5f ? 0 : (longest <= target*1.0001f ? 1 : 2)]++;
+                if(quality <= 1e-5f) remeshinfo.degenerates++;
+                else if(quality < 0.25f) remeshinfo.elongated++;
+            }
+            enumeratekt(edgeuses, remeshedge, edge, int, uses,
+            {
+                (void)edge;
+                if(uses == 1) remeshinfo.boundaryedges++;
+            });
+            return changed;
+        }
+
+        void resetremeshstats() { remeshinfo.reset(); }
+
+        void printremeshstats()
+        {
+            int edges = remeshinfo.patches*3;
+            conoutf(CON_INFO, "tessellation remesh: %d original triangles, %d patches, %d new vertices, %d ms",
+                    remeshinfo.originaltris, remeshinfo.patches, remeshinfo.vertices, remeshinfo.millis);
+            conoutf(CON_INFO, "edges: %.2f average, %.2f maximum; quality: %.3f average, %.3f minimum; %d elongated, %d degenerate",
+                    edges ? float(remeshinfo.edgesum/edges) : 0.0f, remeshinfo.maxedge,
+                    remeshinfo.patches ? float(remeshinfo.qualitysum/remeshinfo.patches) : 0.0f,
+                    remeshinfo.patches ? remeshinfo.minquality : 0.0f, remeshinfo.elongated, remeshinfo.degenerates);
+            conoutf(CON_INFO, "quality bins [0-.2/.2-.4/.4-.6/.6-.8/.8-1]: %d/%d/%d/%d/%d; size [<=.5x/<=1x/>1x]: %d/%d/%d; boundaries: %d",
+                    remeshinfo.qualitybins[0], remeshinfo.qualitybins[1], remeshinfo.qualitybins[2], remeshinfo.qualitybins[3],
+                    remeshinfo.qualitybins[4], remeshinfo.sizebins[0], remeshinfo.sizebins[1], remeshinfo.sizebins[2],
+                    remeshinfo.boundaryedges);
+            conoutf(CON_INFO, "additional geometry memory: %d bytes", remeshinfo.vertices*int(sizeof(vertex)) +
+                    max(remeshinfo.patches - remeshinfo.originaltris, 0)*3*int(sizeof(ushort)));
         }
 
         Shader *worldshader(Slot &slot)
@@ -257,7 +525,11 @@ namespace renderer
 
         bool beginwireframe()
         {
-            return false;
+            if(wireframeactive || tesselationdebug != 4) return false;
+            glGetIntegerv(GL_POLYGON_MODE, previouspolygonmode);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            wireframeactive = true;
+            return true;
         }
 
         void endwireframe()
@@ -269,3 +541,5 @@ namespace renderer
         }
     }
 }
+
+ICOMMAND(tesselationremeshstats, "", (), renderer::tesselation::printremeshstats());
