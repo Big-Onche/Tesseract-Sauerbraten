@@ -476,10 +476,14 @@ const char *addpackagedir(const char *dir)
 
 static bool sauerractresource(const char *filename, string &overlay, string &vanilla)
 {
-    static const char packaged[] = "packages/";
-    if(strncmp(filename, packaged, sizeof(packaged)-1)) return false;
+    string normalized;
+    copystring(normalized, filename);
+    for(char *c = normalized; *c; c++) if(*c == '\\') *c = '/';
 
-    const char *relative = filename + sizeof(packaged)-1;
+    static const char packaged[] = "packages/";
+    if(strncmp(normalized, packaged, sizeof(packaged)-1)) return false;
+
+    const char *relative = normalized + sizeof(packaged)-1;
     if(!strncmp(relative, "map/", 4))
     {
         formatstring(overlay, "sauerract/maps/%s", relative+4);
@@ -504,7 +508,7 @@ static bool sauerractresource(const char *filename, string &overlay, string &van
         else if(!strncmp(relative, "interface/", 10)) formatstring(vanilla, "packages/hud/%s", relative+10);
         else if(!strncmp(relative, "particle/", 9)) formatstring(vanilla, "packages/particles/%s", relative+9);
         else if(!strncmp(relative, "stain/", 6)) formatstring(vanilla, "packages/particles/%s", relative+6);
-        else copystring(vanilla, filename);
+        else copystring(vanilla, normalized);
     }
     return true;
 }

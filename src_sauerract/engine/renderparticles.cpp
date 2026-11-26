@@ -918,13 +918,13 @@ struct hazeRenderer : quadrenderer
 static partrenderer *parts[] =
 {
     new quadrenderer("<grey>packages/stain/blood.png", PT_PART|PT_FLIP|PT_MOD|PT_RND4, STAIN_BLOOD),            // blood spats (note: rgb is inverted)
-    new quadrenderer("packages/particles/grass.png", PT_PART|PT_FLIP|PT_RND4|PT_LERP|PT_COLLIDE),               // grass debris
+    new quadrenderer("sauerract/particle/grass.png", PT_PART|PT_FLIP|PT_RND4|PT_LERP|PT_COLLIDE),               // grass debris
     new trailrenderer("packages/particles/base.png", PT_TRAIL|PT_LERP),                                         // water, entity
     new quadrenderer("<grey>packages/particles/smoke.png", PT_PART|PT_FLIP|PT_LERP),                            // smoke
     new quadrenderer("<grey>packages/particles/steam.png", PT_PART|PT_FLIP),                                    // steam
     new quadrenderer("<grey>packages/particles/flames.png", PT_PART|PT_HFLIP|PT_RND4|PT_BRIGHT),                // flame on - no flipping please, they have orientation
     new quadrenderer("packages/particles/ball1.png", PT_PART|PT_FEW|PT_BRIGHT),                                 // fireball1
-    new quadrenderer("packages/particlesball2.png", PT_PART|PT_FEW|PT_BRIGHT),                                  // fireball2
+    new quadrenderer("packages/particles/ball2.png", PT_PART|PT_FEW|PT_BRIGHT),                                 // fireball2
     new quadrenderer("packages/particles/ball3.png", PT_PART|PT_FEW|PT_BRIGHT),                                 // fireball3
     new taperenderer("packages/particles/flare.jpg", PT_TAPE|PT_BRIGHT),                                        // streak
     &lightnings,                                                                                                // lightning
