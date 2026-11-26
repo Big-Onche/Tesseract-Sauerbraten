@@ -383,17 +383,9 @@ void text_boundsf(const char *str, float &width, float &height, int maxwidth)
 }
 
 Shader *textshader = NULL;
-static bool drawingtextshadow = false;
 
 void draw_text(const char *str, float left, float top, int r, int g, int b, int a, int cursor, int maxwidth)
 {
-    if(!drawingtextshadow && !textmatrix && curfont && !strcmp(curfont->name, "default_outline"))
-    {
-        drawingtextshadow = true;
-        draw_text(str, left+4, top+4, 0, 0, 0, -0xC0, -1, maxwidth);
-        drawingtextshadow = false;
-    }
-
     #define TEXTINDEX(idx) if(idx == cursor) { cx = x; cy = y; }
     #define TEXTWHITE(idx)
     #define TEXTLINE(idx)
