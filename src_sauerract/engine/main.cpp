@@ -1134,13 +1134,16 @@ int main(int argc, char **argv)
     // set home dir first
     for(int i = 1; i<argc; i++) if(argv[i][0]=='-' && argv[i][1] == 'u') { sethomedir(&argv[i][2]); break; }
     // set log after home dir, but before anything else
+    bool haslogfile = false;
     for(int i = 1; i<argc; i++) if(argv[i][0]=='-' && argv[i][1] == 'g')
     {
         const char *file = argv[i][2] ? &argv[i][2] : "log.txt";
         setlogfile(file);
         logoutf("Setting log file: %s", file);
+        haslogfile = true;
         break;
     }
+    if(!haslogfile) setlogfile("log.txt");
     execfile("sauerract/config/init.cfg", false);
     for(int i = 1; i<argc; i++)
     {
