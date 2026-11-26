@@ -502,6 +502,8 @@ static bool sauerractresource(const char *filename, string &overlay, string &van
         else if(!strncmp(relative, "sound/game/", 11)) formatstring(vanilla, "packages/sounds/%s", relative+11);
         else if(!strncmp(relative, "sound/mapsound/", 15)) formatstring(vanilla, "packages/sounds/%s", relative+15);
         else if(!strncmp(relative, "sound/", 6)) formatstring(vanilla, "packages/sounds/%s", relative+6);
+        else if(!strcmp(relative, "interface/crosshair/default.png")) copystring(vanilla, "data/crosshair.png");
+        else if(!strcmp(relative, "interface/crosshair/default_hit.png")) copystring(vanilla, "data/hit.png");
         else if(!strncmp(relative, "interface/crosshair/", 20)) formatstring(vanilla, "packages/crosshairs/%s", relative+20);
         else if(!strncmp(relative, "interface/font/", 15)) formatstring(vanilla, "packages/fonts/%s", relative+15);
         else if(!strncmp(relative, "interface/icons/", 16)) formatstring(vanilla, "packages/icons/%s", relative+16);
