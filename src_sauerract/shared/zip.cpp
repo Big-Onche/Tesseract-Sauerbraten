@@ -239,7 +239,7 @@ static void mountzip(ziparchive &arch, vector<zipfile> &files, const char *mount
                     stripdir = f.name;
                     striplen = ogzdir + 1 - f.name;
                 }
-                if(!mountdir) mountdir = "packages/map/";
+                if(!mountdir) mountdir = "packages/base/";
                 break;
             }
         }

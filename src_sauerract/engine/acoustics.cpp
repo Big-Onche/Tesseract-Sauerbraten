@@ -427,7 +427,7 @@ namespace acoustics
 
         string pakname, mapname, cfgname;
         getmapfilenames(mname, NULL, pakname, mapname, cfgname);
-        nformatstring(acgname, MAXSTRLEN, "packages/map/%s.acg", mapname);
+        nformatstring(acgname, MAXSTRLEN, "sauerract/maps/%s.acg", mapname);
         path(acgname);
         return true;
     }

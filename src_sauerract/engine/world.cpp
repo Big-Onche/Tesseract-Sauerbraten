@@ -1781,7 +1781,7 @@ ICOMMAND(lightproperty, "ssN", (const char *name, const char *value, int *numarg
 
 void saveLightEntities()
 {
-    defformatstring(filename, "packages/map/%s.lit", game::getclientmap());
+    defformatstring(filename, "sauerract/maps/%s.lit", game::getclientmap());
     defformatstring(tempname, "%s.tmp", filename);
     vector<lightfile::record> records;
     const vector<extentity *> &ents = entities::getents();
@@ -1816,7 +1816,7 @@ ICOMMAND(savelights, "", (), saveLightEntities());
 
 void loadLightEntities(bool msg = true, const char *mapName = NULL)
 {
-    defformatstring(filename, "packages/map/%s.lit", mapName ? mapName : game::getclientmap());
+    defformatstring(filename, "sauerract/maps/%s.lit", mapName ? mapName : game::getclientmap());
     stream *file = openutf8file(filename, "r");
     if(!file)
     {
