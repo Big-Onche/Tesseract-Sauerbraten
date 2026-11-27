@@ -278,6 +278,15 @@ void setbackgroundinfo(const char *caption = NULL, Texture *mapshot = NULL, cons
     }
 }
 
+static void swaploadingbuffers()
+{
+    // Progress redraws must not pace the loader to the display refresh rate.
+    int interval = SDL_GL_GetSwapInterval();
+    bool restoreinterval = interval && SDL_GL_SetSwapInterval(0) == 0;
+    swapbuffers(false);
+    if(restoreinterval) SDL_GL_SetSwapInterval(interval);
+}
+
 void renderbackground(const char *caption, Texture *mapshot, const char *mapname, const char *mapinfo, bool force)
 {
     if(!inbetweenframes && !force) return;
@@ -298,7 +307,7 @@ void renderbackground(const char *caption, Texture *mapshot, const char *mapname
     loopi(3)
     {
         renderbackgroundview(w, h, caption, mapshot, mapname, mapinfo);
-        swapbuffers(false);
+        swaploadingbuffers();
     }
 
     setbackgroundinfo(caption, mapshot, mapname, mapinfo);
@@ -396,7 +405,7 @@ void renderprogress(float bar, const char *text, bool background)   // also used
     if(background || forcebackground) restorebackground(w, h, forcebackground);
 
     renderprogressview(w, h, bar, text);
-    swapbuffers(false);
+    swaploadingbuffers();
 }
 
 #ifdef WIN32
