@@ -1243,7 +1243,7 @@ VAR(testpitch, -90, 0, 90);
 void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int hold, int attack, int attackdelay, int lastaction, int lastpain, float fade, bool ragdoll, bool onlyshadow, int flags)
 {
     int anim = hold ? hold : ANIM_IDLE|ANIM_LOOP;
-    float yaw = testanims && d==player ? 0 : d->yaw,
+    float yaw = (testanims && d==player ? 0 : d->yaw) + 90,
           pitch = testpitch && d==player ? testpitch : d->pitch;
     vec o = d->feetpos();
     int basetime = 0;
