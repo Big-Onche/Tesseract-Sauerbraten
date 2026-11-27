@@ -824,6 +824,8 @@ extern int blendpaintmode;
 
 struct BlendMapCache;
 extern BlendMapCache *newblendmapcache();
+extern float blendmaptexelscale();
+extern uchar lookupblendtexel(BlendMapCache *cache, int x, int y);
 extern void freeblendmapcache(BlendMapCache *&cache);
 extern bool setblendmaporigin(BlendMapCache *cache, const ivec &o, int size);
 extern bool hasblendmap(BlendMapCache *cache);

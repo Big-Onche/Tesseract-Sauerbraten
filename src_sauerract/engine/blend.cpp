@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "../renderer/tesselation.h"
 
 enum
 {
@@ -848,6 +849,17 @@ static void updateblendtextures(uchar &type, BlendMapNode &node, int bmx, int bm
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
+float blendmaptexelscale()
+{
+    return float(1<<min(worldscale-BM_SCALE, blendtexsize))/float(1<<min(worldscale, 12));
+}
+
+uchar lookupblendtexel(BlendMapCache *cache, int x, int y)
+{
+    float step = 1.0f/blendmaptexelscale(), center = float(1<<BM_SCALE)*0.5f;
+    return lookupblendmap(cache, vec(x*step + center, y*step + center, 0));
+}
+
 void updateblendtextures(int x1, int y1, int x2, int y2)
 {
     int bmsize = worldsize>>BM_SCALE,
@@ -857,6 +869,7 @@ void updateblendtextures(int x1, int y1, int x2, int y2)
         uy2 = (min(y2, worldsize) + (1<<BM_SCALE)-1) >> BM_SCALE;
     if(ux1 >= ux2 || uy1 >= uy2) return;
     updateblendtextures(blendmap.type, blendmap, 0, 0, bmsize, ux1, uy1, ux2-ux1, uy2-uy1);
+    renderer::tesselation::invalidateblendseams();
 }
 
 void clearblendtextures()

@@ -10,6 +10,7 @@ namespace renderer
         void init();
         void cleanup();
         bool enabled();
+        bool conforming();
         bool displacing();
         bool shadowsenabled();
         bool eligible(const VSlot &vslot, const VSlot *layer, int layermask, const ivec &bbmin, const ivec &bbmax);
@@ -17,6 +18,7 @@ namespace renderer
         Shader *shadowshader(VSlot &vslot, VSlot *layer, int layermask, bool transparent = false);
         bool hasshadowcasters();
         float shadowmargin();
+        float displacementmargin();
         void beginworld();
         void endworld();
         void beginshadow();
@@ -24,9 +26,14 @@ namespace renderer
         void setparams(Slot &slot, VSlot &vslot, VSlot *layer, int layermask);
         bool beginwireframe();
         void endwireframe();
-        void beginremesh(vector<vertex> &verts);
+        void beginremesh();
+        void finishseams();
         bool remesh(VSlot &vslot, VSlot *layer, int layermask, vector<vertex> &verts, vector<ushort> &indices, int maxindices);
-        void endremesh(vector<vertex> &verts);
+        void endremesh(vector<vertex> &verts, vtxarray *va);
+        void invalidateseams(vtxarray *va);
+        void marktjoint(const vec &position);
+        void invalidateblendseams();
+        void invalidatematerialseams();
         void resetremeshstats();
         void printremeshstats();
     }

@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "../renderer/skylight.h"
+#include "../renderer/tesselation.h"
 
 extern int outline;
 
@@ -604,7 +605,7 @@ void commitchanges(bool force)
     if(!force && !haschanged) return;
     haschanged = false;
 
-    int oldlen = valist.length();
+    int oldlen = renderer::tesselation::conforming() ? 0 : valist.length();
     resetclipplanes();
     entitiesinoctanodes();
     inbetweenframes = false;

@@ -154,10 +154,13 @@ static inline void findvisiblevas(vector<vtxarray *> &vas)
     {
         vtxarray &v = *vas[i];
         int prevvfc = v.curvfc;
-        v.curvfc = fullvis ? VFC_FULL_VISIBLE : isvisiblecube(v.o, v.size);
+        int tessmargin = int(ceilf(renderer::tesselation::displacementmargin()));
+        v.curvfc = fullvis ? VFC_FULL_VISIBLE : (tessmargin > 0 ?
+                   isvisiblebb(ivec(v.o).sub(tessmargin), ivec(v.size + 2*tessmargin, v.size + 2*tessmargin, v.size + 2*tessmargin)) :
+                   isvisiblecube(v.o, v.size));
         if(v.curvfc != VFC_NOT_VISIBLE)
         {
-            if(pvsoccluded(v.o, v.size))
+            if(!renderer::tesselation::displacing() && pvsoccluded(v.o, v.size))
             {
                 v.curvfc += PVS_FULL_VISIBLE - VFC_FULL_VISIBLE;
                 continue;
@@ -1894,7 +1897,7 @@ void rendergeom()
                 va->occluded = va->query && va->query->owner == va && checkquery(va->query) ? min(va->occluded+1, int(OCCLUDE_BB)) : OCCLUDE_NOTHING;
                 va->query = newquery(va);
                 if(!va->query || !va->occluded)
-                    va->occluded = pvsoccluded(va->geommin, va->geommax) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
+                    va->occluded = (!renderer::tesselation::displacing() && pvsoccluded(va->geommin, va->geommax)) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
                 if(va->occluded >= OCCLUDE_GEOM)
                 {
                     if(va->query)
@@ -1909,7 +1912,7 @@ void rendergeom()
             else
             {
                 va->query = NULL;
-                va->occluded = pvsoccluded(va->geommin, va->geommax) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
+                va->occluded = (!renderer::tesselation::displacing() && pvsoccluded(va->geommin, va->geommax)) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
                 if(va->occluded >= OCCLUDE_GEOM) continue;
             }
 
@@ -1947,7 +1950,7 @@ void rendergeom()
             }
             else
             {
-                va->occluded = pvsoccluded(va->geommin, va->geommax) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
+                va->occluded = (!renderer::tesselation::displacing() && pvsoccluded(va->geommin, va->geommax)) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
                 if(va->occluded >= OCCLUDE_GEOM) continue;
             }
 
@@ -1963,7 +1966,7 @@ void rendergeom()
         for(vtxarray *va = visibleva; va; va = va->next) if(va->texs)
         {
             va->query = NULL;
-            va->occluded = pvsoccluded(va->geommin, va->geommax) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
+            va->occluded = (!renderer::tesselation::displacing() && pvsoccluded(va->geommin, va->geommax)) ? OCCLUDE_GEOM : OCCLUDE_NOTHING;
             if(va->occluded >= OCCLUDE_GEOM) continue;
             blends += va->blends;
             renderva(cur, va, RENDERPASS_GBUFFER);

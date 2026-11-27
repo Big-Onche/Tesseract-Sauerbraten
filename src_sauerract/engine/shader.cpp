@@ -353,6 +353,8 @@ static void bindworldtexlocs(Shader &s)
     UNIFORMTEX("tessbasedetailnormalmap", 9);
     UNIFORMTEX("tesslayernormalmap", 10);
     UNIFORMTEX("tesslayerdetailnormalmap", 11);
+    UNIFORMTEX("tessconstraints", 12);
+    UNIFORMTEX("tessheights", 13);
     UNIFORMTEX("refractmask", 7);
     UNIFORMTEX("refractlight", 8);
 }

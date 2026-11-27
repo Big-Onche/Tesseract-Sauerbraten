@@ -460,7 +460,7 @@ struct vacollect : verthash
         optimize();
         gendecals();
 
-        renderer::tesselation::beginremesh(verts);
+        renderer::tesselation::beginremesh();
         enumeratekt(indices, sortkey, k, sortval, t,
         {
             VSlot &vslot = lookupvslot(k.tex, false);
@@ -469,7 +469,7 @@ struct vacollect : verthash
             VSlot *layer = k.layertex != USHRT_MAX ? &lookupvslot(k.layertex, false) : NULL;
             if(renderer::tesselation::remesh(vslot, layer, k.layer, verts, t.tris, maxindices)) worldtris += t.tris.length() - oldlength;
         });
-        renderer::tesselation::endremesh(verts);
+        renderer::tesselation::endremesh(verts, va);
 
         va->verts = verts.length();
         va->tris = worldtris/3;
@@ -760,6 +760,7 @@ void addtris(VSlot &vslot, int orient, const sortkey &key, vertex *verts, int *i
                     float offset = (t.offset - offset1) * doffset;
                     vertex vt;
                     vt.pos = vec(d).mul(t.offset/8.0f).add(o);
+                    renderer::tesselation::marktjoint(vt.pos);
                     vt.tc.lerp(v1.tc, v2.tc, offset);
                     vt.norm.lerp(v1.norm, v2.norm, offset);
                     vt.tangent.lerp(v1.tangent, v2.tangent, offset);
@@ -897,7 +898,7 @@ void addcubeverts(VSlot &vslot, int orient, int size, vec *pos, int convex, usho
     {
         vertex &v = verts[k];
         v.pos = pos[k];
-        v.tc = vec(sgen.dot(v.pos), tgen.dot(v.pos), 0);
+        v.tc = vec(sgen.dot(v.pos), tgen.dot(v.pos), float(dim));
         if(vinfo && vinfo[k].norm)
         {
             vec n = decodenormal(vinfo[k].norm), t = orientation_tangent[vslot.rotation][dim];
@@ -1113,7 +1114,7 @@ void gencubeverts(cube &c, const ivec &co, int size, int csi)
     if(!(c.visible&0x80)) vismask &= c.visible;
     if(!vismask) return;
 
-    int tj = filltjoints && c.ext ? c.ext->tjoints : -1, vis;
+    int tj = (filltjoints || renderer::tesselation::conforming()) && c.ext ? c.ext->tjoints : -1, vis;
     loopi(6) if(vismask&(1<<i) && (vis = visibletris(c, i, co, size)))
     {
         vec pos[MAXFACEVERTS];
@@ -1215,6 +1216,7 @@ vtxarray *newva(const ivec &o, int size)
 void destroyva(vtxarray *va, bool reparent)
 {
     renderer::worldbvh::invalidate(va);
+    renderer::tesselation::invalidateseams(va);
     wverts -= va->verts;
     wtris -= va->tris + va->blends + va->alphatris + va->decaltris;
     allocva--;
@@ -1715,6 +1717,13 @@ void findtjoints()
 
 void octarender()                               // creates va s for all leaf cubes that don't already have them
 {
+    if(renderer::tesselation::conforming())
+    {
+        // A changed octree edge may split a patch in an otherwise unchanged VA. Rebuild the source topology as one transaction.
+        // This runs only on geometry edits/recalculation, never during rendering.
+        clearvas(worldroot);
+        findtjoints();
+    }
     int csi = 0;
     while(1<<csi < worldsize) csi++;
 
@@ -1723,6 +1732,7 @@ void octarender()                               // creates va s for all leaf cub
     updateva(worldroot, ivec(0, 0, 0), worldsize/2, csi-1);
     loadprogress = 0;
     flushvbo();
+    renderer::tesselation::finishseams();
     renderer::worldbvh::sync();
 
     explicitsky = 0;
@@ -1774,7 +1784,7 @@ void allchanged(bool load)
     if(load) initenvmaps();
     entitiesinoctanodes();
     tjoints.setsize(0);
-    if(filltjoints) findtjoints();
+    if(filltjoints && !renderer::tesselation::conforming()) findtjoints();
     octarender();
     if(load) precachetextures();
     setupmaterials();

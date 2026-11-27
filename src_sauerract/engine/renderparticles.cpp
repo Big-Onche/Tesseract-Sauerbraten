@@ -1486,10 +1486,6 @@ void seedparticles()
     }
 }
 
-VARR(sunflareyaw, 0, 0, 360);
-VARR(sunflarepitch, -90, 90, 90);
-CVARR(sunflarecolour, 0x000000);
-
 void updateparticles()
 {
     if(regenemitters) addparticleemitters();

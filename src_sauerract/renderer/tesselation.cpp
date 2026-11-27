@@ -5,7 +5,7 @@ PFNGLPATCHPARAMETERIPROC glPatchParameteri_ = NULL;
 VAR(tesselationsupported, 1, 0, 0);
 VAR(tesselationmaxlevel, 1, 0, 0);
 VAR(tesselationmaxpatchvertices, 1, 0, 0);
-VARP(tesselation, 0, 0, 1);
+VARFP(tesselation, 0, 0, 1, allchanged());
 VARFP(tesselationfixed, 1, 4, 64,
 {
     if(tesselationmaxlevel > 0) tesselationfixed = min(tesselationfixed, tesselationmaxlevel);
@@ -19,11 +19,11 @@ VARFP(tesselationmax, 1, 64, 64,
 FVARP(tesselationpixels, 1.0f, 8.0f, 256.0f);
 FVARP(tesselationtexels, 1.0f, 8.0f, 256.0f);
 FVARP(tesselationworld, 1.0f, 32.0f, 4096.0f);
-FVARP(tesselationscale, 0.0f, 1.0f, 16.0f);
-FVARP(tesselationheightlod, 0.0f, 0.0f, 12.0f);
+FVARFP(tesselationscale, 0.0f, 1.0f, 16.0f, clearshadowcache());
+FVARFP(tesselationheightlod, 0.0f, 0.0f, 12.0f, clearshadowcache());
 VARP(tesselationautolod, 0, 1, 1);
 FVARP(tesselationlodbias, -4.0f, -0.5f, 4.0f);
-VARP(tesselationdisplacement, 0, 1, 1);
+VARFP(tesselationdisplacement, 0, 1, 1, clearshadowcache());
 FVARFP(tesselationdistance, 0.0f, 256.0f, 1048576.0f, clearshadowcache());
 FVARFP(tesselationfade, 0.0f, 128.0f, 1048576.0f, clearshadowcache());
 VARFP(tesselationseams, 0, 1, 1,
@@ -32,11 +32,8 @@ VARFP(tesselationseams, 0, 1, 1,
     clearshadowcache();
 });
 FVARFP(tesselationseamwidth, 0.0f, 4.0f, 1024.0f, clearshadowcache());
-FVARFP(tesselationseamangle, 0.0f, 30.0f, 180.0f,
-{
-    allchanged();
-    clearshadowcache();
-});
+// Retained for map/config compatibility: controls regularization of the shared corner-plane solve.
+FVARFP(tesselationseamangle, 0.0f, 30.0f, 180.0f, clearshadowcache());
 VARFP(tesselationremesh, 0, 0, 1, allchanged());
 FVARFP(tesselationpatchsize, 4.0f, 32.0f, 512.0f, allchanged());
 VARFP(tesselationremeshquality, 0, 1, 2, allchanged());
@@ -51,6 +48,8 @@ VARP(tesselationshadowdebug, 0, 0, 1);
 // 15 seam distance, 16 final seam attenuation, 17 base displacement, 18 secondary displacement, 19 blend weight,
 // 20 final blended displacement
 VARP(tesselationdebug, 0, 0, 20);
+// 1 constraints, 2 welded adjacency, 3 boundary/T-junction topology, 4 transition weight.
+VARP(tessellationseamdebug, 0, 0, 4);
 
 extern void *getprocaddress(const char *name);
 extern bool hasext(const char *ext);
@@ -96,13 +95,13 @@ namespace renderer
             ushort a, b;
             const VSlot *base, *layer;
             bool displaced;
-            int next;
+            int va, vb, side;
+            vec na, nb, plane, mapping, opposite;
 
-            seamedge() : a(0), b(0), base(NULL), layer(NULL), displaced(false), next(-1) {}
+            seamedge() : a(0), b(0), base(NULL), layer(NULL), displaced(false) {}
         };
 
         static vector<seamedge> seamedges;
-        static hashtable<geometricedge, int> seamheads;
         static bool remeshsession = false;
 
         struct remeshstats
@@ -158,10 +157,18 @@ namespace renderer
                     tesselationmaxpatchvertices);
         }
 
+        static void cleanupseams();
+
         void cleanup()
         {
+            cleanupseams();
             lastworldbase = lastworldshader = NULL;
             worldactive = shadowactive = wireframeactive = false;
+        }
+
+        bool conforming()
+        {
+            return tesselationseams && (::tesselation || tesselationremesh);
         }
 
         bool enabled()
@@ -271,10 +278,11 @@ namespace renderer
             return index;
         }
 
-        static bool refine(vector<vertex> &verts, vector<ushort> &indices, float target)
+        static bool refine(vector<vertex> &verts, vector<ushort> &indices, float target,
+                           hashtable<remeshedge, int> &boundaries)
         {
-            // Split a geometric edge once for every incident triangle. Repeating this pass produces a conforming dyadic mesh and
-            // makes boundary subdivision deterministic across material and vertex-array boundaries without moving the source surface.
+            // Preserve the conforming octree boundary, including its T-junction splits. Only interior edges may be refined;
+            // material and VA boundaries are subdivided by the hardware using their shared world-space metric.
             const float targetsq = target*target;
             vector<ushort> output;
             hashtable<remeshedge, ushort> midpoints;
@@ -283,9 +291,9 @@ namespace renderer
             for(int i = 0; i+2 < indices.length(); i += 3)
             {
                 ushort a = indices[i], b = indices[i+1], c = indices[i+2], ab = USHRT_MAX, bc = USHRT_MAX, ca = USHRT_MAX;
-                bool sab = vec(verts[b].pos).sub(verts[a].pos).squaredlen() > targetsq,
-                     sbc = vec(verts[c].pos).sub(verts[b].pos).squaredlen() > targetsq,
-                     sca = vec(verts[a].pos).sub(verts[c].pos).squaredlen() > targetsq;
+                bool sab = !boundaries.access(remeshedge(a, b)) && vec(verts[b].pos).sub(verts[a].pos).squaredlen() > targetsq,
+                     sbc = !boundaries.access(remeshedge(b, c)) && vec(verts[c].pos).sub(verts[b].pos).squaredlen() > targetsq,
+                     sca = !boundaries.access(remeshedge(c, a)) && vec(verts[a].pos).sub(verts[c].pos).squaredlen() > targetsq;
                 int mask = (sab ? 1 : 0) | (sbc ? 2 : 0) | (sca ? 4 : 0);
                 if(!mask) { addtriangle(output, a, b, c); continue; }
                 changed = true;
@@ -402,7 +410,7 @@ namespace renderer
             for(int i = 0; i+2 < indices.length(); i += 3) loopj(3)
             {
                 ushort a = indices[i+j], b = indices[i+(j+1)%3];
-                if(a == b) continue;
+                if(a == b || verts[a].pos == verts[b].pos) continue;
                 seamedge &entry = seamedges.add();
                 entry.edge = geometricedge(verts[a].pos, verts[b].pos);
                 entry.a = a;
@@ -410,166 +418,103 @@ namespace renderer
                 entry.base = base;
                 entry.layer = layer;
                 entry.displaced = displaced;
-                int *head = seamheads.access(entry.edge);
-                entry.next = head ? *head : -1;
-                seamheads[entry.edge] = seamedges.length()-1;
+                entry.opposite = verts[indices[i+(j+2)%3]].pos;
+                entry.mapping = vec(0, 0, 0);
+                entry.mapping[clamp(int(verts[a].tc.z), 0, 2)] = 1.0f;
+                bool forward = verts[a].pos == entry.edge.a;
+                entry.side = forward ? 1 : -1;
+                const bvec4 &an = verts[forward ? a : b].norm, &bn = verts[forward ? b : a].norm;
+                loopk(3)
+                {
+                    entry.na[k] = max((float(an[k]) - 128.0f)/127.0f, -1.0f);
+                    entry.nb[k] = max((float(bn[k]) - 128.0f)/127.0f, -1.0f);
+                }
+                entry.plane.cross(vec(verts[indices[i+1]].pos).sub(verts[indices[i]].pos),
+                                  vec(verts[indices[i+2]].pos).sub(verts[indices[i]].pos));
+                if(entry.plane.squaredlen() > 1e-12f) entry.plane.normalize();
             }
         }
 
-        static bool seamendpointcompatible(const vertex &a, const vertex &b, float normalthreshold)
+        static hashtable<vec, int> seamvertices, seamtjoints;
+
+        void marktjoint(const vec &position)
         {
-            vec an = bvec(a.norm).tonormal(), bn = bvec(b.norm).tonormal();
-            float lengths = an.magnitude()*bn.magnitude();
-            return lengths > 1e-6f && an.dot(bn) >= normalthreshold*lengths;
+            seamtjoints[position] = 1;
+        }
+        static vector<vec> seampositions;
+        struct seamgeometry
+        {
+            vtxarray *owner;
+            vector<seamedge> edges;
+        };
+        static vector<seamgeometry *> seamgeometrylist;
+        static bool seamsdirty = true;
+        static GLuint seamtexture = 0, seamheighttexture = 0;
+        static int seamtexturesize = 0;
+        static float seamheightbound = 0.0f;
+        static void syncseams();
+
+        void invalidatematerialseams()
+        {
+            seamsdirty = true;
+            clearshadowcache();
         }
 
-        static bool seamedgegeometrycompatible(const seamedge &a, const seamedge &b, vector<vertex> &verts, float normalthreshold)
+        static int seamvertex(const vec &position)
         {
-            bool sameorder = verts[a.a].pos == verts[b.a].pos;
-            const vertex &aa = verts[a.a], &ab = verts[a.b], &ba = verts[sameorder ? b.a : b.b], &bb = verts[sameorder ? b.b : b.a];
-            return seamendpointcompatible(aa, ba, normalthreshold) && seamendpointcompatible(ab, bb, normalthreshold);
+            int *found = seamvertices.access(position);
+            if(found) return *found;
+            int id = seampositions.length();
+            seamvertices[position] = id;
+            seampositions.add(position);
+            return id;
         }
 
-        static bool sameblendpair(const seamedge &a, const seamedge &b)
+        void beginremesh()
         {
-            return a.base == b.base && a.layer == b.layer;
-        }
-
-        static bool blendselectedalongedge(const seamedge &blended, const seamedge &plain, vector<vertex> &verts, BlendMapCache *cache)
-        {
-            int selected = plain.base == blended.base ? 0xFF : (plain.base == blended.layer ? 0 : -1);
-            if(selected < 0 || plain.layer) return false;
-            const vec &start = verts[blended.a].pos, &end = verts[blended.b].pos;
-            int samples = max(int(ceilf(start.dist(end))), 1);
-            loopi(samples + 1)
-            {
-                vec position(start);
-                position.lerp(end, float(i)/samples);
-                if(lookupblendmap(cache, position) != selected) return false;
-            }
-            return true;
-        }
-
-        void beginremesh(vector<vertex> &verts)
-        {
-            remeshsession = tesselationseams != 0;
+            remeshsession = true;
             seamedges.setsize(0);
-            seamheads.clear();
-            loopv(verts) verts[i].tc.z = -1.0f;
+            // tc.z retains the source projection axis until all material batches have been recorded.
         }
 
-        void endremesh(vector<vertex> &verts)
+        void finishseams()
         {
-            if(!remeshsession) return;
-            const float infinity = 1e16f;
-            vector<float> distances;
-            vector<uchar> relevant, queued;
-            vector<vector<ushort> > adjacency;
-            distances.growbuf(verts.length());
-            relevant.growbuf(verts.length());
-            queued.growbuf(verts.length());
-            adjacency.growbuf(verts.length());
-            loopv(verts)
-            {
-                distances.add(infinity);
-                relevant.add(0);
-                queued.add(0);
-                adjacency.add();
-            }
-            loopv(seamedges) if(seamedges[i].displaced)
-            {
-                const seamedge &edge = seamedges[i];
-                relevant[edge.a] = relevant[edge.b] = 1;
-                adjacency[edge.a].add(edge.b);
-                adjacency[edge.b].add(edge.a);
-            }
+            if(::tesselation && tesselationsupported) syncseams();
+        }
 
-            float normalthreshold = cosf(tesselationseamangle*RAD);
-            BlendMapCache *blendcache = newblendmapcache();
-            setblendmaporigin(blendcache, ivec(0, 0, 0), worldsize);
-            enumeratekt(seamheads, geometricedge, edge, int, head,
+        void endremesh(vector<vertex> &verts, vtxarray *va)
+        {
+            seamgeometry *geometry = new seamgeometry;
+            geometry->owner = va;
+            loopv(seamedges)
             {
-                (void)edge;
-                vector<int> group;
-                for(int current = head; current >= 0; current = seamedges[current].next) group.add(current);
-                int count = group.length();
-                int first = count ? group[0] : -1;
-                bool compatible = false;
-                if(first >= 0)
-                {
-                    const seamedge &reference = seamedges[first];
-                    bool samesignature = reference.displaced && count == (reference.layer ? 4 : 2);
-                    loopv(group) if(group[i] != first &&
-                                    (!sameblendpair(reference, seamedges[group[i]]) ||
-                                     !seamedgegeometrycompatible(reference, seamedges[group[i]], verts, normalthreshold)))
-                        samesignature = false;
-                    compatible = samesignature;
-                }
-                if(!compatible && count == 3)
-                {
-                    int blended = -1;
-                    int otherblended = -1;
-                    int plain = -1;
-                    int blendcount = 0;
-                    int plaincount = 0;
-                    loopv(group)
-                    {
-                        const seamedge &candidate = seamedges[group[i]];
-                        if(candidate.layer)
-                        {
-                            if(blended < 0) blended = group[i];
-                            else otherblended = group[i];
-                            ++blendcount;
-                        }
-                        else { plain = group[i]; ++plaincount; }
-                    }
-                    compatible = blendcount == 2 && plaincount == 1 && seamedges[blended].displaced &&
-                                 sameblendpair(seamedges[blended], seamedges[otherblended]) &&
-                                 seamedgegeometrycompatible(seamedges[blended], seamedges[otherblended], verts, normalthreshold) &&
-                                 seamedgegeometrycompatible(seamedges[blended], seamedges[plain], verts, normalthreshold) &&
-                                 blendselectedalongedge(seamedges[blended], seamedges[plain], verts, blendcache);
-                }
-                if(compatible) ++remeshinfo.seamcompatible;
-                else
-                {
-                    if(count == 1) ++remeshinfo.seamopen;
-                    else ++remeshinfo.seamincompatible;
-                    for(int current = head; current >= 0; current = seamedges[current].next) if(seamedges[current].displaced)
-                    {
-                        const seamedge &boundary = seamedges[current];
-                        distances[boundary.a] = distances[boundary.b] = 0.0f;
-                    }
-                }
-            });
-            freeblendmapcache(blendcache);
-
-            vector<ushort> queue;
-            loopv(verts) if(relevant[i] && distances[i] == 0.0f)
-            {
-                queue.add(ushort(i));
-                queued[i] = 1;
+                seamedge edge = seamedges[i];
+                edge.va = seamvertex(edge.edge.a);
+                edge.vb = seamvertex(edge.edge.b);
+                geometry->edges.add(edge);
+                verts[edge.a].tc.z = float(seamvertex(verts[edge.a].pos));
+                verts[edge.b].tc.z = float(seamvertex(verts[edge.b].pos));
             }
-            for(int offset = 0; offset < queue.length(); ++offset)
-            {
-                ushort from = queue[offset];
-                queued[from] = 0;
-                loopv(adjacency[from])
-                {
-                    ushort to = adjacency[from][i];
-                    float candidate = distances[from] + verts[from].pos.dist(verts[to].pos);
-                    if(candidate + 1e-5f >= distances[to]) continue;
-                    distances[to] = candidate;
-                    if(!queued[to])
-                    {
-                        queue.add(to);
-                        queued[to] = 1;
-                    }
-                }
-            }
-            loopv(verts) if(relevant[i]) verts[i].tc.z = distances[i];
+            seamgeometrylist.add(geometry);
+            seamsdirty = true;
             remeshsession = false;
             seamedges.setsize(0);
-            seamheads.clear();
+        }
+
+        void invalidateseams(vtxarray *va)
+        {
+            loopvrev(seamgeometrylist) if(seamgeometrylist[i]->owner == va)
+            {
+                delete seamgeometrylist[i];
+                seamgeometrylist.remove(i);
+                seamsdirty = true;
+            }
+            if(seamgeometrylist.empty())
+            {
+                seamvertices.clear();
+                seamtjoints.clear();
+                seampositions.setsize(0);
+            }
         }
 
         bool remesh(VSlot &vslot, VSlot *other, int layermask, vector<vertex> &verts, vector<ushort> &indices, int maxindices)
@@ -586,12 +531,21 @@ namespace renderer
             vector<ushort> original;
             original.put(indices.getbuf(), indices.length());
 
+            hashtable<remeshedge, int> uses, boundaries;
+            for(int i = 0; i+2 < indices.length(); i += 3) loopj(3)
+            {
+                remeshedge edge(indices[i+j], indices[i+(j+1)%3]);
+                int *count = uses.access(edge);
+                if(count) ++*count;
+                else uses[edge] = 1;
+            }
+            enumeratekt(uses, remeshedge, edge, int, count, if(count != 2) boundaries[edge] = count);
             float target = tesselationpatchsize;
             bool changed = false;
             loopi(16)
             {
                 int oldtris = indices.length();
-                if(!refine(verts, indices, target))
+                if(!refine(verts, indices, target, boundaries))
                 {
                     verts.setsize(originalverts);
                     indices.setsize(0);
@@ -714,28 +668,14 @@ namespace renderer
             return false;
         }
 
+        float displacementmargin()
+        {
+            return displacing() ? seamheightbound*tesselationscale*(tesselationseams ? 2.0f : 1.0f) : 0.0f;
+        }
+
         float shadowmargin()
         {
-            if(!shadowsenabled()) return 0.0f;
-            static int lastupdate = -1;
-            static float margin = 0.0f;
-            if(lastupdate == lastmillis) return margin;
-            lastupdate = lastmillis;
-            margin = 0.0f;
-            loopv(vslots)
-            {
-                if(!vslots[i] || !vslots[i]->slot) continue;
-                VSlot &vslot = *vslots[i];
-                Slot &slot = *vslot.slot;
-                if(!candisplace(slot)) continue;
-                Texture *diffuse = NULL;
-                loopvj(slot.sts) if(slot.sts[j].type == TEX_DIFFUSE) { diffuse = slot.sts[j].t; break; }
-                const float *parallax = findparam(slot, vslot, "parallaxscale");
-                if(!diffuse || diffuse == notexture || !parallax) continue;
-                float worldperuv = vslot.scale*(diffuse->xs + diffuse->ys)/(2.0f*TEX_SCALE);
-                margin = max(margin, max(fabsf(parallax[1]), fabsf(parallax[0] + parallax[1]))*worldperuv*tesselationscale);
-            }
-            return margin;
+            return shadowsenabled() ? displacementmargin() : 0.0f;
         }
 
         void beginworld()
@@ -805,10 +745,14 @@ namespace renderer
             material.tripbias = slot.shader ? findparam(slot, vslot, "triplanarbias") : NULL;
             material.worldperuv = material.diffuse && material.diffuse != notexture ?
                                   vslot.scale*(material.diffuse->xs + material.diffuse->ys)/(2.0f*TEX_SCALE) : 0.0f;
+            const float *tessscale = slot.shader ? findparam(slot, vslot, "tessscale") : NULL;
+            if(tessscale) material.worldperuv *= max(tessscale[0], 0.0f);
             material.displaced = candisplace(slot) && material.worldperuv > 0.0f;
             material.triplanar = slot.shader && slot.shader->type&SHADER_TRIPLANAR;
             return material;
         }
+
+#include "tesselationseams.h"
 
         static void bindtesstexture(int unit, Texture *texture)
         {
@@ -823,8 +767,8 @@ namespace renderer
                   ys = material.diffuse && material.diffuse != notexture ? float(material.diffuse->ys) : 1.0f,
                   scale = TEX_SCALE/vslot.scale,
                   sk = scale/(rotation.flipx ? -xs : xs), tk = scale/(rotation.flipy ? -ys : ys),
-                  soff = -(rotation.swapxy ? vslot.offset.y : vslot.offset.x)/xs,
-                  toff = -(rotation.swapxy ? vslot.offset.x : vslot.offset.y)/ys;
+                  soff = -(rotation.swapxy ? vslot.offset.y : vslot.offset.x)/(rotation.flipx ? -xs : xs),
+                  toff = -(rotation.swapxy ? vslot.offset.x : vslot.offset.y)/(rotation.flipy ? -ys : ys);
             vec2 scroll(vslot.scroll);
             if(rotation.swapxy) swap(scroll.x, scroll.y);
             scroll.x *= lastmillis*(rotation.flipx ? -1.0f : 1.0f);
@@ -871,6 +815,14 @@ namespace renderer
 
         void setparams(Slot &slot, VSlot &vslot, VSlot *other, int layermask)
         {
+            syncseams();
+            glActiveTexture_(GL_TEXTURE0 + 12);
+            glBindTexture(GL_TEXTURE_2D, seamtexture);
+            glActiveTexture_(GL_TEXTURE0 + 13);
+            glBindTexture(GL_TEXTURE_2D, seamheighttexture);
+            glActiveTexture_(GL_TEXTURE0);
+            LOCALPARAMF(tessconstraintparams, float(seamtexturesize), displacing() ? tesselationscale : 0.0f,
+                        float(lastmillis), float(tessellationseamdebug));
             LOCALPARAM(camera, camera1->o);
             LOCALPARAMF(tessfactor, float(clamp(tesselationfixed, 1, tesselationmaxlevel)));
             LOCALPARAMF(tessshadowalpha, slot.texmask&(1<<TEX_ALPHA) ? 1.0f : 0.0f);
@@ -904,10 +856,11 @@ namespace renderer
             glActiveTexture_(GL_TEXTURE0);
             LOCALPARAMF(tessadaptiveparams, float(clamp(tesselationmin, 1, tesselationmaxlevel)),
                         float(clamp(tesselationmax, 1, tesselationmaxlevel)), tesselationpixels, tesselationtexels);
-            LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive && !mixedplain ? 1.0f : 0.0f,
-                        tesselationautolod && !mixedplain ? 1.0f : 0.0f, tesselationlodbias);
+            // Shared edges and corners use one height mip. Per-patch nearest-edge mip selection is discontinuous at corners.
+            LOCALPARAMF(tessadaptiveoptions, tesselationworld, tesselationadaptive ? 1.0f : 0.0f,
+                        tesselationautolod && !tesselationseams && !mixedplain ? 1.0f : 0.0f, tesselationlodbias);
             LOCALPARAMF(tessviewparams, 0.5f*vieww, 0.5f*viewh, float(tesselationmaxlevel), 0.0f);
-            float fadedistance = clamp(tesselationfade, 0.0f, tesselationdistance);
+            float fadedistance = clamp(max(tesselationfade, 1.0f), 0.0f, tesselationdistance);
             LOCALPARAMF(tessdistanceparams, tesselationdistance, tesselationdistance - fadedistance, fadedistance, 0.0f);
             float basemagnitude = active && base.parallax ? max(fabsf(base.parallax[1]), fabsf(base.parallax[0] + base.parallax[1]))*
                                   base.worldperuv*tesselationscale : 0.0f;
@@ -916,7 +869,7 @@ namespace renderer
                                    layer.worldperuv*tesselationscale : 0.0f;
             float displacementmagnitude = max(basemagnitude, layermagnitude);
             LOCALPARAMF(tessblenddebugscale, basemagnitude, layermagnitude, displacementmagnitude, 0.0f);
-            float seamwidth = max(tesselationseamwidth, 2.0f*displacementmagnitude);
+            float seamwidth = max(tesselationseamwidth, 0.001f);
             LOCALPARAMF(tessseamparams, tesselationseams ? 1.0f : 0.0f, seamwidth, tesselationseamangle, 0.0f);
             LOCALPARAMF(tessmapsize, current.normal && current.normal != notexture ? float(current.normal->xs) : 1.0f,
                         current.normal && current.normal != notexture ? float(current.normal->ys) : 1.0f);

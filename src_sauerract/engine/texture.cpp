@@ -1,6 +1,7 @@
 // texture.cpp: texture slot management
 
 #include "engine.h"
+#include "../renderer/tesselation.h"
 #include "SDL_image.h"
 
 #ifndef SDL_IMAGE_VERSION_ATLEAST
@@ -3300,6 +3301,7 @@ void reloadtex(char *name)
         *t = oldtex;
         conoutf(CON_ERROR, "failed to reload texture %s", name);
     }
+    else renderer::tesselation::invalidatematerialseams();
 }
 
 COMMAND(reloadtex, "s");
