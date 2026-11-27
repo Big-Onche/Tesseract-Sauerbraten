@@ -667,6 +667,8 @@ void resetgl()
 
     renderbackground("resetting OpenGL");
 
+    reloadenhancedmaterials();
+
     recorder::cleanup();
     cleanupva();
     cleanupparticles();

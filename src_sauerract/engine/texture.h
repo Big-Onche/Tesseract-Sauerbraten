@@ -688,13 +688,17 @@ struct Slot
     vector<Tex> sts;
     Shader *shader;
     vector<SlotShaderParam> params;
+    vector<Tex> baseenhancedsts;
+    Shader *baseenhancedshader;
+    vector<SlotShaderParam> baseenhancedparams;
+    bool enhanced;
     VSlot *variants;
     bool loaded;
     uint texmask;
     char *grass;
     Texture *grasstex, *thumbnail;
 
-    Slot(int index = -1) : index(index), variants(NULL), grass(NULL) { reset(); }
+    Slot(int index = -1) : index(index), baseenhancedshader(NULL), enhanced(false), variants(NULL), grass(NULL) { reset(); }
     virtual ~Slot() {}
 
     virtual int type() const { return OCTA; }
@@ -715,6 +719,10 @@ struct Slot
 
     void reset()
     {
+        baseenhancedsts.setsize(0);
+        baseenhancedparams.setsize(0);
+        baseenhancedshader = NULL;
+        enhanced = false;
         smooth = -1;
         sts.setsize(0);
         shader = NULL;

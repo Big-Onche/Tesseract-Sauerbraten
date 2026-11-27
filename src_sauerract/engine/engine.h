@@ -780,7 +780,12 @@ namespace UI
 extern int mainmenu;
 
 extern void addchange(const char *desc, int type);
+extern void removechange(const char *desc);
 extern void clearchanges(int type);
+extern int enhancedpbrtextures;
+extern void reloadenhancedmaterials();
+extern void commitenhancedpbrtextures();
+extern void cancelenhancedpbrtextures();
 extern void menuprocess();
 extern void clearmainmenu();
 

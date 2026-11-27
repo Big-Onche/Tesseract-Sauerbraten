@@ -317,7 +317,7 @@ namespace renderer
         FVARFP(voldirectstrength, 0.0f, 2.0f, 32.0f, settingschanged());
         FVARFP(volindirectstrength, 0.0f, 1.0f, 32.0f, settingschanged());
         FVARFP(vollocalstrength, 0.0f, 8.0f, 32.0f, settingschanged());
-        VARFP(volsteps, 4, 32, 128, settingschanged());
+        VARFP(volsteps, 4, 8, 128, settingschanged());
         FVARFP(volmaxdistance, 1.0f, 1536.0f, 65536.0f, settingschanged());
         FVARFP(volheight, -65536.0f, 256.0f, 65536.0f, settingschanged());
         FVARFP(volthickness, 1.0f, 512.0f, 65536.0f, settingschanged());

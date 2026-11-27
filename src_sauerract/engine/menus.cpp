@@ -26,6 +26,12 @@ void addchange(const char *desc, int type)
     if(!hidechanges) UI::showui("changes");
 }
 
+void removechange(const char *desc)
+{
+    loopvrev(needsapply) if(!strcmp(needsapply[i].desc, desc)) needsapply.remove(i);
+    if(needsapply.empty()) UI::hideui("changes");
+}
+
 void clearchanges(int type)
 {
     loopvrev(needsapply)
@@ -44,12 +50,14 @@ void applychanges()
 {
     int changetypes = 0;
     loopv(needsapply) changetypes |= needsapply[i].type;
+    commitenhancedpbrtextures();
     if(changetypes&CHANGE_GFX) execident("resetgl");
     else if(changetypes&CHANGE_SHADERS) execident("resetshaders");
     if(changetypes&CHANGE_SOUND) execident("resetsound");
 }
 
 COMMAND(applychanges, "");
+ICOMMAND(cancelchanges, "", (), { cancelenhancedpbrtextures(); UI::hideui("changes"); });
 ICOMMAND(pendingchanges, "b", (int *idx), { if(needsapply.inrange(*idx)) result(needsapply[*idx].desc); else if(*idx < 0) intret(needsapply.length()); });
 
 static int lastmainmenu = -1;

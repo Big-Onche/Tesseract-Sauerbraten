@@ -258,6 +258,7 @@ static void execmapconfigs()
     execfile("sauerract/config/default_map_settings.cfg", false);
     execfile(cfgname, false);
     execfile(sauerractcfgname, false);
+    reloadenhancedmaterials();
 }
 
 void mapcfgname()

@@ -484,6 +484,12 @@ static bool sauerractresource(const char *filename, string &overlay, string &van
     if(strncmp(normalized, packaged, sizeof(packaged)-1)) return false;
 
     const char *relative = normalized + sizeof(packaged)-1;
+    if(enhancedpbrtextures && !strncmp(relative, "texture/", 8))
+    {
+        formatstring(overlay, "sauerract/packages/%s", relative+8);
+        formatstring(vanilla, "packages/%s", relative+8);
+        return true;
+    }
     if(!strncmp(relative, "map/", 4))
     {
         formatstring(overlay, "sauerract/maps/%s", relative+4);
@@ -544,6 +550,11 @@ const char *findfile(const char *filename, const char *mode)
     loopv(packagedirs)
     {
         packagedir &pf = packagedirs[i];
+        if(mapped && (!pf.filter || !strncmp(overlay, pf.filter, pf.filterlen)))
+        {
+            formatstring(s, "%s%s", pf.dir, overlay);
+            if(fileexists(s, mode)) return s;
+        }
         if(pf.filter && strncmp(filename, pf.filter, pf.filterlen)) continue;
         formatstring(s, "%s%s", pf.dir, filename);
         if(fileexists(s, mode)) return s;

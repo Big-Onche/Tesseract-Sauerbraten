@@ -1762,6 +1762,171 @@ vector<DecalSlot *> decalslots;
 DecalSlot dummydecalslot;
 Slot *defslot = NULL;
 
+static const char *const enhancedpbrchange = "Enhanced PBR Textures";
+static bool settingenhancedpbrtextures = false;
+static int enhancedpbrapplied = 0;
+extern int enhancedpbrtexturespending;
+
+static void enhancedpbrtexturespendingchanged()
+{
+    if(settingenhancedpbrtextures) return;
+    if(enhancedpbrtexturespending != enhancedpbrtextures) addchange(enhancedpbrchange, CHANGE_GFX);
+    else removechange(enhancedpbrchange);
+}
+
+VARFP(enhancedpbrtextures, 0, 0, 1,
+{
+    if(settingenhancedpbrtextures) return;
+    settingenhancedpbrtextures = true;
+    enhancedpbrtexturespending = enhancedpbrtextures;
+    settingenhancedpbrtextures = false;
+});
+VARF(enhancedpbrtexturespending, 0, 0, 1, enhancedpbrtexturespendingchanged());
+
+void commitenhancedpbrtextures()
+{
+    settingenhancedpbrtextures = true;
+    enhancedpbrtextures = enhancedpbrtexturespending;
+    settingenhancedpbrtextures = false;
+}
+
+void cancelenhancedpbrtextures()
+{
+    settingenhancedpbrtextures = true;
+    enhancedpbrtexturespending = enhancedpbrtextures;
+    settingenhancedpbrtextures = false;
+    removechange(enhancedpbrchange);
+}
+
+static void copyenhancedtexs(vector<Slot::Tex> &dst, const vector<Slot::Tex> &src)
+{
+    dst.setsize(0);
+    loopv(src)
+    {
+        Slot::Tex &d = dst.add();
+        d.type = src[i].type;
+        d.t = NULL;
+        copystring(d.name, src[i].name);
+        d.combined = -1;
+    }
+}
+
+static void copyenhancedparams(vector<SlotShaderParam> &dst, const vector<SlotShaderParam> &src)
+{
+    dst.setsize(0);
+    loopv(src) dst.add(src[i]);
+}
+
+static void restoreenhancedslot(Slot &slot)
+{
+    if(!slot.enhanced) return;
+    copyenhancedtexs(slot.sts, slot.baseenhancedsts);
+    copyenhancedparams(slot.params, slot.baseenhancedparams);
+    slot.shader = slot.baseenhancedshader;
+    slot.texmask = 0;
+    loopv(slot.sts) slot.texmask |= 1<<slot.sts[i].type;
+    slot.loaded = false;
+    slot.enhanced = false;
+    slot.baseenhancedsts.setsize(0);
+    slot.baseenhancedparams.setsize(0);
+    slot.baseenhancedshader = NULL;
+}
+
+static void setenhancedtex(Slot &slot, int type, const char *name)
+{
+    loopv(slot.sts) if(slot.sts[i].type == type)
+    {
+        copystring(slot.sts[i].name, name);
+        slot.sts[i].t = NULL;
+        slot.sts[i].combined = -1;
+        return;
+    }
+    Slot::Tex &tex = slot.sts.add();
+    tex.type = type;
+    tex.t = NULL;
+    copystring(tex.name, name);
+    tex.combined = -1;
+}
+
+static bool enhancedtexexists(const char *name)
+{
+    defformatstring(filename, "packages/texture/%s", name);
+    return findfile(filename, "e") != NULL;
+}
+
+static void enhancedtexture(char *diffuse, char *normal, char *height, char *spec, char *shader)
+{
+    path(diffuse);
+    path(normal);
+    path(height);
+    path(spec);
+    if(!enhancedpbrtextures || !diffuse[0] || !normal[0] || !height[0] || !spec[0]) return;
+    if(!enhancedtexexists(normal) || !enhancedtexexists(height) || !enhancedtexexists(spec))
+    {
+        conoutf(CON_WARN, "enhanced PBR material is incomplete, using original material: %s", diffuse);
+        return;
+    }
+    loopv(slots)
+    {
+        Slot &slot = *slots[i];
+        int diffuseidx = slot.findtextype(1<<TEX_DIFFUSE);
+        if(diffuseidx < 0 || strcmp(slot.sts[diffuseidx].name, diffuse)) continue;
+        if(!slot.enhanced)
+        {
+            copyenhancedtexs(slot.baseenhancedsts, slot.sts);
+            copyenhancedparams(slot.baseenhancedparams, slot.params);
+            slot.baseenhancedshader = slot.shader;
+            slot.enhanced = true;
+        }
+        setslotshader(slot);
+        if(!slot.shader || strcmp(slot.shader->name, shader))
+        {
+            conoutf(CON_WARN, "enhanced PBR shader was not selected for %s: %s", diffuse, shader);
+            restoreenhancedslot(slot);
+            continue;
+        }
+        setenhancedtex(slot, TEX_NORMAL, normal);
+        setenhancedtex(slot, TEX_DEPTH, height);
+        setenhancedtex(slot, TEX_SPEC, spec);
+        slot.texmask = 0;
+        loopvj(slot.sts) slot.texmask |= 1<<slot.sts[j].type;
+        slot.loaded = false;
+        linkslotshader(slot);
+        enhancedpbrapplied++;
+    }
+}
+
+COMMAND(enhancedtexture, "sssss");
+
+void reloadenhancedmaterials()
+{
+    loopv(slots) restoreenhancedslot(*slots[i]);
+    if(!enhancedpbrtextures) return;
+
+    enhancedpbrapplied = 0;
+    vector<char *> configs;
+    loopv(slots)
+    {
+        Slot &slot = *slots[i];
+        int diffuseidx = slot.findtextype(1<<TEX_DIFFUSE);
+        if(diffuseidx < 0) continue;
+        const char *name = slot.sts[diffuseidx].name, *slash = strrchr(name, '/'), *backslash = strrchr(name, '\\');
+        if(backslash && (!slash || backslash > slash)) slash = backslash;
+        if(!slash) continue;
+        defformatstring(config, "sauerract/packages/%.*s/package.cfg", int(slash-name), name);
+        bool duplicate = false;
+        loopvj(configs) if(!strcmp(configs[j], config)) { duplicate = true; break; }
+        if(!duplicate) configs.add(newstring(config));
+    }
+    int loadedconfigs = 0;
+    loopv(configs) if(execfile(configs[i], false)) loadedconfigs++;
+    if(loadedconfigs || enhancedpbrapplied)
+        conoutf(CON_INIT, "enhanced PBR textures: applied %d material slot%s from %d package%s", enhancedpbrapplied,
+                enhancedpbrapplied == 1 ? "" : "s", loadedconfigs, loadedconfigs == 1 ? "" : "s");
+    else conoutf(CON_WARN, "enhanced PBR textures are enabled, but no matching package configuration was loaded");
+    configs.deletearrays();
+}
+
 const char *Slot::name() const { return tempformatstring("slot %d", index); }
 
 MatSlot::MatSlot() : Slot(int(this - materialslots)), VSlot(this) {}
