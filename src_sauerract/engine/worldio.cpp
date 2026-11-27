@@ -219,7 +219,7 @@ bool loadents(const char *fname, vector<entity> &ents, uint *crc)
 }
 
 #ifndef STANDALONE
-string ogzname, bakname, cfgname, picname;
+string ogzname, bakname, cfgname, sauerractcfgname, picname;
 
 VARP(savebak, 0, 2, 2);
 VARP(useremasteredmaps, 0, 0, 1);
@@ -242,12 +242,22 @@ void setmapfilenames(const char *fname, const char *cname = NULL)
     }
 
     validmapname(name, cname ? cname : fname);
-    formatstring(cfgname, "packages/base/%s%s.cfg", name, loadremastered && useremasteredmaps ? "_r" : "");
+    const char *cfgsuffix = loadremastered && useremasteredmaps ? "_r" : "";
+    formatstring(cfgname, "packages/base/%s%s.cfg", name, cfgsuffix);
+    formatstring(sauerractcfgname, "sauerract/maps/%s%s.cfg", name, cfgsuffix);
 
     path(ogzname);
     path(bakname);
     path(cfgname);
+    path(sauerractcfgname);
     path(picname);
+}
+
+static void execmapconfigs()
+{
+    execfile("sauerract/config/default_map_settings.cfg", false);
+    execfile(cfgname, false);
+    execfile(sauerractcfgname, false);
 }
 
 void mapcfgname()
@@ -1368,8 +1378,7 @@ bool trynewmap(const char *mname, const char *cname) // sauerract | try to load 
     clearmainmenu();
 
     identflags |= IDF_OVERRIDDEN;
-    execfile("sauerract/config/default_map_settings.cfg", false);
-    execfile(cfgname, false);
+    execmapconfigs();
     identflags &= ~IDF_OVERRIDDEN;
 
     finishload(mname, cname, mapshot);
@@ -1615,8 +1624,7 @@ bool tryoldmap(const char *mname, const char *cname) // sauerract | fallback to 
     clearmainmenu();
 
     identflags |= IDF_OVERRIDDEN;
-    execfile("sauerract/config/default_map_settings.cfg", false);
-    execfile(cfgname, false);
+    execmapconfigs();
     identflags &= ~IDF_OVERRIDDEN;
 
     finishload(mname, cname, mapshot);
