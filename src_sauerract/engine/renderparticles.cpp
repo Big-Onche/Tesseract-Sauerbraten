@@ -1355,6 +1355,22 @@ static void regularflame(int type, const vec &p, float radius, float height, int
     }
 }
 
+static void regularflamehaze(const vec &p, float radius, float height)
+{
+    if(!heatHaze::shouldRender() || !canemitparticles()) return;
+
+    static const int hazeEmitInterval = 75;
+    int emitTime = lastmillis + emitoffset;
+    if(!seedemitter && emitTime/hazeEmitInterval == (emitTime-max(emitmillis, 1))/hazeEmitInterval) return;
+
+    float flameSize = 2.0f*min(radius, height), hazeSize = 15.0f*max(radius, height);
+    vec origin(p.x + rndscale(radius*2.0f)-radius,
+               p.y + rndscale(radius*2.0f)-radius,
+               p.z + 3.0f*flameSize),
+        velocity(0, 0, 50.0f*min(1.0f, height));
+    newparticle(origin, velocity, 750+rnd(250), PART_HAZE_NOISE, 60, hazeSize, -20);
+}
+
 void regular_particle_flame(int type, const vec &p, float radius, float height, int color, int density, float scale, float speed, float fade, int gravity)
 {
     if(!canaddparticles()) return;
@@ -1370,6 +1386,7 @@ static void makeparticles(entity &e)
             float radius = e.attr2 ? float(e.attr2)/100.0f : 1.5f,
                   height = e.attr3 ? float(e.attr3)/100.0f : radius/3;
             regularflame(PART_FLAME, e.o, radius, height, e.attr4 ? colorfromattr(e.attr4) : 0x903020, 3, 2.0f);
+            regularflamehaze(e.o, radius, height);
             regularflame(PART_SMOKE, vec(e.o.x, e.o.y, e.o.z + 4.0f*min(radius, height)), radius, height, 0x303020, 1, 4.0f, 100.0f, 2000.0f, -20);
             break;
         }
@@ -1420,8 +1437,12 @@ static void makeparticles(entity &e)
             break;
         }
         case 11: // flame <radius> <height> <rgb> - radius=100, height=100 is the classic size
-            regularflame(PART_FLAME, e.o, float(e.attr2)/100.0f, float(e.attr3)/100.0f, colorfromattr(e.attr4), 3, 2.0f);
+        {
+            float radius = float(e.attr2)/100.0f, height = float(e.attr3)/100.0f;
+            regularflame(PART_FLAME, e.o, radius, height, colorfromattr(e.attr4), 3, 2.0f);
+            regularflamehaze(e.o, radius, height);
             break;
+        }
         case 12: // smoke plume <radius> <height> <rgb>
             regularflame(PART_SMOKE, e.o, float(e.attr2)/100.0f, float(e.attr3)/100.0f, colorfromattr(e.attr4), 1, 4.0f, 100.0f, 2000.0f, -20);
             break;
