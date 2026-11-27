@@ -1684,6 +1684,7 @@ static lightfile::record lightrecord(const extentity &e)
     loopi(3) r.values[OFFSET_AXES+i] = a.offsetaxes[i];
     r.values[BLINK_FREQUENCY] = a.blinkfrequency; r.values[BLINK_DUTY] = a.blinkduty;
     r.values[BLINK_PHASE] = a.blinkphase; r.values[BLINK_FADE] = a.blinkfade;
+    r.values[SINE_MINIMUM] = a.sineminimum; r.values[SINE_MAXIMUM] = a.sinemaximum; r.values[SINE_PERIOD] = a.sineperiod;
     r.values[SECONDARY_COLOR] = e.secondary.color;
     r.values[SECONDARY_RADIUS] = clamp(e.secondary.radius, 0.0f, float(max(int(e.attr1), 0)));
     r.values[ATTENUATION_ENABLED] = e.attenuation.enabled;
@@ -1715,6 +1716,7 @@ static void applylightrecord(extentity &e, const lightfile::record &r)
     loopi(3) a.offsetaxes[i] = r.values[OFFSET_AXES+i];
     a.blinkfrequency = r.values[BLINK_FREQUENCY]; a.blinkduty = r.values[BLINK_DUTY];
     a.blinkphase = r.values[BLINK_PHASE]; a.blinkfade = r.values[BLINK_FADE];
+    a.sineminimum = r.values[SINE_MINIMUM]; a.sinemaximum = r.values[SINE_MAXIMUM]; a.sineperiod = r.values[SINE_PERIOD];
     e.secondary.color = int(r.values[SECONDARY_COLOR]);
     e.secondary.radius = clamp(r.values[SECONDARY_RADIUS], 0.0f, float(max(int(e.attr1), 0)));
     e.attenuation.enabled = r.values[ATTENUATION_ENABLED] != 0;

@@ -6,11 +6,11 @@
 namespace renderer
 {
     VARP(bloom, 0, 1, 1);
-    FVARP(bloomstrength, 0.0f, 2.0f, 8.0f);
+    FVARR(bloomstrength, 0.0f, 2.0f, 8.0f);
     FVARP(bloomthreshold, 0.0f, 1.0f, 64.0f);
     FVARP(bloomsoftknee, 0.0f, 0.5f, 1.0f);
-    VARP(tonemap, 0, 2, 7);
-    FVARP(exposure, 0.01f, 1.0f, 16.0f);
+    VARR(tonemap, 0, 2, 7);
+    FVARR(exposure, 0.01f, 1.0f, 16.0f);
     VARFP(eyeadaptation, 0, 1, 1, reseteyeadaptation());
     FVARP(eyeadaptsensitivity, 0.001f, 0.18f, 4.0f);
     FVARP(eyeadaptbrightenspeed, 0.01f, 1.0f, 20.0f);

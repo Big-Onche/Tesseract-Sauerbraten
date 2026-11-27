@@ -17,6 +17,7 @@ namespace lightfile
         SHADOW_ENABLED, INTENSITY, FLICKER_AMPLITUDE, FLICKER_FREQUENCY, FLICKER_NOISE, FLICKER_SEED,
         OFFSET_AMPLITUDE, OFFSET_FREQUENCY, OFFSET_NOISE, OFFSET_SEED, OFFSET_AXES, OFFSET_QUANTIZE = OFFSET_AXES+3,
         BLINK_FREQUENCY, BLINK_DUTY, BLINK_PHASE, BLINK_FADE,
+        SINE_MINIMUM, SINE_MAXIMUM, SINE_PERIOD,
         ATTENUATION_EXPONENT, ATTENUATION_MINDISTANCE, ATTENUATION_EDGE, ATTENUATION_ENABLED, SECONDARY_COLOR, SECONDARY_RADIUS,
         SHADOW_MODE, SOFT_MULTIPLIER, SOFT_RADIUS, SOFT_SAMPLES, SOFT_DISTANCE, SOFT_MINPIXELS, NUMVALUES
     };
@@ -39,6 +40,7 @@ namespace lightfile
             values[OFFSET_AXES] = values[OFFSET_AXES+1] = values[OFFSET_AXES+2] = 1;
             values[OFFSET_QUANTIZE] = 0.025f;
             values[BLINK_DUTY] = 0.5f;
+            values[SINE_MAXIMUM] = 1;
             values[ATTENUATION_EXPONENT] = 2;
             values[ATTENUATION_MINDISTANCE] = 16;
             values[ATTENUATION_EDGE] = 0.1f;
@@ -93,6 +95,9 @@ namespace lightfile
         { "blink.duty", BLINK_DUTY, 1, 0, 1, false, true },
         { "blink.phase", BLINK_PHASE, 1, -1000, 1000, false, true },
         { "blink.fade", BLINK_FADE, 1, 0, 0.5f, false, true },
+        { "sine.minimum", SINE_MINIMUM, 1, 0, 64, false, true },
+        { "sine.maximum", SINE_MAXIMUM, 1, 0, 64, false, true },
+        { "sine.period", SINE_PERIOD, 1, 0, 3600, false, true },
         { "attenuation.exponent", ATTENUATION_EXPONENT, 1, 0, 8, false, true },
         { "attenuation.min_distance", ATTENUATION_MINDISTANCE, 1, 0.01f, 4096, false, true },
         { "attenuation.edge", ATTENUATION_EDGE, 1, 0.001f, 1, false, true },
@@ -101,7 +106,7 @@ namespace lightfile
         { "secondary.radius", SECONDARY_RADIUS, 1, 0, 32767, false, true },
         { "shadow.mode", SHADOW_MODE, 1, -1, 2, true, true },
         { "soft.multiplier", SOFT_MULTIPLIER, 1, -1, 16, false, true },
-        { "soft.max_radius", SOFT_RADIUS, 1, -1, 16, false, true },
+        { "soft.max_radius", SOFT_RADIUS, 1, -1, 32, false, true },
         { "soft.samples", SOFT_SAMPLES, 1, -1, 8, true, true },
         { "soft.distance", SOFT_DISTANCE, 1, -1, 16384, false, true },
         { "soft.min_pixels", SOFT_MINPIXELS, 1, -1, 1024, false, true }

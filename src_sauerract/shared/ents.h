@@ -65,10 +65,12 @@ struct lightanimation
     vec offsetaxes;
     int offsetseed;
     float blinkfrequency, blinkduty, blinkphase, blinkfade;
+    float sineminimum, sinemaximum, sineperiod;
 
     lightanimation() : intensity(1), flickeramp(0), flickerfrequency(1), flickernoise(1), flickerseed(0),
                        offsetamp(0), offsetfrequency(1), offsetnoise(1), offsetquantize(0.025f), offsetaxes(1, 1, 1), offsetseed(0),
-                       blinkfrequency(0), blinkduty(0.5f), blinkphase(0), blinkfade(0) {}
+                       blinkfrequency(0), blinkduty(0.5f), blinkphase(0), blinkfade(0),
+                       sineminimum(0), sinemaximum(1), sineperiod(0) {}
 };
 
 struct lightattenuation

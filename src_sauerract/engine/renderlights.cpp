@@ -1313,7 +1313,7 @@ FVARP(localpcssdist, 0, 128, 16384);
 FVARP(localpcssminpixels, 0, 24, 1024);
 VARP(localsoftshadow, 0, 1, 1);
 FVARP(localsoftshadowsoftness, 0, 1, 64);
-FVARP(localsoftshadowmaxradius, 0, 4, 256);
+FVARP(localsoftshadowmaxradius, 0, 16, 256);
 VARP(localsoftshadowsamples, 1, 4, 8);
 FVARP(localsoftshadowdist, 0, 256, 16384);
 FVARP(localsoftshadowminpixels, 0, 12, 1024);
@@ -1377,6 +1377,12 @@ animatedlightstate evaluatelight(const extentity &e, int millis)
             blink = lightsmooth(phase/fade)*lightsmooth((a.blinkduty-phase)/fade);
         }
         intensity *= blink;
+    }
+    if(a.sineperiod > 0)
+    {
+        float minimum = min(a.sineminimum, a.sinemaximum), maximum = max(a.sineminimum, a.sinemaximum);
+        float wave = 0.5f + 0.5f*sinf(float(2*M_PI*seconds/a.sineperiod));
+        intensity *= minimum + (maximum-minimum)*wave;
     }
     animatedlightstate state;
     state.o = e.o;
